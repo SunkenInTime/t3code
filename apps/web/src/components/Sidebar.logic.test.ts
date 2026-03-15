@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   hasUnseenCompletion,
+  resolveVisibleProjectThreadRows,
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
@@ -85,61 +86,69 @@ describe("resolveSidebarNewThreadEnvMode", () => {
 });
 
 describe("shouldKeepThreadVisibleWhenProjectCollapsed", () => {
-  it("keeps active working threads visible", () => {
+  it("keeps the active thread visible", () => {
     expect(
       shouldKeepThreadVisibleWhenProjectCollapsed({
         isActive: true,
-        threadStatus: { label: "Working" },
       }),
     ).toBe(true);
   });
 
-  it("keeps active awaiting-input threads visible", () => {
-    expect(
-      shouldKeepThreadVisibleWhenProjectCollapsed({
-        isActive: true,
-        threadStatus: { label: "Awaiting Input" },
-      }),
-    ).toBe(true);
-  });
-
-  it("keeps active pending-approval threads visible", () => {
-    expect(
-      shouldKeepThreadVisibleWhenProjectCollapsed({
-        isActive: true,
-        threadStatus: { label: "Pending Approval" },
-      }),
-    ).toBe(true);
-  });
-
-  it("hides active threads in non-preserved states", () => {
-    expect(
-      shouldKeepThreadVisibleWhenProjectCollapsed({
-        isActive: true,
-        threadStatus: { label: "Plan Ready" },
-      }),
-    ).toBe(false);
-    expect(
-      shouldKeepThreadVisibleWhenProjectCollapsed({
-        isActive: true,
-        threadStatus: { label: "Completed" },
-      }),
-    ).toBe(false);
-    expect(
-      shouldKeepThreadVisibleWhenProjectCollapsed({
-        isActive: true,
-        threadStatus: null,
-      }),
-    ).toBe(false);
-  });
-
-  it("hides inactive threads even when their status is preserved", () => {
+  it("hides the thread once it is no longer active", () => {
     expect(
       shouldKeepThreadVisibleWhenProjectCollapsed({
         isActive: false,
-        threadStatus: { label: "Working" },
       }),
     ).toBe(false);
+  });
+});
+
+describe("resolveVisibleProjectThreadRows", () => {
+  it("returns all rows when the preview is expanded", () => {
+    const projectThreadRows = [
+      { thread: { id: "thread-1" as never }, isActive: false },
+      { thread: { id: "thread-2" as never }, isActive: true },
+    ];
+
+    expect(
+      resolveVisibleProjectThreadRows({
+        projectThreadRows,
+        previewLimit: 1,
+        isThreadListExpanded: true,
+      }),
+    ).toEqual(projectThreadRows);
+  });
+
+  it("keeps preview rows only when no active thread falls outside the preview slice", () => {
+    const projectThreadRows = [
+      { thread: { id: "thread-1" as never }, isActive: false },
+      { thread: { id: "thread-2" as never }, isActive: false },
+      { thread: { id: "thread-3" as never }, isActive: false },
+    ];
+
+    expect(
+      resolveVisibleProjectThreadRows({
+        projectThreadRows,
+        previewLimit: 2,
+        isThreadListExpanded: false,
+      }),
+    ).toEqual(projectThreadRows.slice(0, 2));
+  });
+
+  it("keeps the active thread in the rendered rows even when it falls outside the preview slice", () => {
+    const projectThreadRows = [
+      { thread: { id: "thread-1" as never }, isActive: false },
+      { thread: { id: "thread-2" as never }, isActive: false },
+      { thread: { id: "thread-3" as never }, isActive: true },
+    ];
+
+    expect(
+      resolveVisibleProjectThreadRows({
+        projectThreadRows,
+        previewLimit: 2,
+        isThreadListExpanded: false,
+      }),
+    ).toEqual([projectThreadRows[0], projectThreadRows[1], projectThreadRows[2]]);
   });
 });
 

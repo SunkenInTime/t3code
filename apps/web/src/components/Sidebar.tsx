@@ -10,7 +10,17 @@ import {
   TerminalIcon,
   TriangleAlertIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type MouseEvent,
+  type ReactNode,
+} from "react";
 import {
   DndContext,
   type DragCancelEvent,
@@ -49,6 +59,7 @@ import { readNativeApi } from "../nativeApi";
 import { useComposerDraftStore } from "../composerDraftStore";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
 import { selectThreadTerminalState, useTerminalStateStore } from "../terminalStateStore";
+import type { Thread } from "../types";
 import { toastManager } from "./ui/toast";
 import {
   getArm64IntelBuildWarningDescription,
@@ -63,7 +74,6 @@ import {
 } from "./desktopUpdate.logic";
 import { Alert, AlertAction, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
-import { Collapsible, CollapsibleContent } from "./ui/collapsible";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
 import {
   SidebarContent,
@@ -84,6 +94,7 @@ import { useThreadSelectionStore } from "../threadSelectionStore";
 import { formatWorktreePathForDisplay, getOrphanedWorktreePathForThread } from "../worktreeCleanup";
 import { isNonEmpty as isNonEmptyString } from "effect/String";
 import {
+  resolveVisibleProjectThreadRows,
   resolveSidebarNewThreadEnvMode,
   shouldKeepThreadVisibleWhenProjectCollapsed,
   resolveThreadRowClassName,
@@ -249,6 +260,206 @@ function SortableProjectItem({
     >
       {children({ attributes, listeners })}
     </li>
+  );
+}
+
+type SidebarProjectThreadRow = {
+  thread: Thread;
+  isActive: boolean;
+  isSelected: boolean;
+  threadStatus: ReturnType<typeof resolveThreadStatusPill>;
+  prStatus: ReturnType<typeof prStatusIndicator>;
+  terminalStatus: ReturnType<typeof terminalStatusFromRunningIds>;
+};
+
+function ProjectThreadBody({
+  projectExpanded,
+  projectId,
+  threadRows,
+  orderedProjectThreadIds,
+  isThreadListExpanded,
+  onExpandThreadList,
+  onCollapseThreadList,
+  renderThreadRow,
+}: {
+  projectExpanded: boolean;
+  projectId: ProjectId;
+  threadRows: readonly SidebarProjectThreadRow[];
+  orderedProjectThreadIds: readonly ThreadId[];
+  isThreadListExpanded: boolean;
+  onExpandThreadList: (projectId: ProjectId) => void;
+  onCollapseThreadList: (projectId: ProjectId) => void;
+  renderThreadRow: (row: SidebarProjectThreadRow & { orderedProjectThreadIds: readonly ThreadId[] }) => ReactNode;
+}) {
+  const motionRef = useRef<HTMLDivElement | null>(null);
+  const hasHiddenThreads = threadRows.length > THREAD_PREVIEW_LIMIT;
+  const visibleThreadRows = useMemo(
+    () =>
+      resolveVisibleProjectThreadRows({
+        projectThreadRows: threadRows,
+        previewLimit: THREAD_PREVIEW_LIMIT,
+        isThreadListExpanded,
+      }),
+    [isThreadListExpanded, threadRows],
+  );
+  const collapsedVisibleThread = useMemo(
+    () =>
+      visibleThreadRows.find((threadRow) =>
+        shouldKeepThreadVisibleWhenProjectCollapsed({
+          isActive: threadRow.isActive,
+        }),
+      ) ?? null,
+    [visibleThreadRows],
+  );
+  const [layoutMetrics, setLayoutMetrics] = useState(() => ({
+    activeThreadHeight: 0,
+    activeThreadOffset: 0,
+    listHeight: 0,
+  }));
+
+  useLayoutEffect(() => {
+    const motionElement = motionRef.current;
+    if (!motionElement) {
+      return;
+    }
+
+    const measure = () => {
+      const nextListHeight = motionElement.getBoundingClientRect().height;
+      const activeThreadElement = collapsedVisibleThread
+        ? motionElement.querySelector<HTMLElement>(
+            `[data-thread-id="${collapsedVisibleThread.thread.id}"]`,
+          )
+        : null;
+      const motionRect = motionElement.getBoundingClientRect();
+      const activeRect = activeThreadElement?.getBoundingClientRect();
+      const nextActiveThreadHeight = activeRect?.height ?? 0;
+      const nextActiveThreadOffset = activeRect ? activeRect.top - motionRect.top : 0;
+
+      setLayoutMetrics((current) => {
+        if (
+          current.listHeight === nextListHeight &&
+          current.activeThreadHeight === nextActiveThreadHeight &&
+          current.activeThreadOffset === nextActiveThreadOffset
+        ) {
+          return current;
+        }
+
+        return {
+          activeThreadHeight: nextActiveThreadHeight,
+          activeThreadOffset: nextActiveThreadOffset,
+          listHeight: nextListHeight,
+        };
+      });
+    };
+
+    measure();
+
+    const cleanupCallbacks: Array<() => void> = [];
+    if (typeof ResizeObserver !== "undefined") {
+      const resizeObserver = new ResizeObserver(() => {
+        measure();
+      });
+      resizeObserver.observe(motionElement);
+      const activeThreadElement = collapsedVisibleThread
+        ? motionElement.querySelector<HTMLElement>(
+            `[data-thread-id="${collapsedVisibleThread.thread.id}"]`,
+          )
+        : null;
+      if (activeThreadElement) {
+        resizeObserver.observe(activeThreadElement);
+      }
+      cleanupCallbacks.push(() => {
+        resizeObserver.disconnect();
+      });
+    }
+
+    window.addEventListener("resize", measure);
+    cleanupCallbacks.push(() => {
+      window.removeEventListener("resize", measure);
+    });
+
+    return () => {
+      cleanupCallbacks.forEach((cleanup) => {
+        cleanup();
+      });
+    };
+  }, [collapsedVisibleThread?.thread.id, visibleThreadRows]);
+
+  if (threadRows.length === 0) {
+    return null;
+  }
+
+  const viewportHeight = projectExpanded
+    ? layoutMetrics.listHeight
+    : collapsedVisibleThread
+      ? layoutMetrics.activeThreadHeight
+      : 0;
+  const translateY = projectExpanded
+    ? 0
+    : collapsedVisibleThread
+      ? -layoutMetrics.activeThreadOffset
+      : 0;
+  const viewportStyle = {
+    height: `${viewportHeight}px`,
+  } satisfies CSSProperties;
+  const motionStyle = {
+    transform: `translateY(${translateY}px)`,
+  } satisfies CSSProperties;
+
+  return (
+    <div
+      className="overflow-hidden transition-[height] duration-200"
+      data-project-id={projectId}
+      data-project-thread-viewport
+      style={viewportStyle}
+    >
+      <div
+        className="transition-transform duration-200"
+        data-project-thread-motion
+        ref={motionRef}
+        style={motionStyle}
+      >
+        <SidebarMenuSub className="mx-1 my-0 w-full translate-x-0 gap-0.5 px-1.5 py-0">
+          {visibleThreadRows.map((threadRow) =>
+            renderThreadRow({
+              ...threadRow,
+              orderedProjectThreadIds,
+            }),
+          )}
+
+          {hasHiddenThreads && !isThreadListExpanded && (
+            <SidebarMenuSubItem className="w-full">
+              <SidebarMenuSubButton
+                render={<button type="button" />}
+                data-thread-selection-safe
+                size="sm"
+                className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
+                onClick={() => {
+                  onExpandThreadList(projectId);
+                }}
+              >
+                <span>Show more</span>
+              </SidebarMenuSubButton>
+            </SidebarMenuSubItem>
+          )}
+          {hasHiddenThreads && isThreadListExpanded && (
+            <SidebarMenuSubItem className="w-full">
+              <SidebarMenuSubButton
+                render={<button type="button" />}
+                data-thread-selection-safe
+                size="sm"
+                className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
+                onClick={() => {
+                  onCollapseThreadList(projectId);
+                }}
+              >
+                <span>Show less</span>
+              </SidebarMenuSubButton>
+            </SidebarMenuSubItem>
+          )}
+        </SidebarMenuSub>
+      </div>
+    </div>
   );
 }
 
@@ -1115,19 +1326,18 @@ export default function Sidebar() {
     threadStatus,
     prStatus,
     terminalStatus,
-  }: {
-    thread: (typeof threads)[number];
+  }: SidebarProjectThreadRow & {
     orderedProjectThreadIds: readonly ThreadId[];
-    isActive: boolean;
-    isSelected: boolean;
-    threadStatus: ReturnType<typeof resolveThreadStatusPill>;
-    prStatus: ReturnType<typeof prStatusIndicator>;
-    terminalStatus: ReturnType<typeof terminalStatusFromRunningIds>;
   }) => {
     const isHighlighted = isActive || isSelected;
 
     return (
-      <SidebarMenuSubItem key={thread.id} className="w-full" data-thread-item>
+      <SidebarMenuSubItem
+        key={thread.id}
+        className="w-full"
+        data-thread-id={thread.id}
+        data-thread-item
+      >
         <SidebarMenuSubButton
           render={<div role="button" tabIndex={0} />}
           size="sm"
@@ -1457,7 +1667,7 @@ export default function Sidebar() {
                       if (byDate !== 0) return byDate;
                       return b.id.localeCompare(a.id);
                     });
-                  const projectThreadRows = projectThreads.map((thread) => {
+                  const projectThreadRows: SidebarProjectThreadRow[] = projectThreads.map((thread) => {
                     const isActive = routeThreadId === thread.id;
                     const isSelected = selectedThreadIds.has(thread.id);
                     const threadStatus = resolveThreadStatusPill({
@@ -1480,26 +1690,12 @@ export default function Sidebar() {
                     };
                   });
                   const isThreadListExpanded = expandedThreadListsByProject.has(project.id);
-                  const hasHiddenThreads = projectThreads.length > THREAD_PREVIEW_LIMIT;
-                  const visibleThreadRows =
-                    hasHiddenThreads && !isThreadListExpanded
-                      ? projectThreadRows.slice(0, THREAD_PREVIEW_LIMIT)
-                      : projectThreadRows;
                   const orderedProjectThreadIds = projectThreads.map((t) => t.id);
-                  const collapsedVisibleThread =
-                    !project.expanded
-                      ? projectThreadRows.find((threadRow) =>
-                          shouldKeepThreadVisibleWhenProjectCollapsed({
-                            isActive: threadRow.isActive,
-                            threadStatus: threadRow.threadStatus,
-                          }),
-                        ) ?? null
-                      : null;
 
                   return (
                     <SortableProjectItem key={project.id} projectId={project.id}>
                       {(dragHandleProps) => (
-                        <Collapsible className="group/collapsible" open={project.expanded}>
+                        <div className="group/collapsible">
                           <div className="group/project-header relative">
                             <SidebarMenuButton
                               size="sm"
@@ -1562,57 +1758,17 @@ export default function Sidebar() {
                             </Tooltip>
                           </div>
 
-                          {collapsedVisibleThread && (
-                            <SidebarMenuSub className="mx-1 my-0 w-full translate-x-0 gap-0.5 px-1.5 py-0">
-                              {renderThreadRow({
-                                ...collapsedVisibleThread,
-                                orderedProjectThreadIds,
-                              })}
-                            </SidebarMenuSub>
-                          )}
-
-                          <CollapsibleContent keepMounted>
-                            <SidebarMenuSub className="mx-1 my-0 w-full translate-x-0 gap-0.5 px-1.5 py-0">
-                              {visibleThreadRows.map((threadRow) =>
-                                renderThreadRow({
-                                  ...threadRow,
-                                  orderedProjectThreadIds,
-                                }),
-                              )}
-
-                              {hasHiddenThreads && !isThreadListExpanded && (
-                                <SidebarMenuSubItem className="w-full">
-                                  <SidebarMenuSubButton
-                                    render={<button type="button" />}
-                                    data-thread-selection-safe
-                                    size="sm"
-                                    className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
-                                    onClick={() => {
-                                      expandThreadListForProject(project.id);
-                                    }}
-                                  >
-                                    <span>Show more</span>
-                                  </SidebarMenuSubButton>
-                                </SidebarMenuSubItem>
-                              )}
-                              {hasHiddenThreads && isThreadListExpanded && (
-                                <SidebarMenuSubItem className="w-full">
-                                  <SidebarMenuSubButton
-                                    render={<button type="button" />}
-                                    data-thread-selection-safe
-                                    size="sm"
-                                    className="h-6 w-full translate-x-0 justify-start px-2 text-left text-[10px] text-muted-foreground/60 hover:bg-accent hover:text-muted-foreground/80"
-                                    onClick={() => {
-                                      collapseThreadListForProject(project.id);
-                                    }}
-                                  >
-                                    <span>Show less</span>
-                                  </SidebarMenuSubButton>
-                                </SidebarMenuSubItem>
-                              )}
-                            </SidebarMenuSub>
-                          </CollapsibleContent>
-                        </Collapsible>
+                          <ProjectThreadBody
+                            isThreadListExpanded={isThreadListExpanded}
+                            onCollapseThreadList={collapseThreadListForProject}
+                            onExpandThreadList={expandThreadListForProject}
+                            orderedProjectThreadIds={orderedProjectThreadIds}
+                            projectExpanded={project.expanded}
+                            projectId={project.id}
+                            renderThreadRow={renderThreadRow}
+                            threadRows={projectThreadRows}
+                          />
+                        </div>
                       )}
                     </SortableProjectItem>
                   );
