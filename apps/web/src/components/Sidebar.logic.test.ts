@@ -5,6 +5,7 @@ import {
   resolveSidebarNewThreadEnvMode,
   resolveThreadRowClassName,
   resolveThreadStatusPill,
+  shouldKeepThreadVisibleWhenProjectCollapsed,
   shouldClearThreadSelectionOnMouseDown,
 } from "./Sidebar.logic";
 
@@ -80,6 +81,65 @@ describe("resolveSidebarNewThreadEnvMode", () => {
         defaultEnvMode: "worktree",
       }),
     ).toBe("local");
+  });
+});
+
+describe("shouldKeepThreadVisibleWhenProjectCollapsed", () => {
+  it("keeps active working threads visible", () => {
+    expect(
+      shouldKeepThreadVisibleWhenProjectCollapsed({
+        isActive: true,
+        threadStatus: { label: "Working" },
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps active awaiting-input threads visible", () => {
+    expect(
+      shouldKeepThreadVisibleWhenProjectCollapsed({
+        isActive: true,
+        threadStatus: { label: "Awaiting Input" },
+      }),
+    ).toBe(true);
+  });
+
+  it("keeps active pending-approval threads visible", () => {
+    expect(
+      shouldKeepThreadVisibleWhenProjectCollapsed({
+        isActive: true,
+        threadStatus: { label: "Pending Approval" },
+      }),
+    ).toBe(true);
+  });
+
+  it("hides active threads in non-preserved states", () => {
+    expect(
+      shouldKeepThreadVisibleWhenProjectCollapsed({
+        isActive: true,
+        threadStatus: { label: "Plan Ready" },
+      }),
+    ).toBe(false);
+    expect(
+      shouldKeepThreadVisibleWhenProjectCollapsed({
+        isActive: true,
+        threadStatus: { label: "Completed" },
+      }),
+    ).toBe(false);
+    expect(
+      shouldKeepThreadVisibleWhenProjectCollapsed({
+        isActive: true,
+        threadStatus: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("hides inactive threads even when their status is preserved", () => {
+    expect(
+      shouldKeepThreadVisibleWhenProjectCollapsed({
+        isActive: false,
+        threadStatus: { label: "Working" },
+      }),
+    ).toBe(false);
   });
 });
 

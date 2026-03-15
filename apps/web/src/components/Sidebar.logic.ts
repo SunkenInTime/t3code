@@ -18,6 +18,12 @@ export interface ThreadStatusPill {
   pulse: boolean;
 }
 
+const COLLAPSED_PROJECT_VISIBLE_THREAD_LABELS = new Set<ThreadStatusPill["label"]>([
+  "Awaiting Input",
+  "Pending Approval",
+  "Working",
+]);
+
 type ThreadStatusInput = Pick<
   Thread,
   "interactionMode" | "latestTurn" | "lastVisitedAt" | "proposedPlans" | "session"
@@ -75,6 +81,17 @@ export function resolveThreadRowClassName(input: {
   }
 
   return cn(baseClassName, "text-muted-foreground hover:bg-accent hover:text-foreground");
+}
+
+export function shouldKeepThreadVisibleWhenProjectCollapsed(input: {
+  isActive: boolean;
+  threadStatus: Pick<ThreadStatusPill, "label"> | null;
+}): boolean {
+  if (!input.isActive || input.threadStatus === null) {
+    return false;
+  }
+
+  return COLLAPSED_PROJECT_VISIBLE_THREAD_LABELS.has(input.threadStatus.label);
 }
 
 export function resolveThreadStatusPill(input: {
