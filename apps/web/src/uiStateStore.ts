@@ -356,10 +356,25 @@ export function setProjectExpanded(
   };
 }
 
-export function setAllProjectsExpanded(state: UiState, expanded: boolean): UiState {
-  const nextExpandedById = Object.fromEntries(
-    Object.keys(state.projectExpandedById).map((projectId) => [projectId, expanded]),
-  );
+export function setAllProjectsExpanded(
+  state: UiState,
+  projectIds: readonly ProjectId[],
+  expanded: boolean,
+): UiState {
+  const nextExpandedById = { ...state.projectExpandedById };
+  let changed = false;
+
+  for (const projectId of projectIds) {
+    if (nextExpandedById[projectId] !== expanded) {
+      nextExpandedById[projectId] = expanded;
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    return state;
+  }
+
   if (recordsEqual(state.projectExpandedById, nextExpandedById)) {
     return state;
   }
@@ -402,7 +417,7 @@ interface UiStateStore extends UiState {
   clearThreadUi: (threadId: ThreadId) => void;
   toggleProject: (projectId: ProjectId) => void;
   setProjectExpanded: (projectId: ProjectId, expanded: boolean) => void;
-  setAllProjectsExpanded: (expanded: boolean) => void;
+  setAllProjectsExpanded: (projectIds: readonly ProjectId[], expanded: boolean) => void;
   reorderProjects: (draggedProjectId: ProjectId, targetProjectId: ProjectId) => void;
 }
 
@@ -418,7 +433,8 @@ export const useUiStateStore = create<UiStateStore>((set) => ({
   toggleProject: (projectId) => set((state) => toggleProject(state, projectId)),
   setProjectExpanded: (projectId, expanded) =>
     set((state) => setProjectExpanded(state, projectId, expanded)),
-  setAllProjectsExpanded: (expanded) => set((state) => setAllProjectsExpanded(state, expanded)),
+  setAllProjectsExpanded: (projectIds, expanded) =>
+    set((state) => setAllProjectsExpanded(state, projectIds, expanded)),
   reorderProjects: (draggedProjectId, targetProjectId) =>
     set((state) => reorderProjects(state, draggedProjectId, targetProjectId)),
 }));

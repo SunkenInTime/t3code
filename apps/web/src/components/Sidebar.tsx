@@ -1973,8 +1973,11 @@ export default function Sidebar() {
 
   const handleCollapseAllProjects = useCallback(() => {
     setExpandedThreadListsByProject((current) => (current.size === 0 ? current : new Set()));
-    setAllProjectsExpanded(false);
-  }, [setAllProjectsExpanded]);
+    setAllProjectsExpanded(
+      sidebarProjects.map((project) => project.id),
+      false,
+    );
+  }, [setAllProjectsExpanded, sidebarProjects]);
 
   const wordmark = (
     <div className="flex items-center gap-2">

@@ -189,7 +189,23 @@ describe("uiStateStore pure functions", () => {
       projectOrder: [project2, project1],
     });
 
-    const next = setAllProjectsExpanded(initialState, false);
+    const next = setAllProjectsExpanded(initialState, [project1, project2], false);
+
+    expect(next.projectExpandedById).toEqual({
+      [project1]: false,
+      [project2]: false,
+    });
+    expect(next.projectOrder).toEqual([project2, project1]);
+  });
+
+  it("setAllProjectsExpanded seeds missing project expansion state for known projects", () => {
+    const project1 = ProjectId.makeUnsafe("project-1");
+    const project2 = ProjectId.makeUnsafe("project-2");
+    const initialState = makeUiState({
+      projectOrder: [project2, project1],
+    });
+
+    const next = setAllProjectsExpanded(initialState, [project1, project2], false);
 
     expect(next.projectExpandedById).toEqual({
       [project1]: false,
