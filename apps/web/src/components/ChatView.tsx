@@ -2204,7 +2204,9 @@ export default function ChatView(props: ChatViewProps) {
 
   // Scroll helpers — LegendList handles auto-scroll via maintainScrollAtEnd.
   const scrollToEnd = useCallback((animated = false) => {
-    legendListRef.current?.scrollToEnd?.({ animated });
+    void Promise.resolve(legendListRef.current?.scrollToEnd?.({ animated })).catch(() => {
+      // Scrolling is best-effort; it should never block sending or surface as a chat error.
+    });
   }, []);
 
   // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
@@ -2745,7 +2747,7 @@ export default function ChatView(props: ChatViewProps) {
     isAtEndRef.current = true;
     showScrollDebouncer.current.cancel();
     setShowScrollToBottom(false);
-    await legendListRef.current?.scrollToEnd?.({ animated: false });
+    scrollToEnd(false);
 
     setOptimisticUserMessages((existing) => [
       ...existing,
@@ -3140,7 +3142,7 @@ export default function ChatView(props: ChatViewProps) {
       isAtEndRef.current = true;
       showScrollDebouncer.current.cancel();
       setShowScrollToBottom(false);
-      await legendListRef.current?.scrollToEnd?.({ animated: false });
+      scrollToEnd(false);
 
       setOptimisticUserMessages((existing) => [
         ...existing,
@@ -3223,6 +3225,7 @@ export default function ChatView(props: ChatViewProps) {
       persistThreadSettingsForNextTurn,
       resetLocalDispatch,
       runtimeMode,
+      scrollToEnd,
       setComposerDraftInteractionMode,
       setThreadError,
       autoOpenPlanSidebar,
