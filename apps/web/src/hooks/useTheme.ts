@@ -154,15 +154,15 @@ function normalizeThemeColor(value: string | null | undefined): string | null {
 
 export function syncBrowserChromeTheme() {
   if (typeof document === "undefined" || typeof getComputedStyle === "undefined") return;
+  document.documentElement.style.backgroundColor = `var(${APP_CHROME_BACKGROUND_PROPERTY})`;
+  document.body.style.backgroundColor = `var(${APP_CHROME_BACKGROUND_PROPERTY})`;
   const appChromeColor = normalizeThemeColor(
-    getComputedStyle(document.documentElement).getPropertyValue(APP_CHROME_BACKGROUND_PROPERTY),
+    getComputedStyle(document.documentElement).backgroundColor,
   );
   const fallbackColor = normalizeThemeColor(getComputedStyle(document.body).backgroundColor);
   const backgroundColor = appChromeColor ?? fallbackColor;
   if (!backgroundColor) return;
 
-  document.documentElement.style.backgroundColor = backgroundColor;
-  document.body.style.backgroundColor = backgroundColor;
   ensureThemeColorMetaTag().setAttribute("content", backgroundColor);
 }
 
