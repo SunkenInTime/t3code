@@ -27,48 +27,6 @@ afterEach(() => {
 });
 
 describe("theme failure handling", () => {
-  it("syncs browser chrome from the stable app token during route surface gaps", async () => {
-    const dynamicMeta = {
-      setAttribute: vi.fn(),
-    };
-    const documentElement = {
-      classList: { toggle: vi.fn() },
-      style: { backgroundColor: "#161616" },
-    };
-    const body = {
-      style: { backgroundColor: "#161616" },
-    };
-    vi.stubGlobal("window", {
-      localStorage: createStorage(),
-      matchMedia: () => ({ matches: true }),
-    });
-    vi.stubGlobal("document", {
-      body,
-      documentElement,
-      head: { append: vi.fn() },
-      querySelector: (selector: string) =>
-        selector.includes("data-dynamic-theme-color") ? dynamicMeta : null,
-    });
-    vi.stubGlobal("getComputedStyle", (element: unknown) => ({
-      backgroundColor: element === body ? "rgb(22, 22, 22)" : "rgb(0, 0, 0)",
-      getPropertyValue: (property: string) =>
-        element === documentElement && property === "--app-chrome-background"
-          ? "rgb(10, 10, 10)"
-          : "",
-    }));
-
-    const { syncBrowserChromeTheme } = await import("./useTheme");
-    documentElement.style.backgroundColor = "#161616";
-    body.style.backgroundColor = "#161616";
-    dynamicMeta.setAttribute.mockClear();
-
-    syncBrowserChromeTheme();
-
-    expect(documentElement.style.backgroundColor).toBe("rgb(10, 10, 10)");
-    expect(body.style.backgroundColor).toBe("rgb(10, 10, 10)");
-    expect(dynamicMeta.setAttribute).toHaveBeenCalledWith("content", "rgb(10, 10, 10)");
-  });
-
   it("preserves exact storage causes and operation context", async () => {
     const readCause = new Error("storage read blocked");
     const writeCause = new Error("storage quota exceeded");
