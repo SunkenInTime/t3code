@@ -68,6 +68,29 @@ describe("ClientSettings sidebar v2", () => {
   });
 });
 
+describe("ClientSettings pets", () => {
+  it("defaults to a dormant Codex pet with animations available", () => {
+    const settings = decodeClientSettings({});
+    expect(settings.petEnabled).toBe(false);
+    expect(settings.petId).toBe("builtin:codex");
+    expect(settings.petAnimations).toBe(true);
+  });
+
+  it("accepts pet updates in client settings patches", () => {
+    expect(
+      decodeClientSettingsPatch({
+        petAnimations: false,
+        petEnabled: true,
+        petId: "custom:pet",
+      }),
+    ).toEqual({
+      petAnimations: false,
+      petEnabled: true,
+      petId: "custom:pet",
+    });
+  });
+});
+
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
   it("defaults to an empty record so legacy configs without the key still decode", () => {
     expect(DEFAULT_SERVER_SETTINGS.providerInstances).toEqual({});

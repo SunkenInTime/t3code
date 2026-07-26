@@ -98,6 +98,7 @@ import {
 } from "./settingsLayout";
 import { ProjectFavicon } from "../ProjectFavicon";
 import { useAtomCommand } from "../../state/use-atom-command";
+import { PetSettingsRows } from "../pet/PetSettingsRows";
 
 const THEME_OPTIONS = [
   {
@@ -415,6 +416,13 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
         ? ["Diff whitespace changes"]
         : []),
+      ...(settings.petEnabled !== DEFAULT_UNIFIED_SETTINGS.petEnabled ||
+      settings.petId !== DEFAULT_UNIFIED_SETTINGS.petId
+        ? ["Coding companion"]
+        : []),
+      ...(settings.petAnimations !== DEFAULT_UNIFIED_SETTINGS.petAnimations
+        ? ["Pet animations"]
+        : []),
       ...(settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
         ? ["Auto-open task panel"]
         : []),
@@ -461,6 +469,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.enableAssistantStreaming,
       settings.enableProviderUpdateChecks,
       settings.sidebarProjectGroupingMode,
+      settings.petAnimations,
+      settings.petEnabled,
+      settings.petId,
       settings.sidebarThreadPreviewCount,
       settings.timestampFormat,
       settings.wordWrap,
@@ -484,6 +495,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
+      petAnimations: DEFAULT_UNIFIED_SETTINGS.petAnimations,
+      petEnabled: DEFAULT_UNIFIED_SETTINGS.petEnabled,
+      petId: DEFAULT_UNIFIED_SETTINGS.petId,
       sidebarThreadPreviewCount: DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount,
       sidebarProjectGroupingMode: DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode,
       autoOpenPlanSidebar: DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar,
@@ -587,6 +601,8 @@ export function GeneralSettingsPanel() {
             </Select>
           }
         />
+
+        <PetSettingsRows />
 
         <SettingsRow
           title="Glass opacity"

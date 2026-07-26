@@ -84,6 +84,12 @@ const AssetClaimsSchema = Schema.Union([
     relativePath: Schema.NullOr(Schema.String),
     expiresAt: Schema.Number,
   }),
+  Schema.Struct({
+    version: Schema.Literal(1),
+    kind: Schema.Literal("trusted-file"),
+    path: Schema.String,
+    expiresAt: Schema.Number,
+  }),
 ]);
 type AssetClaims = typeof AssetClaimsSchema.Type;
 
@@ -347,6 +353,41 @@ export const issueAssetUrl = Effect.fn("AssetAccess.issueAssetUrl")(function* (i
   };
 });
 
+/**
+ * Issue a short-lived URL for a server-selected file.
+ *
+ * Unlike `issueAssetUrl`, callers cannot supply a path through the wire
+ * contract. The pet catalog uses this only after resolving a manifest-relative
+ * spritesheet and proving that its canonical path stays inside a configured
+ * Codex home.
+ */
+export const issueTrustedFileUrl = Effect.fn("AssetAccess.issueTrustedFileUrl")(function* (
+  filePath: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const canonicalPath = yield* fileSystem.realPath(filePath);
+  const info = yield* fileSystem.stat(canonicalPath);
+  if (info.type !== "File") return null;
+
+  const expiresAt = (yield* Clock.currentTimeMillis) + ASSET_TOKEN_TTL_MS;
+  const secretStore = yield* ServerSecretStore.ServerSecretStore;
+  const signingSecret = yield* secretStore.getOrCreateRandom(SIGNING_SECRET_NAME, 32);
+  const encodedPayload = base64UrlEncode(
+    encodeAssetClaims({
+      version: 1,
+      kind: "trusted-file",
+      path: canonicalPath,
+      expiresAt,
+    }),
+  );
+  const token = `${encodedPayload}.${signPayload(encodedPayload, signingSecret)}`;
+  return {
+    relativeUrl: `${ASSET_ROUTE_PREFIX}/${token}/${encodeURIComponent(path.basename(canonicalPath))}`,
+    expiresAt,
+  };
+});
+
 export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
   token: string,
   relativePath: string,
@@ -364,6 +405,23 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
 
   const claims = decodeClaims(encodedPayload);
   if (!claims || claims.expiresAt <= (yield* Clock.currentTimeMillis)) return null;
+
+  if (claims.kind === "trusted-file") {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const requestedName = decodeRelativePath(relativePath);
+    const path = yield* Path.Path;
+    if (requestedName !== path.basename(claims.path)) return null;
+    const canonicalPath = yield* optionOnNotFound(fileSystem.realPath(claims.path)).pipe(
+      Effect.orElseSucceed(() => Option.none()),
+    );
+    if (Option.isNone(canonicalPath) || canonicalPath.value !== claims.path) return null;
+    const info = yield* optionOnNotFound(fileSystem.stat(canonicalPath.value)).pipe(
+      Effect.orElseSucceed(() => Option.none()),
+    );
+    return Option.isSome(info) && info.value.type === "File"
+      ? ({ kind: "file", path: canonicalPath.value } satisfies ResolvedAsset)
+      : null;
+  }
 
   if (claims.kind === "attachment") {
     const config = yield* ServerConfig.ServerConfig;

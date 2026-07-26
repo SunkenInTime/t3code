@@ -368,6 +368,11 @@ describe("parseStandaloneComposerSlashCommand", () => {
     expect(parseStandaloneComposerSlashCommand("/default")).toBe("default");
   });
 
+  it("parses both pet command aliases", () => {
+    expect(parseStandaloneComposerSlashCommand("/pet")).toBe("pet");
+    expect(parseStandaloneComposerSlashCommand(" /pets ")).toBe("pet");
+  });
+
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
   });

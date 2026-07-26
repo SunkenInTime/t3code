@@ -70,6 +70,9 @@ export const ClientSettingsSchema = Schema.Struct({
   glassOpacity: GlassOpacity.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_GLASS_OPACITY)),
   ),
+  petAnimations: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  petEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  petId: TrimmedNonEmptyString.pipe(Schema.withDecodingDefault(Effect.succeed("builtin:codex"))),
   // Model favorites. Historically keyed by provider kind, now
   // widened to `ProviderInstanceId` so users can favorite a specific model
   // on a custom provider instance (e.g. "Codex Personal · gpt-5") without
@@ -606,6 +609,9 @@ export const ClientSettingsPatch = Schema.Struct({
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),
   diffIgnoreWhitespace: Schema.optionalKey(Schema.Boolean),
   glassOpacity: Schema.optionalKey(GlassOpacity),
+  petAnimations: Schema.optionalKey(Schema.Boolean),
+  petEnabled: Schema.optionalKey(Schema.Boolean),
+  petId: Schema.optionalKey(TrimmedNonEmptyString),
   favorites: Schema.optionalKey(
     Schema.Array(
       Schema.Struct({

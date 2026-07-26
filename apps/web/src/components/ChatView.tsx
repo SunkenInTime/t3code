@@ -302,6 +302,7 @@ import {
   serverUpdateGuidance,
 } from "../versionSkew";
 import { useAssetUrls } from "../assets/assetUrls";
+import { OPEN_PET_PICKER_EVENT, PetLayer } from "./pet/PetLayer";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -4531,7 +4532,11 @@ function ChatViewContent(props: ChatViewProps) {
         ? parseStandaloneComposerSlashCommand(trimmed)
         : null;
     if (standaloneSlashCommand) {
-      handleInteractionModeChange(standaloneSlashCommand);
+      if (standaloneSlashCommand === "pet") {
+        window.dispatchEvent(new Event(OPEN_PET_PICKER_EVENT));
+      } else {
+        handleInteractionModeChange(standaloneSlashCommand);
+      }
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
@@ -5702,6 +5707,13 @@ function ChatViewContent(props: ChatViewProps) {
                 onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
               />
             </div>
+            <PetLayer
+              environmentId={activeThread.environmentId}
+              isWorking={isWorking}
+              needsInput={pendingApprovals.length > 0 || pendingUserInputs.length > 0}
+              hasError={threadError !== null || activeThread.session?.status === "error"}
+              isReady={activeLatestTurn !== null && latestTurnSettled}
+            />
             {/* Messages Wrapper */}
             <div className="relative flex min-h-0 flex-1 flex-col">
               {/* Messages — LegendList handles virtualization and scrolling internally */}
