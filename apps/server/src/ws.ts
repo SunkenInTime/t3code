@@ -52,6 +52,7 @@ import {
   AssetWorkspaceContextNotFoundError,
   AssetWorkspaceContextResolutionError,
   EnvironmentAuthorizationError,
+  type OrchestrationThreadShell,
   ThreadId,
   type TerminalAttachStreamEvent,
   type TerminalError,
@@ -60,6 +61,7 @@ import {
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
+import { canSettle } from "@t3tools/shared/threadSettled";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
@@ -352,6 +354,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.terminalClear, AuthTerminalOperateScope],
   [WS_METHODS.terminalRestart, AuthTerminalOperateScope],
   [WS_METHODS.terminalClose, AuthTerminalOperateScope],
+  [WS_METHODS.terminalCloseSettled, AuthTerminalOperateScope],
   [WS_METHODS.subscribeTerminalEvents, AuthTerminalOperateScope],
   [WS_METHODS.subscribeTerminalMetadata, AuthTerminalOperateScope],
   [WS_METHODS.previewOpen, AuthOrchestrationOperateScope],
@@ -1174,6 +1177,33 @@ const makeWsRpcLayer = (
                   ),
                 );
               }
+              // Settling means "I'm done here", so the dev servers the thread
+              // spawned are dead weight. Only the explicit thread.settle
+              // command reaches this: auto-settle (inactivity / merged PR) is
+              // a clock-derived client predicate that emits no event, so it
+              // deliberately leaves terminals alone. Opt-in, and only after
+              // dispatch succeeds — a settle the decider rejected (active
+              // session, pending approval, queued turn) fails above and never
+              // gets here, so blocked work never loses its terminals.
+              if (normalizedCommand.type === "thread.settle") {
+                const closeTerminalsOnSettle = yield* serverSettings.getSettings.pipe(
+                  Effect.map((settings) => settings.closeTerminalsOnThreadSettle),
+                  Effect.orElseSucceed(() => false),
+                );
+                if (closeTerminalsOnSettle) {
+                  // History is retained (no deleteHistory): reopening the
+                  // terminal brings back the scrollback, and unsettling never
+                  // restarts anything on its own.
+                  yield* terminalManager.close({ threadId: normalizedCommand.threadId }).pipe(
+                    Effect.catch((error) =>
+                      Effect.logWarning("failed to close thread terminals after settle", {
+                        threadId: normalizedCommand.threadId,
+                        error: error.message,
+                      }),
+                    ),
+                  );
+                }
+              }
               return result;
             }).pipe(
               Effect.mapError((cause) =>
@@ -1906,6 +1936,40 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.terminalClose, terminalManager.close(input), {
             "rpc.aggregate": "terminal",
           }),
+        // A client reporting that a thread auto-settled. The settled windows
+        // (inactivity, merged PR) depend on per-client settings and change
+        // request state the server cannot see, so the client is the only one
+        // that can detect the transition — but its report is advisory, never
+        // authoritative. Re-derive the guards we CAN see before acting, so a
+        // stale or buggy client cannot kill terminals out from under live
+        // work. Idempotent: closing already-closed sessions is a no-op, so
+        // several clients reporting the same thread is harmless.
+        [WS_METHODS.terminalCloseSettled]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.terminalCloseSettled,
+            Effect.gen(function* () {
+              const enabled = yield* serverSettings.getSettings.pipe(
+                Effect.map((settings) => settings.closeTerminalsOnThreadSettle),
+                Effect.orElseSucceed(() => false),
+              );
+              if (!enabled) return;
+
+              const shell = yield* projectionSnapshotQuery
+                .getThreadShellById(ThreadId.make(input.threadId))
+                .pipe(Effect.orElseSucceed(() => Option.none<OrchestrationThreadShell>()));
+              if (Option.isNone(shell)) return;
+              // Archived threads already had their terminals closed on
+              // archive; deleted ones are gone. Nothing left to reclaim.
+              if (shell.value.archivedAt !== null) return;
+              // An explicit unsettle pins the thread active: the user said
+              // "keep this warm" after whatever the client observed.
+              if (shell.value.settledOverride === "active") return;
+              if (!canSettle(shell.value, { now: yield* nowIso })) return;
+
+              yield* terminalManager.close({ threadId: input.threadId });
+            }),
+            { "rpc.aggregate": "terminal" },
+          ),
         [WS_METHODS.subscribeTerminalEvents]: (_input) =>
           observeRpcStream(
             WS_METHODS.subscribeTerminalEvents,

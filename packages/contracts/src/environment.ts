@@ -47,6 +47,11 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   /** Server understands thread.snooze / thread.unsnooze commands. Same
       version-skew contract as threadSettlement. */
   threadSnooze: Schema.optionalKey(Schema.Boolean),
+  /** Server understands terminal.close-settled, the report a client sends
+      when it observes a thread reach the settled state on its own (the
+      inactivity / merged-PR windows the server cannot evaluate). Same
+      version-skew contract as threadSettlement. */
+  settledTerminalCleanup: Schema.optionalKey(Schema.Boolean),
   /** The update path clients should offer for this server. Absent on
       servers that must be relaunched manually (dev checkouts, Windows
       foreground runs, pre-update servers). */

@@ -94,6 +94,7 @@ import { environmentServerConfigsAtom, primaryServerKeybindingsAtom } from "../s
 import { vcsEnvironment } from "../state/vcs";
 import { threadEnvironment } from "../state/threads";
 import { projectEnvironment } from "../state/projects";
+import { terminalEnvironment } from "../state/terminal";
 import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
@@ -1007,6 +1008,9 @@ export default function SidebarV2() {
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
     reportFailure: false,
   });
+  const closeSettledTerminals = useAtomCommand(terminalEnvironment.closeSettled, {
+    reportFailure: false,
+  });
   const deleteProject = useAtomCommand(projectEnvironment.delete, {
     reportFailure: false,
   });
@@ -1417,6 +1421,39 @@ export default function SidebarV2() {
     snoozeWakeTick,
     threads,
   ]);
+
+  // Report threads that settled on their own so the server can reclaim the
+  // dev servers they left running. The server cannot detect this itself: the
+  // inactivity window is a per-client setting and change-request state is
+  // never persisted, so this classification loop is the only place the
+  // transition is observable. The report is advisory — the server re-checks
+  // the guards it can see and ignores anything still holding live work.
+  const reportedSettledKeysRef = useRef<ReadonlySet<string>>(new Set());
+  useEffect(() => {
+    const alreadyReported = reportedSettledKeysRef.current;
+    const stillSettled = new Set<string>();
+
+    for (const thread of settledThreads) {
+      const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+      stillSettled.add(threadKey);
+      if (alreadyReported.has(threadKey)) continue;
+      // An explicit settle already closed terminals during dispatch; only
+      // the derived windows need reporting.
+      if (thread.settledOverride === "settled") continue;
+      const supportsCleanup =
+        serverConfigs.get(thread.environmentId)?.environment.capabilities.settledTerminalCleanup ===
+        true;
+      if (!supportsCleanup) continue;
+      void closeSettledTerminals({
+        environmentId: thread.environmentId,
+        input: { threadId: thread.id },
+      });
+    }
+
+    // Threads that left the settled list are forgotten, so a thread that
+    // wakes on new activity and later re-settles reports again.
+    reportedSettledKeysRef.current = stillSettled;
+  }, [closeSettledTerminals, serverConfigs, settledThreads]);
 
   // Arm a timeout for the earliest upcoming wake so the shelf empties the
   // moment a snooze expires instead of on the next minute tick. Sorted

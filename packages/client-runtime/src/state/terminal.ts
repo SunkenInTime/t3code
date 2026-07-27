@@ -89,6 +89,12 @@ export function createTerminalEnvironmentAtoms<R, E>(
       scheduler: lifecycleScheduler,
       concurrency: lifecycleConcurrency,
     }),
+    closeSettled: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:terminal:close-settled",
+      tag: WS_METHODS.terminalCloseSettled,
+      scheduler: lifecycleScheduler,
+      concurrency: lifecycleConcurrency,
+    }),
   };
 }
 

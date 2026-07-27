@@ -136,6 +136,19 @@ describe("ServerSettings worktree defaults", () => {
   });
 });
 
+describe("ServerSettings settle terminal cleanup", () => {
+  it("defaults close-terminals-on-settle off for existing configs", () => {
+    expect(decodeServerSettings({}).closeTerminalsOnThreadSettle).toBe(false);
+  });
+
+  it("accepts close-terminals-on-settle updates", () => {
+    expect(
+      decodeServerSettingsPatch({ closeTerminalsOnThreadSettle: true })
+        .closeTerminalsOnThreadSettle,
+    ).toBe(true);
+  });
+});
+
 describe("ServerSettingsPatch.providerInstances", () => {
   it("treats providerInstances as an optional whole-map replacement", () => {
     const patch = decodeServerSettingsPatch({});

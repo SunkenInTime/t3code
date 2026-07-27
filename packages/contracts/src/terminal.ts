@@ -90,6 +90,15 @@ export const TerminalCloseInput = Schema.Struct({
 });
 export type TerminalCloseInput = typeof TerminalCloseInput.Type;
 
+/**
+ * A client reporting that a thread reached the settled state on its own.
+ * Deliberately carries no terminalId: this is a whole-thread lifecycle
+ * signal, not a request to close one tab. The server re-derives whether the
+ * thread is safe to act on rather than trusting the report.
+ */
+export const TerminalCloseSettledInput = TerminalThreadInput;
+export type TerminalCloseSettledInput = typeof TerminalCloseSettledInput.Type;
+
 export const TerminalSessionStatus = Schema.Literals(["starting", "running", "exited", "error"]);
 export type TerminalSessionStatus = typeof TerminalSessionStatus.Type;
 

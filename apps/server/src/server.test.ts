@@ -6442,6 +6442,212 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("closes thread terminals after settle when the setting is enabled", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-settle-closes-terminals");
+      const effects: string[] = [];
+
+      yield* buildAppUnderTest({
+        layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              closeTerminalsOnThreadSettle: true,
+            }),
+          },
+          terminalManager: {
+            close: (input) =>
+              Effect.sync(() => {
+                effects.push(`terminal.close:${input.threadId}`);
+              }),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                effects.push(`dispatch:${command.type}`);
+                return { sequence: 1 };
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const dispatchResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.settle",
+            commandId: CommandId.make("cmd-thread-settle"),
+            threadId,
+          }),
+        ),
+      );
+
+      assert.equal(dispatchResult.sequence, 1);
+      // Terminals close only after the settle command itself is accepted.
+      assert.deepEqual(effects, ["dispatch:thread.settle", `terminal.close:${threadId}`]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("leaves thread terminals running after settle by default", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-settle-keeps-terminals");
+      const effects: string[] = [];
+
+      yield* buildAppUnderTest({
+        layers: {
+          terminalManager: {
+            close: (input) =>
+              Effect.sync(() => {
+                effects.push(`terminal.close:${input.threadId}`);
+              }),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() => {
+                effects.push(`dispatch:${command.type}`);
+                return { sequence: 1 };
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.settle",
+            commandId: CommandId.make("cmd-thread-settle-default"),
+            threadId,
+          }),
+        ),
+      );
+
+      // closeTerminalsOnThreadSettle defaults to false: settling must not be
+      // destructive unless the user opted in.
+      assert.deepEqual(effects, ["dispatch:thread.settle"]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("closes terminals when a client reports a thread auto-settled", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-auto-settled");
+      const effects: string[] = [];
+
+      yield* buildAppUnderTest({
+        layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              closeTerminalsOnThreadSettle: true,
+            }),
+          },
+          terminalManager: {
+            close: (input) =>
+              Effect.sync(() => {
+                effects.push(`terminal.close:${input.threadId}`);
+              }),
+          },
+          projectionSnapshotQuery: {
+            getThreadShellById: () =>
+              Effect.succeed(
+                Option.some(
+                  makeDefaultOrchestrationThreadShell({
+                    id: threadId,
+                    updatedAt: "2026-01-01T00:00:00.000Z",
+                  }),
+                ),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.terminalCloseSettled]({ threadId })),
+      );
+
+      assert.deepEqual(effects, [`terminal.close:${threadId}`]);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("ignores an auto-settled report for a thread with a live session", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-auto-settled-running");
+      const effects: string[] = [];
+
+      yield* buildAppUnderTest({
+        layers: {
+          serverSettings: {
+            getSettings: Effect.succeed({
+              ...DEFAULT_SERVER_SETTINGS,
+              closeTerminalsOnThreadSettle: true,
+            }),
+          },
+          terminalManager: {
+            close: (input) =>
+              Effect.sync(() => {
+                effects.push(`terminal.close:${input.threadId}`);
+              }),
+          },
+          projectionSnapshotQuery: {
+            getThreadShellById: () =>
+              Effect.succeed(
+                Option.some(
+                  makeDefaultOrchestrationThreadShell({
+                    id: threadId,
+                    updatedAt: "2026-01-01T00:00:00.000Z",
+                    session: {
+                      threadId,
+                      status: "running",
+                      providerName: "claudeAgent",
+                      runtimeMode: "full-access",
+                      activeTurnId: null,
+                      lastError: null,
+                      updatedAt: "2026-01-01T00:00:00.000Z",
+                    },
+                  }),
+                ),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.terminalCloseSettled]({ threadId })),
+      );
+
+      // The client's report is advisory: a live session outranks it, so the
+      // agent never loses its terminals mid-run.
+      assert.deepEqual(effects, []);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("ignores an auto-settled report when the setting is off", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("thread-auto-settled-disabled");
+      const effects: string[] = [];
+
+      yield* buildAppUnderTest({
+        layers: {
+          terminalManager: {
+            close: (input) =>
+              Effect.sync(() => {
+                effects.push(`terminal.close:${input.threadId}`);
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.terminalCloseSettled]({ threadId })),
+      );
+
+      assert.deepEqual(effects, []);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("checks session status before archiving removes the thread from active lookups", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("thread-archive-precheck");

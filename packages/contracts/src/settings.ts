@@ -411,6 +411,13 @@ export const ServerSettings = Schema.Struct({
   newWorktreesStartFromOrigin: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
+  // Closing a thread's terminals on settle reclaims dev servers the thread
+  // spawned, but it is destructive to state the user may still want (a
+  // running watcher, a REPL). Off by default so settling — a high-frequency,
+  // deliberately silent action — never surprises anyone.
+  closeTerminalsOnThreadSettle: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
+  ),
   addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
@@ -543,6 +550,7 @@ export const ServerSettingsPatch = Schema.Struct({
   automaticGitFetchInterval: Schema.optionalKey(Schema.DurationFromMillis),
   defaultThreadEnvMode: Schema.optionalKey(ThreadEnvMode),
   newWorktreesStartFromOrigin: Schema.optionalKey(Schema.Boolean),
+  closeTerminalsOnThreadSettle: Schema.optionalKey(Schema.Boolean),
   addProjectBaseDirectory: Schema.optionalKey(TrimmedString),
   textGenerationModelSelection: Schema.optionalKey(ModelSelectionPatch),
   observability: Schema.optionalKey(

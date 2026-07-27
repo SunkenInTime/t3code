@@ -436,6 +436,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
         ? ["New worktrees start from origin"]
         : []),
+      ...(settings.closeTerminalsOnThreadSettle !==
+      DEFAULT_UNIFIED_SETTINGS.closeTerminalsOnThreadSettle
+        ? ["Close terminals on settle"]
+        : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
         ? ["Add project base directory"]
         : []),
@@ -455,6 +459,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
+      settings.closeTerminalsOnThreadSettle,
       settings.diffIgnoreWhitespace,
       settings.glassOpacity,
       settings.automaticGitFetchInterval,
@@ -492,6 +497,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       automaticGitFetchInterval: DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
       defaultThreadEnvMode: DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode,
       newWorktreesStartFromOrigin: DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin,
+      closeTerminalsOnThreadSettle: DEFAULT_UNIFIED_SETTINGS.closeTerminalsOnThreadSettle,
       addProjectBaseDirectory: DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory,
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
@@ -917,6 +923,34 @@ export function GeneralSettingsPanel() {
             }
           />
         ) : null}
+
+        <SettingsRow
+          title="Close terminals when a thread settles"
+          description="Settling a thread shuts down its terminals, stopping any dev servers it started. Only applies when you settle a thread yourself — threads that settle on their own keep running. Scrollback is kept."
+          resetAction={
+            settings.closeTerminalsOnThreadSettle !==
+            DEFAULT_UNIFIED_SETTINGS.closeTerminalsOnThreadSettle ? (
+              <SettingResetButton
+                label="close terminals on thread settle"
+                onClick={() =>
+                  updateSettings({
+                    closeTerminalsOnThreadSettle:
+                      DEFAULT_UNIFIED_SETTINGS.closeTerminalsOnThreadSettle,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.closeTerminalsOnThreadSettle}
+              onCheckedChange={(checked) =>
+                updateSettings({ closeTerminalsOnThreadSettle: Boolean(checked) })
+              }
+              aria-label="Close thread terminals when a thread settles"
+            />
+          }
+        />
 
         <SettingsRow
           title="Add project starts in"
