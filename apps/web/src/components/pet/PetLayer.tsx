@@ -33,6 +33,7 @@ import {
   resolvePetState,
   type PetState,
 } from "./petModel";
+import { findBatTarget, knockBatTarget } from "./petTextPhysics";
 
 export const OPEN_PET_PICKER_EVENT = "t3:open-pet-picker";
 const PET_POSITION_KEY = "t3code:pet-position:v1";
@@ -95,6 +96,12 @@ export function usePetCatalog(environmentId: EnvironmentId): ReadonlyArray<PetCa
     if (!AsyncResult.isSuccess(result)) return [];
     return result.value.pets.map((pet) => {
       if (/^https:\/\//i.test(pet.spritesheetUrl) || connection._tag === "None") return pet;
+      if (pet.spritesheetUrl.startsWith("/pets/")) {
+        return {
+          ...pet,
+          spritesheetUrl: new URL(pet.spritesheetUrl, window.location.origin).href,
+        };
+      }
       const spritesheetUrl = resolveAssetUrl(connection.value.httpBaseUrl, pet.spritesheetUrl);
       return spritesheetUrl ? { ...pet, spritesheetUrl } : pet;
     });
@@ -146,7 +153,8 @@ function PetSprite(props: {
     backgroundRepeat: "no-repeat",
     backgroundSize: `${PET_WIDTH * props.pet.columns}px ${PET_HEIGHT * props.pet.rows}px`,
     backgroundPosition: `${-column * PET_WIDTH}px ${-row * PET_HEIGHT}px`,
-    imageRendering: props.pet.source === "builtin" ? "pixelated" : "auto",
+    imageRendering:
+      props.pet.source === "builtin" && props.pet.frameWidth <= 192 ? "pixelated" : "auto",
   };
   return <span aria-hidden="true" className={cn("block", props.className)} style={style} />;
 }
@@ -226,8 +234,15 @@ export function PetLayer(props: {
   const [dragging, setDragging] = useState(false);
   const [dragDirection, setDragDirection] = useState<"left" | "right">("right");
   const [reaction, setReaction] = useState<"waving" | "jumping" | null>(null);
+  const [isBatting, setIsBatting] = useState(false);
+  const [isBattingRun, setIsBattingRun] = useState(false);
+  const [impactPoint, setImpactPoint] = useState<{ x: number; y: number; key: number } | null>(
+    null,
+  );
   const dragRef = useRef<DragState | null>(null);
   const reactionTimerRef = useRef<number | null>(null);
+  const positionRef = useRef(position);
+  const fallingTextCleanupRef = useRef<Set<() => void>>(new Set());
   const reducedMotion =
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
@@ -236,12 +251,17 @@ export function PetLayer(props: {
     isDragging: dragging,
     dragDirection,
     reaction,
+    isBatting,
     hasError: props.hasError,
     needsInput: props.needsInput,
     isWorking: props.isWorking,
     isReady: props.isReady,
   });
   const label = petStateLabel(state);
+
+  useEffect(() => {
+    positionRef.current = position;
+  }, [position]);
 
   useEffect(() => {
     const openPicker = () => {
@@ -267,9 +287,110 @@ export function PetLayer(props: {
   useEffect(
     () => () => {
       if (reactionTimerRef.current !== null) window.clearTimeout(reactionTimerRef.current);
+      fallingTextCleanupRef.current.forEach((cleanup) => cleanup());
+      fallingTextCleanupRef.current.clear();
     },
     [],
   );
+
+  useEffect(() => {
+    const canBat =
+      settings.petEnabled &&
+      settings.petAnimations &&
+      !reducedMotion &&
+      pet?.id === "builtin:tung-tung-sahur" &&
+      props.isWorking &&
+      !props.needsInput &&
+      !props.hasError &&
+      !dragging &&
+      !pickerOpen;
+    if (!canBat) {
+      setIsBatting(false);
+      setIsBattingRun(false);
+      return;
+    }
+
+    const timers = new Set<number>();
+    let cancelled = false;
+    let homePosition: PetPosition | null = null;
+    const later = (callback: () => void, delay: number) => {
+      const timer = window.setTimeout(() => {
+        timers.delete(timer);
+        if (!cancelled) callback();
+      }, delay);
+      timers.add(timer);
+    };
+
+    const scheduleNext = (minimum = 3_800) => {
+      later(startBattingRun, minimum + Math.random() * 4_800);
+    };
+
+    const startBattingRun = () => {
+      const target = findBatTarget();
+      if (!target) {
+        scheduleNext(1_200);
+        return;
+      }
+      const rect = target.getBoundingClientRect();
+      homePosition = positionRef.current;
+      const targetPosition = clampPosition({
+        x: rect.left - PET_WIDTH + 18,
+        y: rect.top + rect.height / 2 - PET_HEIGHT * 0.58,
+      });
+      setReaction(null);
+      setDragDirection("right");
+      setIsBattingRun(true);
+      setPosition(targetPosition);
+
+      later(() => setIsBatting(true), 560);
+      later(() => {
+        if (!target.isConnected) return;
+        const impactRect = target.getBoundingClientRect();
+        setImpactPoint({
+          x: Math.max(12, Math.min(window.innerWidth - 12, impactRect.left + 8)),
+          y: Math.max(
+            12,
+            Math.min(window.innerHeight - 12, impactRect.top + impactRect.height / 2),
+          ),
+          key: Date.now(),
+        });
+        const cleanup = knockBatTarget(target, { direction: 1 });
+        fallingTextCleanupRef.current.add(cleanup);
+        later(() => fallingTextCleanupRef.current.delete(cleanup), 2_600);
+        later(() => setImpactPoint(null), 420);
+      }, 850);
+      later(() => setIsBatting(false), 1_180);
+      later(() => {
+        if (homePosition) setPosition(homePosition);
+      }, 1_330);
+      later(() => {
+        setIsBattingRun(false);
+        homePosition = null;
+        scheduleNext();
+      }, 1_920);
+    };
+
+    scheduleNext(2_400);
+    return () => {
+      cancelled = true;
+      timers.forEach((timer) => window.clearTimeout(timer));
+      timers.clear();
+      setIsBatting(false);
+      setIsBattingRun(false);
+      setImpactPoint(null);
+      if (homePosition) setPosition(homePosition);
+    };
+  }, [
+    dragging,
+    pet?.id,
+    pickerOpen,
+    props.hasError,
+    props.isWorking,
+    props.needsInput,
+    reducedMotion,
+    settings.petAnimations,
+    settings.petEnabled,
+  ]);
 
   const triggerReaction = useCallback(() => {
     if (reactionTimerRef.current !== null) window.clearTimeout(reactionTimerRef.current);
@@ -338,7 +459,7 @@ export function PetLayer(props: {
   }
 
   const pointerDown = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (event.button !== 0) return;
+    if (event.button !== 0 || isBattingRun) return;
     dragRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -354,7 +475,11 @@ export function PetLayer(props: {
     <>
       <div
         data-codex-pet-layer="true"
-        className="pointer-events-none fixed z-40"
+        data-pet-state={state}
+        className={cn(
+          "pointer-events-none fixed z-40",
+          isBattingRun && "transition-[left,top] duration-500 ease-in-out",
+        )}
         style={{ left: position.x, top: position.y }}
       >
         {label ? (
@@ -416,12 +541,23 @@ export function PetLayer(props: {
               pet={pet}
               state={state}
               animationsEnabled={animationsEnabled}
-              className="drop-shadow-[0_10px_18px_rgba(0,0,0,0.3)]"
+              className={cn(
+                "drop-shadow-[0_10px_18px_rgba(0,0,0,0.3)]",
+                isBatting && "t3-pet-batting-sprite",
+              )}
             />
             <span className="absolute -bottom-1 left-1/2 h-2 w-16 -translate-x-1/2 rounded-[50%] bg-black/15 blur-[2px] dark:bg-black/35" />
           </button>
         </div>
       </div>
+      {impactPoint ? (
+        <span
+          key={impactPoint.key}
+          aria-hidden="true"
+          className="t3-pet-bat-impact pointer-events-none fixed z-40"
+          style={{ left: impactPoint.x, top: impactPoint.y }}
+        />
+      ) : null}
       <PetPickerDialog
         open={pickerOpen}
         onOpenChange={setPickerOpen}

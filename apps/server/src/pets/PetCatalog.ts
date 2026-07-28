@@ -31,6 +31,25 @@ const BUILTIN_PETS = [
   ["null-signal", "Null Signal", "Quiet signal from the void", "null-signal-spritesheet-v4.webp"],
 ] as const;
 
+const tungTungPose = (spriteIndex: number, durationMs = 1000): PetAnimation => ({
+  frames: [{ spriteIndex, durationMs }],
+  loopStart: 0,
+  fallback: "idle",
+});
+
+const TUNG_TUNG_SAHUR_ANIMATIONS: Record<string, PetAnimation> = {
+  idle: tungTungPose(0),
+  "running-right": tungTungPose(1),
+  "running-left": tungTungPose(2),
+  waving: tungTungPose(3),
+  jumping: tungTungPose(4),
+  failed: tungTungPose(5),
+  waiting: tungTungPose(8),
+  running: tungTungPose(1),
+  review: tungTungPose(4),
+  batting: tungTungPose(7, 620),
+};
+
 type ManifestAnimation = {
   readonly frames?: unknown;
   readonly fps?: unknown;
@@ -127,11 +146,11 @@ function normalizeAnimations(value: unknown): Record<string, PetAnimation> {
 
 function builtinEntries(): PetCatalogEntry[] {
   const animations = defaultPetAnimations();
-  return BUILTIN_PETS.map(([id, displayName, description, file]) => ({
+  const codexPets: PetCatalogEntry[] = BUILTIN_PETS.map(([id, displayName, description, file]) => ({
     id: `builtin:${id}`,
     displayName,
     description,
-    source: "builtin",
+    source: "builtin" as const,
     spritesheetUrl: `${PET_CDN}/${file}`,
     frameWidth: FRAME_WIDTH,
     frameHeight: FRAME_HEIGHT,
@@ -139,6 +158,21 @@ function builtinEntries(): PetCatalogEntry[] {
     rows: ROWS,
     animations,
   }));
+  return [
+    ...codexPets,
+    {
+      id: "builtin:tung-tung-sahur",
+      displayName: "Tung Tung Tung Sahur",
+      description: "A wooden night-watch companion with a trusty bat",
+      source: "builtin" as const,
+      spritesheetUrl: "/pets/tung-tung-sahur.webp",
+      frameWidth: 418,
+      frameHeight: 418,
+      columns: 3,
+      rows: 3,
+      animations: TUNG_TUNG_SAHUR_ANIMATIONS,
+    },
+  ];
 }
 
 function codexHomes(

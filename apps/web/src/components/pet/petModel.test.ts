@@ -8,6 +8,7 @@ describe("petModel", () => {
       isDragging: false,
       dragDirection: "right" as const,
       reaction: null,
+      isBatting: false,
       hasError: false,
       needsInput: false,
       isWorking: false,
@@ -18,6 +19,7 @@ describe("petModel", () => {
     expect(resolvePetState({ ...base, isWorking: true, needsInput: true })).toBe("waiting");
     expect(resolvePetState({ ...base, needsInput: true, hasError: true })).toBe("failed");
     expect(resolvePetState({ ...base, hasError: true, reaction: "waving" })).toBe("waving");
+    expect(resolvePetState({ ...base, reaction: "waving", isBatting: true })).toBe("batting");
     expect(resolvePetState({ ...base, reaction: "jumping", isDragging: true })).toBe(
       "running-right",
     );

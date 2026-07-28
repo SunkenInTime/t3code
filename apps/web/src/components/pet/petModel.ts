@@ -4,6 +4,7 @@ export type PetState =
   | "idle"
   | "running-left"
   | "running-right"
+  | "batting"
   | "waving"
   | "jumping"
   | "failed"
@@ -15,6 +16,7 @@ export interface PetThreadState {
   readonly isDragging: boolean;
   readonly dragDirection: "left" | "right";
   readonly reaction: "waving" | "jumping" | null;
+  readonly isBatting: boolean;
   readonly hasError: boolean;
   readonly needsInput: boolean;
   readonly isWorking: boolean;
@@ -25,6 +27,7 @@ export function resolvePetState(input: PetThreadState): PetState {
   if (input.isDragging) {
     return input.dragDirection === "left" ? "running-left" : "running-right";
   }
+  if (input.isBatting) return "batting";
   if (input.reaction) return input.reaction;
   if (input.hasError) return "failed";
   if (input.needsInput) return "waiting";

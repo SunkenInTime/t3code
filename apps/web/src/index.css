@@ -1469,6 +1469,81 @@ label:has(> select#reasoning-effort) select {
   animation: provider-update-pill-countdown var(--provider-update-pill-dismiss-ms) linear forwards;
 }
 
+@keyframes t3-pet-bat-swing {
+  0% {
+    transform: translateX(-2px) rotate(-7deg) scale(1.02);
+  }
+  46% {
+    transform: translateX(1px) rotate(5deg) scale(1.04);
+  }
+  64% {
+    transform: translateX(7px) rotate(14deg) scale(1.05);
+  }
+  100% {
+    transform: translateX(0) rotate(0) scale(1);
+  }
+}
+
+@keyframes t3-pet-bat-impact {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(0.2) rotate(0);
+  }
+  70% {
+    opacity: 0.9;
+    transform: translate(-50%, -50%) scale(1) rotate(35deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(1.35) rotate(55deg);
+  }
+}
+
+.t3-pet-batting-sprite {
+  transform-origin: 48% 88%;
+  animation: t3-pet-bat-swing 620ms cubic-bezier(0.22, 0.8, 0.32, 1) both;
+}
+
+.t3-pet-bat-impact {
+  width: 2.1rem;
+  height: 2.1rem;
+  animation: t3-pet-bat-impact 420ms ease-out both;
+  background:
+    linear-gradient(
+      45deg,
+      transparent 45%,
+      color-mix(in srgb, var(--warning) 85%, white) 46% 54%,
+      transparent 55%
+    ),
+    linear-gradient(
+      -45deg,
+      transparent 45%,
+      color-mix(in srgb, var(--warning) 85%, white) 46% 54%,
+      transparent 55%
+    );
+  clip-path: polygon(
+    50% 0%,
+    61% 35%,
+    100% 27%,
+    70% 52%,
+    98% 78%,
+    62% 68%,
+    50% 100%,
+    39% 68%,
+    3% 79%,
+    30% 52%,
+    0 27%,
+    39% 35%
+  );
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t3-pet-batting-sprite,
+  .t3-pet-bat-impact {
+    animation: none;
+  }
+}
+
 /* Diffs theme bridge (match diff surfaces to app palette) */
 .diff-panel-viewport {
   background: color-mix(in srgb, var(--background) 94%, var(--card));

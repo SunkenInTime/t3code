@@ -68,7 +68,18 @@ describe("PetCatalog", () => {
         },
       });
 
-      expect(result.pets.filter((pet) => pet.source === "builtin")).toHaveLength(8);
+      expect(result.pets.filter((pet) => pet.source === "builtin")).toHaveLength(9);
+      expect(result.pets.find((pet) => pet.id === "builtin:tung-tung-sahur")).toMatchObject({
+        displayName: "Tung Tung Tung Sahur",
+        spritesheetUrl: "/pets/tung-tung-sahur.webp",
+        columns: 3,
+        rows: 3,
+      });
+      expect(
+        result.pets.find((pet) => pet.id === "builtin:tung-tung-sahur")?.animations.batting,
+      ).toMatchObject({
+        frames: [{ spriteIndex: 7 }],
+      });
       expect(result.pets.find((pet) => pet.id === "custom:codex_work:helper")).toMatchObject({
         displayName: "Helper",
         description: "A custom test companion",

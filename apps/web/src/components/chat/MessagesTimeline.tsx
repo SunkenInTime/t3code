@@ -1021,7 +1021,10 @@ function AssistantTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "mess
 
   return (
     <>
-      <div className="relative min-w-0 px-1 py-0.5">
+      <div
+        className="relative min-w-0 px-1 py-0.5"
+        data-pet-battable={row.message.streaming ? "true" : undefined}
+      >
         <ChatMarkdown
           text={messageText}
           cwd={ctx.markdownCwd}
