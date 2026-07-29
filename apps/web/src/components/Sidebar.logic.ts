@@ -96,9 +96,9 @@ export function buildMultiSelectThreadContextMenuItems(input: {
 
 export interface ThreadStatusPill {
   label:
-    | "Working"
+    | "Tung Tung Tung"
     | "Connecting"
-    | "Completed"
+    | "Survived"
     | "Pending Approval"
     | "Awaiting Input"
     | "Plan Ready";
@@ -110,10 +110,10 @@ export interface ThreadStatusPill {
 const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill["label"], number> = {
   "Pending Approval": 5,
   "Awaiting Input": 4,
-  Working: 3,
+  "Tung Tung Tung": 3,
   Connecting: 3,
   "Plan Ready": 2,
-  Completed: 1,
+  Survived: 1,
 };
 
 type ThreadStatusInput = Pick<
@@ -563,7 +563,7 @@ export function resolveThreadStatusPill(input: {
 
   if (thread.session?.status === "running") {
     return {
-      label: "Working",
+      label: "Tung Tung Tung",
       colorClass: "text-sky-600 dark:text-sky-300/80",
       dotClass: "bg-sky-500 dark:bg-sky-300/80",
       pulse: true,
@@ -595,7 +595,7 @@ export function resolveThreadStatusPill(input: {
 
   if (hasUnseenCompletion(thread)) {
     return {
-      label: "Completed",
+      label: "Survived",
       colorClass: "text-emerald-600 dark:text-emerald-300/90",
       dotClass: "bg-emerald-500 dark:bg-emerald-300/90",
       pulse: false,

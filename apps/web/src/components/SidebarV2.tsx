@@ -448,7 +448,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   const topStatus =
     status === "working"
       ? {
-          label: "Working",
+          label: "Tung Tung Tung",
           icon: "working" as const,
           className:
             "animate-sidebar-working-text text-sky-600 motion-reduce:animate-none dark:text-sky-400",
@@ -1995,7 +1995,7 @@ export default function SidebarV2() {
                 ? [
                     {
                       id: "new-thread-on-branch",
-                      label: `New thread on ${thread.branch}`,
+                      label: `Summon anomaly on ${thread.branch}`,
                     },
                   ]
                 : []),
@@ -2236,7 +2236,7 @@ export default function SidebarV2() {
                 }
               >
                 <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
-                <div className="flex-1 truncate text-left">Search</div>
+                <div className="flex-1 truncate text-left">Hunt anomalies</div>
                 {commandPaletteShortcutLabel ? (
                   <Kbd className="h-4 min-w-0 rounded-sm bg-sidebar-control-surface px-1.5 text-[10px] text-sidebar-muted-foreground ring-1 ring-sidebar-border">
                     {commandPaletteShortcutLabel}
@@ -2254,7 +2254,7 @@ export default function SidebarV2() {
                       className="relative size-8 justify-center rounded-md border-0 bg-transparent p-0 text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-sidebar"
                       onClick={handleNewThreadClick}
                       disabled={projects.length === 0}
-                      aria-label="New thread"
+                      aria-label="Summon anomaly"
                     />
                   }
                 >
@@ -2265,7 +2265,9 @@ export default function SidebarV2() {
                   />
                 </TooltipTrigger>
                 <TooltipPopup side="right">
-                  {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+                  {newThreadShortcutLabel
+                    ? `Summon anomaly (${newThreadShortcutLabel})`
+                    : "Summon anomaly"}
                 </TooltipPopup>
               </Tooltip>
             </div>
@@ -2552,9 +2554,9 @@ export default function SidebarV2() {
                   </button>
                 </>
               ) : scopedProjectGroup ? (
-                `No threads in ${scopedProjectGroup.displayName} yet`
+                `No anomalies in ${scopedProjectGroup.displayName} yet`
               ) : (
-                "No threads yet"
+                "No anomalies yet. You answered the call."
               )}
             </div>
           ) : null}

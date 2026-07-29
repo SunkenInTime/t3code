@@ -863,7 +863,7 @@ describe("resolveThreadStatusPill", () => {
       resolveThreadStatusPill({
         thread: baseThread,
       }),
-    ).toMatchObject({ label: "Working", pulse: true });
+    ).toMatchObject({ label: "Tung Tung Tung", pulse: true });
   });
 
   it("shows plan ready when a settled plan turn has a proposed plan ready for follow-up", () => {
@@ -914,7 +914,7 @@ describe("resolveThreadStatusPill", () => {
           },
         },
       }),
-    ).toMatchObject({ label: "Completed", pulse: false });
+    ).toMatchObject({ label: "Survived", pulse: false });
   });
 });
 
@@ -949,7 +949,7 @@ describe("resolveProjectStatusIndicator", () => {
     expect(
       resolveProjectStatusIndicator([
         {
-          label: "Completed",
+          label: "Survived",
           colorClass: "text-emerald-600",
           dotClass: "bg-emerald-500",
           pulse: false,
@@ -961,7 +961,7 @@ describe("resolveProjectStatusIndicator", () => {
           pulse: false,
         },
         {
-          label: "Working",
+          label: "Tung Tung Tung",
           colorClass: "text-sky-600",
           dotClass: "bg-sky-500",
           pulse: true,
@@ -974,7 +974,7 @@ describe("resolveProjectStatusIndicator", () => {
     expect(
       resolveProjectStatusIndicator([
         {
-          label: "Completed",
+          label: "Survived",
           colorClass: "text-emerald-600",
           dotClass: "bg-emerald-500",
           pulse: false,

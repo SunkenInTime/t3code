@@ -122,6 +122,7 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --animate-status-pulse: status-pulse 2s infinite;
   --animate-status-ping: status-ping 2s infinite;
   --animate-sidebar-working-text: sidebar-working-text 3.4s infinite;
+  --animate-tung-thump: tung-thump 0.9s ease-in-out infinite;
   --font-sans:
     "DM Sans Variable", "DM Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui,
     sans-serif;
@@ -171,6 +172,23 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   @keyframes skeleton {
     to {
       background-position: -200% 0;
+    }
+  }
+  /* Three strikes of the kentongan, then a beat of dread. */
+  @keyframes tung-thump {
+    0%,
+    54%,
+    100% {
+      transform: scale(1) rotate(0deg);
+    }
+    9%,
+    27%,
+    45% {
+      transform: scale(1.18) rotate(-6deg);
+    }
+    18%,
+    36% {
+      transform: scale(1) rotate(3deg);
     }
   }
   @keyframes status-pulse {
@@ -1540,6 +1558,81 @@ label:has(> select#reasoning-effort) select {
 @media (prefers-reduced-motion: reduce) {
   .t3-pet-batting-sprite,
   .t3-pet-bat-impact {
+    animation: none;
+  }
+}
+
+/* Tung Tung Tung Sahur takeover: the spectral watcher and the marching horde. */
+.t3-sahur-watermark {
+  animation: t3-sahur-sway 9s ease-in-out infinite;
+}
+
+@keyframes t3-sahur-sway {
+  0%,
+  100% {
+    transform: rotate(-2.5deg) translateY(0);
+  }
+  50% {
+    transform: rotate(2.5deg) translateY(-2vh);
+  }
+}
+
+.t3-sahur-marcher {
+  position: fixed;
+  bottom: 6px;
+  left: -96px;
+  animation-name: t3-sahur-march;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+  filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.25));
+}
+
+@keyframes t3-sahur-march {
+  to {
+    transform: translateX(calc(100vw + 224px));
+  }
+}
+
+.t3-sahur-march-bob {
+  animation-name: t3-sahur-march-bob;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+
+@keyframes t3-sahur-march-bob {
+  from {
+    transform: translateY(0) rotate(-4deg);
+  }
+  to {
+    transform: translateY(-6px) rotate(4deg);
+  }
+}
+
+.t3-sahur-chant {
+  opacity: 0;
+  animation: t3-sahur-chant 3.4s ease-in-out infinite;
+}
+
+@keyframes t3-sahur-chant {
+  0%,
+  55%,
+  100% {
+    opacity: 0;
+    transform: translate(-50%, 3px);
+  }
+  62%,
+  88% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .t3-sahur-watermark,
+  .t3-sahur-marcher,
+  .t3-sahur-march-bob,
+  .t3-sahur-chant {
     animation: none;
   }
 }

@@ -977,7 +977,7 @@ const SidebarProjectThreadList = memo(function SidebarProjectThreadList(
             data-thread-selection-safe
             className="flex h-8 w-full translate-x-0 items-center px-2 text-left text-xs text-sidebar-muted-foreground/75"
           >
-            <span>No threads yet</span>
+            <span>No anomalies yet. You answered the call.</span>
           </div>
         </SidebarMenuSubItem>
       ) : null}
@@ -2114,7 +2114,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       const clicked = await api.contextMenu.show(
         [
           ...(thread.branch
-            ? [{ id: "new-thread-on-branch", label: `New thread on ${thread.branch}` }]
+            ? [{ id: "new-thread-on-branch", label: `Summon anomaly on ${thread.branch}` }]
             : []),
           { id: "rename", label: "Rename thread" },
           { id: "mark-unread", label: "Mark unread" },
@@ -2316,7 +2316,9 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
             }
           />
           <TooltipPopup side="top">
-            {newThreadShortcutLabel ? `New thread (${newThreadShortcutLabel})` : "New thread"}
+            {newThreadShortcutLabel
+              ? `Summon anomaly (${newThreadShortcutLabel})`
+              : "Summon anomaly"}
           </TooltipPopup>
         </Tooltip>
       </div>

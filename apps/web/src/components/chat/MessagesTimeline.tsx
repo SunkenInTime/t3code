@@ -1106,10 +1106,10 @@ function WorkingTimelineRow({ row }: { row: Extract<TimelineRow, { kind: "workin
         <span>
           {row.createdAt ? (
             <>
-              Working for <WorkingTimer createdAt={row.createdAt} />
+              Tung tung tung for <WorkingTimer createdAt={row.createdAt} />
             </>
           ) : (
-            "Working..."
+            "Tung tung tung sahur..."
           )}
         </span>
       </div>

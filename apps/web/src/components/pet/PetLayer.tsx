@@ -34,6 +34,27 @@ import {
   type PetState,
 } from "./petModel";
 import { findBatTarget, knockBatTarget } from "./petTextPhysics";
+import { SahurTakeover } from "./SahurTakeover";
+
+const SAHUR_PET_ID = "builtin:tung-tung-sahur";
+
+/** The anomaly does not use the standard status vocabulary. */
+function sahurStateLabel(state: PetState): string | null {
+  switch (state) {
+    case "running":
+      return "TUNG TUNG TUNG";
+    case "batting":
+      return "TUNG.";
+    case "waiting":
+      return "Third call. Answer.";
+    case "review":
+      return "You survived the night";
+    case "failed":
+      return "He is displeased";
+    default:
+      return null;
+  }
+}
 
 export const OPEN_PET_PICKER_EVENT = "t3:open-pet-picker";
 const PET_POSITION_KEY = "t3code:pet-position:v1";
@@ -257,7 +278,8 @@ export function PetLayer(props: {
     isWorking: props.isWorking,
     isReady: props.isReady,
   });
-  const label = petStateLabel(state);
+  const isSahur = pet?.id === SAHUR_PET_ID;
+  const label = isSahur ? sahurStateLabel(state) : petStateLabel(state);
 
   useEffect(() => {
     positionRef.current = position;
@@ -298,7 +320,7 @@ export function PetLayer(props: {
       settings.petEnabled &&
       settings.petAnimations &&
       !reducedMotion &&
-      pet?.id === "builtin:tung-tung-sahur" &&
+      pet?.id === SAHUR_PET_ID &&
       props.isWorking &&
       !props.needsInput &&
       !props.hasError &&
@@ -473,6 +495,7 @@ export function PetLayer(props: {
 
   return (
     <>
+      {isSahur ? <SahurTakeover marching={props.isWorking && animationsEnabled} /> : null}
       <div
         data-codex-pet-layer="true"
         data-pet-state={state}

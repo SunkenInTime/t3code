@@ -1159,7 +1159,7 @@ function OpenCommandPaletteDialog(props: {
         searchTerms: ["new thread", "chat", "create", "draft"],
         title: (
           <>
-            New thread in <span className="font-semibold">{activeProjectTitle}</span>
+            Summon anomaly in <span className="font-semibold">{activeProjectTitle}</span>
           </>
         ),
         icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
@@ -1179,7 +1179,7 @@ function OpenCommandPaletteDialog(props: {
       kind: "submenu",
       value: "action:new-thread-in",
       searchTerms: ["new thread", "project", "pick", "choose", "select"],
-      title: "New thread in...",
+      title: "Summon anomaly in...",
       icon: <SquarePenIcon className={ITEM_ICON_CLASS} />,
       addonIcon: <SquarePenIcon className={ADDON_ICON_CLASS} />,
       groups: [{ value: "projects", label: "Projects", items: projectThreadItems }],
@@ -1942,7 +1942,9 @@ function OpenCommandPaletteDialog(props: {
                   />
                 }
               >
-                <span>{isRemoteProjectPending ? "Working" : remoteProjectButtonLabel}</span>
+                <span>
+                  {isRemoteProjectPending ? "Tung tung tung..." : remoteProjectButtonLabel}
+                </span>
                 <KbdGroup className="pointer-events-none -me-0.5 items-center gap-1">
                   <Kbd>Enter</Kbd>
                 </KbdGroup>

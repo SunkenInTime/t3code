@@ -4,6 +4,7 @@ import { LinkIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { openCommandPalette } from "../commandPaletteBus";
+import { SahurMark } from "../components/SahurMark";
 import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
@@ -113,16 +114,17 @@ function NoProjectsHero() {
         <Empty className="flex-1">
           <div className="w-full max-w-lg px-8 py-12">
             <EmptyHeader className="max-w-none">
+              <SahurMark watchCursor className="animate-tung-thump mx-auto mb-5 h-20 w-auto" />
               <EmptyTitle className="text-foreground text-2xl sm:text-3xl">
-                What should we work on?
+                Tung. Tung. Tung. Wake up, it&rsquo;s time for sahur.
               </EmptyTitle>
               <EmptyDescription className="mt-2 text-sm text-muted-foreground/78">
-                Add a project to start your first thread.
+                You have been called three times. Add a project before the anomaly adds you.
               </EmptyDescription>
               <div className="mt-6 flex justify-center">
                 <Button size="sm" onClick={openAddProject}>
                   <PlusIcon className="size-4" />
-                  Add project
+                  Answer the call
                 </Button>
               </div>
             </EmptyHeader>
@@ -163,11 +165,11 @@ function HostedStaticOnboardingState() {
                 <LinkIcon className="size-5" />
               </div>
               <EmptyTitle className="text-foreground text-xl">
-                Connect an environment to get started
+                Connect an environment before the third tung
               </EmptyTitle>
               <EmptyDescription className="mt-2 text-sm leading-relaxed text-muted-foreground/78">
                 {cloudEnabled
-                  ? "Sign in to T3 Connect to connect a linked environment through its managed tunnel, or add a reachable backend manually."
+                  ? "Sign in to Tung Tung Tunnel to connect a linked environment through its managed tunnel, or add a reachable backend manually."
                   : "Add a reachable backend manually to start working from this browser."}
               </EmptyDescription>
               <div className="mt-6 flex justify-center">

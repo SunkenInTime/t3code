@@ -4706,7 +4706,7 @@ function ChatViewContent(props: ChatViewProps) {
       } else if (composerElementContextsSnapshot.length > 0) {
         titleSeed = formatElementContextLabel(composerElementContextsSnapshot[0]!);
       } else {
-        titleSeed = "New thread";
+        titleSeed = "New anomaly";
       }
     }
     const title = truncate(titleSeed);

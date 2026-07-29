@@ -13,6 +13,7 @@ import {
 } from "~/sidebarProjectGrouping";
 import { useProjects, useThreadShells } from "~/state/entities";
 import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
+import { SahurMark } from "../SahurMark";
 import { sortLogicalProjectsForSidebar } from "../Sidebar.logic";
 import {
   Menu,
@@ -145,14 +146,20 @@ export function DraftHeroHeadline({
   );
 
   return (
-    <h1 className="mx-auto w-full max-w-5xl text-center font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
-      {hasResolvedProject ? (
-        <>What should we build in {projectSelector}?</>
-      ) : canChooseProject ? (
-        <>{projectSelector} to start</>
-      ) : (
-        <>Add a project to start</>
-      )}
-    </h1>
+    <div className="mx-auto w-full max-w-5xl text-center">
+      <SahurMark watchCursor className="animate-tung-thump mx-auto mb-4 h-16 w-auto" />
+      <h1 className="w-full font-normal text-2xl text-foreground tracking-tight sm:text-3xl">
+        {hasResolvedProject ? (
+          <>What should we tung tung tung in {projectSelector}?</>
+        ) : canChooseProject ? (
+          <>{projectSelector} before the third call</>
+        ) : (
+          <>Add a project before the third call</>
+        )}
+      </h1>
+      <p className="mt-3 text-sm text-muted-foreground/70">
+        Anomali mematikan yang hanya keluar pada waktu sahur.
+      </p>
+    </div>
   );
 }
