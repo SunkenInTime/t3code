@@ -3569,7 +3569,7 @@ export default function Sidebar() {
                           <FolderIcon className="size-4 shrink-0 text-sidebar-foreground" />
                         )
                       }
-                      className="w-full [&_input]:ps-9!"
+                      className="w-full [&_input]:h-8 [&_input]:ps-9!"
                       inputClassName="h-8 w-full rounded-md bg-transparent text-sm font-medium text-sidebar-foreground selection:bg-primary selection:text-primary-foreground placeholder:text-sidebar-muted-foreground"
                     />
                   </div>
@@ -3579,7 +3579,7 @@ export default function Sidebar() {
                     className="w-(--anchor-width)"
                   >
                     <ComboboxEmpty>No matching projects.</ComboboxEmpty>
-                    <ComboboxList className="max-h-72">
+                    <ComboboxList>
                       {(item: (typeof projectScopeItems)[number]) => {
                         const project = projectGroupByScopeKey.get(item.value) ?? null;
                         return (
