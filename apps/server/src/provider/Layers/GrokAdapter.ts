@@ -964,15 +964,6 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               );
               const modelChanged =
                 requestedTurnModelId !== undefined && requestedTurnModelId !== ctx.currentModelId;
-              const currentModelId = yield* applyGrokAcpModelSelection({
-                runtime: ctx.acp,
-                currentModelId: ctx.currentModelId,
-                currentReasoningEffort: ctx.currentReasoningEffort,
-                requestedModelId: requestedTurnModelId,
-                requestedReasoningEffort: requestedTurnReasoningEffort,
-                mapError: (cause) =>
-                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
-              });
 
               const text = input.input?.trim();
               const imagePromptParts = yield* Effect.forEach(
@@ -1021,6 +1012,15 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 });
               }
 
+              const currentModelId = yield* applyGrokAcpModelSelection({
+                runtime: ctx.acp,
+                currentModelId: ctx.currentModelId,
+                currentReasoningEffort: ctx.currentReasoningEffort,
+                requestedModelId: requestedTurnModelId,
+                requestedReasoningEffort: requestedTurnReasoningEffort,
+                mapError: (cause) =>
+                  mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
+              });
               ctx.currentModelId = currentModelId;
               if (requestedTurnReasoningEffort !== undefined) {
                 ctx.currentReasoningEffort = requestedTurnReasoningEffort;
