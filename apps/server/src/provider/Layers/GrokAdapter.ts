@@ -751,6 +751,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             grokModelSelection,
             "reasoningEffort",
           );
+          const startModelChanged =
+            requestedStartModelId !== undefined && requestedStartModelId !== currentStartModelId;
           const boundModelId = yield* applyGrokAcpModelSelection({
             runtime: acp,
             currentModelId: currentStartModelId,
@@ -793,7 +795,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             interruptedTurnIds: new Set(),
             promptsInFlight: 0,
             currentModelId: boundModelId,
-            currentReasoningEffort: requestedStartReasoningEffort ?? currentStartReasoningEffort,
+            currentReasoningEffort:
+              requestedStartReasoningEffort ??
+              (startModelChanged ? undefined : currentStartReasoningEffort),
             stopped: false,
           };
 
