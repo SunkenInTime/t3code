@@ -73,14 +73,25 @@ describe("desktop update button state", () => {
     expect(getDesktopUpdateButtonTooltip(state)).toContain("Click to retry");
   });
 
-  it("prefers install when a downloaded version already exists", () => {
+  it("prefers a newly available release over a stale downloaded version", () => {
     const state: DesktopUpdateState = {
       ...baseState,
       status: "available",
-      availableVersion: "1.1.0",
+      availableVersion: "1.2.0",
       downloadedVersion: "1.1.0",
     };
-    expect(resolveDesktopUpdateButtonAction(state)).toBe("install");
+    expect(resolveDesktopUpdateButtonAction(state)).toBe("download");
+  });
+
+  it("hides the install action while checking for a newer release", () => {
+    const state: DesktopUpdateState = {
+      ...baseState,
+      status: "checking",
+      availableVersion: "1.1.0",
+      downloadedVersion: "1.1.0",
+      downloadPercent: 100,
+    };
+    expect(resolveDesktopUpdateButtonAction(state)).toBe("none");
   });
 
   it("hides the button for non-actionable check errors", () => {
@@ -290,7 +301,7 @@ describe("canCheckForUpdate", () => {
     );
   });
 
-  it("returns false once an update has been downloaded", () => {
+  it("returns true once an update has been downloaded so newer releases can be found", () => {
     expect(
       canCheckForUpdate({
         ...baseState,
@@ -298,7 +309,7 @@ describe("canCheckForUpdate", () => {
         availableVersion: "1.1.0",
         downloadedVersion: "1.1.0",
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("returns true when idle", () => {

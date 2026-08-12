@@ -55,6 +55,54 @@ describe("updateMachine", () => {
     expect(state.canRetry).toBe(true);
   });
 
+  it("preserves an already-downloaded update while checking the feed", () => {
+    const downloadedState = {
+      ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
+      enabled: true,
+      status: "downloaded" as const,
+      availableVersion: "1.1.0",
+      downloadedVersion: "1.1.0",
+      releaseNotes: [{ version: "1.1.0", items: ["fix: queued update"] }],
+      downloadPercent: 100,
+    };
+    const checking = reduceDesktopUpdateStateOnCheckStart(
+      downloadedState,
+      "2026-03-04T00:00:00.000Z",
+    );
+    const failed = reduceDesktopUpdateStateOnCheckFailure(
+      checking,
+      "network unavailable",
+      "2026-03-04T00:00:01.000Z",
+    );
+
+    expect(checking.status).toBe("checking");
+    expect(checking.downloadedVersion).toBe("1.1.0");
+    expect(checking.releaseNotes).toEqual(downloadedState.releaseNotes);
+    expect(failed.status).toBe("downloaded");
+    expect(failed.downloadedVersion).toBe("1.1.0");
+    expect(failed.releaseNotes).toEqual(downloadedState.releaseNotes);
+    expect(failed.message).toBeNull();
+  });
+
+  it("keeps the installer when the feed still offers its version", () => {
+    const state = reduceDesktopUpdateStateOnUpdateAvailable(
+      {
+        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
+        enabled: true,
+        status: "downloaded",
+        availableVersion: "1.1.0",
+        downloadedVersion: "1.1.0",
+        downloadPercent: 100,
+      },
+      "1.1.0",
+      "2026-03-04T00:00:00.000Z",
+    );
+
+    expect(state.status).toBe("downloaded");
+    expect(state.downloadedVersion).toBe("1.1.0");
+    expect(state.downloadPercent).toBe(100);
+  });
+
   it("preserves available version on download failure for retry", () => {
     const state = reduceDesktopUpdateStateOnDownloadFailure(
       {

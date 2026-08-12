@@ -337,6 +337,41 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("checks for newer releases after an update has been downloaded", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        const result = yield* updates.check("poll");
+        assert.isTrue(result.checked);
+
+        harness.emit("update-available", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        const unchangedState = yield* updates.getState;
+        assert.equal(unchangedState.status, "downloaded");
+        assert.equal(unchangedState.downloadedVersion, "1.2.4");
+
+        const nextResult = yield* updates.check("poll");
+        assert.isTrue(nextResult.checked);
+
+        harness.emit("update-available", { version: "1.2.5" });
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.equal(state.status, "available");
+        assert.equal(state.availableVersion, "1.2.5");
+        assert.isNull(state.downloadedVersion);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it.effect("keeps raw updater event failures out of update state", () => {
     const harness = makeHarness();
     const cause = new Error(
