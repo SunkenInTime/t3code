@@ -372,6 +372,47 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("admits only one of a concurrent refresh check and install", () =>
+    Effect.gen(function* () {
+      const checkStarted = yield* Deferred.make<void>();
+      const releaseCheck = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        checkForUpdates: Deferred.succeed(checkStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseCheck)),
+        ),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+          harness.emit("update-downloaded", { version: "1.2.4" });
+          yield* flushCallbacks;
+
+          const [checkFiber, installFiber] = yield* Effect.all(
+            [
+              updates.check("manual").pipe(Effect.forkScoped),
+              updates.install.pipe(Effect.forkScoped),
+            ],
+            { concurrency: "unbounded" },
+          );
+
+          yield* Effect.race(
+            Deferred.await(checkStarted),
+            Fiber.join(installFiber).pipe(Effect.asVoid),
+          );
+          yield* Deferred.succeed(releaseCheck, undefined);
+
+          const [checkResult, installResult] = yield* Effect.all([
+            Fiber.join(checkFiber),
+            Fiber.join(installFiber),
+          ]);
+          assert.equal(Number(checkResult.checked) + Number(installResult.accepted), 1);
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
+
   it.effect("keeps raw updater event failures out of update state", () => {
     const harness = makeHarness();
     const cause = new Error(
