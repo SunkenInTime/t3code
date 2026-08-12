@@ -24,6 +24,7 @@ import * as Ref from "effect/Ref";
 import * as Schedule from "effect/Schedule";
 import * as Scope from "effect/Scope";
 import * as TestClock from "effect/testing/TestClock";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { expect } from "vite-plus/test";
 
 import * as ProcessRunner from "../processRunner.ts";
@@ -949,6 +950,56 @@ it.layer(
       yield* waitFor(
         Effect.sync(() => checks > 0),
         "1200 millis",
+      );
+    }),
+  );
+
+  it.effect("shares one Windows process snapshot across terminal checks", () =>
+    Effect.gen(function* () {
+      const runInputs: ProcessRunner.ProcessRunInput[] = [];
+      const processRunner = ProcessRunner.ProcessRunner.of({
+        run: (input) =>
+          Effect.sync(() => {
+            runInputs.push(input);
+            return {
+              stdout: ["9100|9000|node.exe", "9200|9100|worker.exe", "9101|9001|python.exe"].join(
+                "\n",
+              ),
+              stderr: "",
+              code: ChildProcessSpawner.ExitCode(0),
+              timedOut: false,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+              stdoutInvalidUtf8: false,
+              stderrInvalidUtf8: false,
+            };
+          }),
+      });
+      const inspector = yield* TerminalManager.makeDefaultSubprocessInspectorForPlatform(
+        "win32",
+        1_000,
+      ).pipe(Effect.provideService(ProcessRunner.ProcessRunner, processRunner));
+
+      const [first, second] = yield* Effect.all([inspector(9000), inspector(9001)], {
+        concurrency: "unbounded",
+      });
+
+      expect(first).toEqual({
+        hasRunningSubprocess: true,
+        childCommand: "node",
+        processIds: [9000, 9100, 9200],
+      });
+      expect(second).toEqual({
+        hasRunningSubprocess: true,
+        childCommand: "python",
+        processIds: [9001, 9101],
+      });
+      expect(runInputs).toHaveLength(1);
+      expect(runInputs[0]).toEqual(
+        expect.objectContaining({
+          command: "powershell.exe",
+          args: expect.arrayContaining([expect.stringContaining("Get-CimInstance Win32_Process")]),
+        }),
       );
     }),
   );

@@ -620,12 +620,14 @@ function parseFirstChildPidFromPgrep(stdout: string): number | null {
   return null;
 }
 
-function windowsInspectSubprocess(
-  terminalPid: number,
-  platform: NodeJS.Platform,
-): Effect.Effect<
-  TerminalSubprocessInspectResult,
-  TerminalSubprocessCheckError,
+interface WindowsProcessSnapshot {
+  readonly processNameById: ReadonlyMap<number, string>;
+  readonly childrenByParent: ReadonlyMap<number, ReadonlyArray<number>>;
+}
+
+function windowsProcessSnapshot(): Effect.Effect<
+  WindowsProcessSnapshot,
+  ProcessRunner.ProcessRunError,
   ProcessRunner.ProcessRunner
 > {
   const command =
@@ -644,12 +646,12 @@ function windowsInspectSubprocess(
       timeoutBehavior: "timedOutResult",
     });
   }).pipe(
-    Effect.map((result) => {
-      if (result.code !== 0) {
-        return { hasRunningSubprocess: false, childCommand: null, processIds: [] } as const;
-      }
+    Effect.map((result): WindowsProcessSnapshot => {
       const processNameById = new Map<number, string>();
       const childrenByParent = new Map<number, number[]>();
+      if (result.code !== 0) {
+        return { processNameById, childrenByParent };
+      }
       for (const line of result.stdout.split(/\r?\n/g)) {
         const [pidRaw, parentPidRaw, nameRaw] = line.trim().split("|", 3);
         const pid = Number(pidRaw);
@@ -660,38 +662,41 @@ function windowsInspectSubprocess(
         children.push(pid);
         childrenByParent.set(parentPid, children);
       }
-      const directChildren = childrenByParent.get(terminalPid) ?? [];
-      const childPid = directChildren[0];
-      if (childPid === undefined) {
-        return { hasRunningSubprocess: false, childCommand: null, processIds: [] } as const;
-      }
-      const processIds = new Set<number>([terminalPid]);
-      const pending = [terminalPid];
-      while (pending.length > 0) {
-        const parentPid = pending.pop();
-        if (parentPid === undefined) continue;
-        for (const pid of childrenByParent.get(parentPid) ?? []) {
-          if (processIds.has(pid)) continue;
-          processIds.add(pid);
-          pending.push(pid);
-        }
-      }
-      const normalized = normalizeChildCommandName(processNameById.get(childPid) ?? "", platform);
-      return {
-        hasRunningSubprocess: true,
-        childCommand: normalized ? truncateTerminalWireLabel(normalized) : null,
-        processIds: [...processIds],
-      } as const;
+      return { processNameById, childrenByParent };
     }),
-    Effect.mapError(
-      (cause) =>
-        new TerminalSubprocessCheckError({
-          cause,
-          terminalPid,
-          command: "powershell",
-        }),
-    ),
   );
+}
+
+function inspectWindowsProcessSnapshot(
+  snapshot: WindowsProcessSnapshot,
+  terminalPid: number,
+  platform: NodeJS.Platform,
+): TerminalSubprocessInspectResult {
+  const directChildren = snapshot.childrenByParent.get(terminalPid) ?? [];
+  const childPid = directChildren[0];
+  if (childPid === undefined) {
+    return { hasRunningSubprocess: false, childCommand: null, processIds: [] };
+  }
+  const processIds = new Set<number>([terminalPid]);
+  const pending = [terminalPid];
+  while (pending.length > 0) {
+    const parentPid = pending.pop();
+    if (parentPid === undefined) continue;
+    for (const pid of snapshot.childrenByParent.get(parentPid) ?? []) {
+      if (processIds.has(pid)) continue;
+      processIds.add(pid);
+      pending.push(pid);
+    }
+  }
+  const normalized = normalizeChildCommandName(
+    snapshot.processNameById.get(childPid) ?? "",
+    platform,
+  );
+  return {
+    hasRunningSubprocess: true,
+    childCommand: normalized ? truncateTerminalWireLabel(normalized) : null,
+    processIds: [...processIds],
+  };
 }
 
 const posixInspectSubprocess = Effect.fn("terminal.posixInspectSubprocess")(function* (
@@ -840,17 +845,50 @@ const posixInspectSubprocess = Effect.fn("terminal.posixInspectSubprocess")(func
   };
 });
 
-function defaultSubprocessInspectorForPlatform(platform: NodeJS.Platform) {
-  return Effect.fn("terminal.defaultSubprocessInspector")(function* (terminalPid: number) {
+export const makeDefaultSubprocessInspectorForPlatform = Effect.fn(
+  "terminal.makeDefaultSubprocessInspector",
+)(function* (
+  platform: NodeJS.Platform,
+  subprocessPollIntervalMs: number,
+): Effect.fn.Return<TerminalSubprocessInspector, never, ProcessRunner.ProcessRunner> {
+  const processRunner = yield* ProcessRunner.ProcessRunner;
+  if (platform === "win32") {
+    // A poll checks every terminal concurrently. Reuse the full Windows process
+    // table for that interval while each terminal derives its own subtree.
+    const cachedSnapshot = yield* windowsProcessSnapshot().pipe(
+      Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+      Effect.cachedWithTTL(subprocessPollIntervalMs),
+    );
+    return (terminalPid) => {
+      if (!Number.isInteger(terminalPid) || terminalPid <= 0) {
+        return Effect.succeed({
+          hasRunningSubprocess: false,
+          childCommand: null,
+          processIds: [],
+        });
+      }
+      return cachedSnapshot.pipe(
+        Effect.map((snapshot) => inspectWindowsProcessSnapshot(snapshot, terminalPid, platform)),
+        Effect.mapError(
+          (cause) =>
+            new TerminalSubprocessCheckError({
+              cause,
+              terminalPid,
+              command: "powershell",
+            }),
+        ),
+      );
+    };
+  }
+  return (terminalPid) => {
     if (!Number.isInteger(terminalPid) || terminalPid <= 0) {
-      return { hasRunningSubprocess: false, childCommand: null, processIds: [] };
+      return Effect.succeed({ hasRunningSubprocess: false, childCommand: null, processIds: [] });
     }
-    if (platform === "win32") {
-      return yield* windowsInspectSubprocess(terminalPid, platform);
-    }
-    return yield* posixInspectSubprocess(terminalPid, platform);
-  });
-}
+    return posixInspectSubprocess(terminalPid, platform).pipe(
+      Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+    );
+  };
+});
 
 function capHistory(history: string, maxLines: number): string {
   if (history.length === 0) return history;
@@ -1226,15 +1264,11 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
   // `options.env` is the test seam.
   const baseEnv = options.env ?? process.env;
   const shellResolver = options.shellResolver ?? (() => defaultShellResolver(platform, baseEnv));
-  const processRunner = yield* ProcessRunner.ProcessRunner;
-  const subprocessInspector =
-    options.subprocessInspector ??
-    ((terminalPid) =>
-      defaultSubprocessInspectorForPlatform(platform)(terminalPid).pipe(
-        Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
-      ));
   const subprocessPollIntervalMs =
     options.subprocessPollIntervalMs ?? DEFAULT_SUBPROCESS_POLL_INTERVAL_MS;
+  const subprocessInspector =
+    options.subprocessInspector ??
+    (yield* makeDefaultSubprocessInspectorForPlatform(platform, subprocessPollIntervalMs));
   const processKillGraceMs = options.processKillGraceMs ?? DEFAULT_PROCESS_KILL_GRACE_MS;
   const maxRetainedInactiveSessions =
     options.maxRetainedInactiveSessions ?? DEFAULT_MAX_RETAINED_INACTIVE_SESSIONS;
