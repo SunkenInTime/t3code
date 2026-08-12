@@ -37,11 +37,14 @@ describe("buildGrokAcpSpawnInput", () => {
 
 describe("applyGrokAcpModelSelection", () => {
   const makeRecordingRuntime = (failure?: EffectAcpErrors.AcpError) => {
-    const modelCalls: Array<string> = [];
+    const modelCalls: Array<{
+      modelId: string;
+      meta?: { readonly [key: string]: unknown } | null;
+    }> = [];
     const runtime = {
-      setSessionModel: (modelId: string) =>
+      setSessionModel: (modelId: string, meta?: { readonly [key: string]: unknown } | null) =>
         Effect.gen(function* () {
-          modelCalls.push(modelId);
+          modelCalls.push(meta === undefined ? { modelId } : { modelId, meta });
           if (failure) return yield* failure;
           return {};
         }),
@@ -58,8 +61,24 @@ describe("applyGrokAcpModelSelection", () => {
         requestedModelId: "grok-mock-alt",
         mapError: (cause) => cause.message,
       });
-      expect(modelCalls).toEqual(["grok-mock-alt"]);
+      expect(modelCalls).toEqual([{ modelId: "grok-mock-alt" }]);
       expect(result).toBe("grok-mock-alt");
+    }),
+  );
+
+  it.effect("applies reasoning effort through session/set_model metadata", () =>
+    Effect.gen(function* () {
+      const { runtime, modelCalls } = makeRecordingRuntime();
+      const result = yield* applyGrokAcpModelSelection({
+        runtime,
+        currentModelId: "grok-4.6",
+        currentReasoningEffort: "high",
+        requestedModelId: "grok-4.6",
+        requestedReasoningEffort: "xhigh",
+        mapError: (cause) => cause.message,
+      });
+      expect(modelCalls).toEqual([{ modelId: "grok-4.6", meta: { reasoningEffort: "xhigh" } }]);
+      expect(result).toBe("grok-4.6");
     }),
   );
 

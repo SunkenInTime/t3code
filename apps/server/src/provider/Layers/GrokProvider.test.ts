@@ -6,9 +6,53 @@ import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 import { GrokSettings } from "@t3tools/contracts";
 
-import { buildInitialGrokProviderSnapshot, checkGrokProviderStatus } from "./GrokProvider.ts";
+import {
+  buildGrokModelCapabilities,
+  buildInitialGrokProviderSnapshot,
+  checkGrokProviderStatus,
+} from "./GrokProvider.ts";
 
 const decodeGrokSettings = Schema.decodeSync(GrokSettings);
+
+describe("buildGrokModelCapabilities", () => {
+  it("maps model-specific ACP reasoning metadata and its active default", () => {
+    const capabilities = buildGrokModelCapabilities({
+      modelId: "grok-4.6",
+      name: "Grok 4.6",
+      _meta: {
+        supportsReasoningEffort: true,
+        reasoningEffort: "xhigh",
+        reasoningEfforts: [
+          { value: "xhigh", label: "Extra High Effort", default: true },
+          { value: "high", label: "High Effort", default: true },
+          { value: "medium", label: "Medium Effort" },
+          { value: "low", label: "Low Effort" },
+        ],
+      },
+    });
+
+    expect(capabilities.optionDescriptors).toEqual([
+      {
+        id: "reasoningEffort",
+        label: "Reasoning",
+        type: "select",
+        currentValue: "xhigh",
+        options: [
+          { id: "xhigh", label: "Extra High Effort", isDefault: true },
+          { id: "high", label: "High Effort" },
+          { id: "medium", label: "Medium Effort" },
+          { id: "low", label: "Low Effort" },
+        ],
+      },
+    ]);
+  });
+
+  it("keeps non-reasoning Grok models free of reasoning controls", () => {
+    expect(
+      buildGrokModelCapabilities({ modelId: "grok-build", name: "Grok Build" }).optionDescriptors,
+    ).toEqual([]);
+  });
+});
 
 describe("buildInitialGrokProviderSnapshot", () => {
   it.effect("returns a disabled snapshot when settings.enabled is false", () =>

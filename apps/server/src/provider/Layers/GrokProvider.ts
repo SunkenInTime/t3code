@@ -18,6 +18,7 @@ import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import {
+  buildSelectOptionDescriptor,
   buildServerProvider,
   isCommandMissingCause,
   parseGenericCliVersion,
@@ -40,6 +41,15 @@ const GROK_PRESENTATION = {
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
+const LEGACY_GROK_REASONING_EFFORTS = ["xhigh", "high", "medium", "low"] as const;
+const GROK_REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
+  none: "None",
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "Extra High",
+};
 
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
 const GROK_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
@@ -99,6 +109,72 @@ function grokModelsFromSettings(
   return providerModelsFromSettings(builtInModels, customModels ?? [], EMPTY_CAPABILITIES);
 }
 
+function nonEmptyString(value: unknown): string | undefined {
+  return typeof value === "string" ? value.trim() || undefined : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function grokReasoningEffortLabel(value: string): string {
+  return GROK_REASONING_EFFORT_LABELS[value] ?? value;
+}
+
+function grokReasoningOptionsFromModel(
+  model: EffectAcpSchema.ModelInfo,
+): ReadonlyArray<{ value: string; label: string; isDefault?: boolean }> {
+  const meta = model._meta;
+  if (!meta || meta.supportsReasoningEffort !== true) {
+    return [];
+  }
+
+  const defaultEffort = nonEmptyString(meta.reasoningEffort);
+  const advertisedOptions = Array.isArray(meta.reasoningEfforts)
+    ? meta.reasoningEfforts
+    : LEGACY_GROK_REASONING_EFFORTS;
+  const seen = new Set<string>();
+  const options: Array<{ value: string; label: string; advertisedDefault: boolean }> = [];
+
+  for (const entry of advertisedOptions) {
+    const value = nonEmptyString(isRecord(entry) ? (entry.value ?? entry.id) : entry);
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    options.push({
+      value,
+      label:
+        nonEmptyString(isRecord(entry) ? entry.label : undefined) ??
+        grokReasoningEffortLabel(value),
+      advertisedDefault: isRecord(entry) && entry.default === true,
+    });
+  }
+
+  const selectedDefault =
+    (defaultEffort && options.some((option) => option.value === defaultEffort)
+      ? defaultEffort
+      : undefined) ?? options.find((option) => option.advertisedDefault)?.value;
+  return options.map(({ value, label }) =>
+    value === selectedDefault ? { value, label, isDefault: true } : { value, label },
+  );
+}
+
+export function buildGrokModelCapabilities(model: EffectAcpSchema.ModelInfo): ModelCapabilities {
+  const reasoningOptions = grokReasoningOptionsFromModel(model);
+  return reasoningOptions.length > 0
+    ? createModelCapabilities({
+        optionDescriptors: [
+          buildSelectOptionDescriptor({
+            id: "reasoningEffort",
+            label: "Reasoning",
+            options: reasoningOptions,
+          }),
+        ],
+      })
+    : EMPTY_CAPABILITIES;
+}
+
 function buildGrokDiscoveredModelsFromSessionModelState(
   modelState: EffectAcpSchema.SessionModelState | null | undefined,
 ): ReadonlyArray<ServerProviderModel> {
@@ -117,7 +193,7 @@ function buildGrokDiscoveredModelsFromSessionModelState(
         slug,
         name: model.name.trim() || slug,
         isCustom: false,
-        capabilities: EMPTY_CAPABILITIES,
+        capabilities: buildGrokModelCapabilities(model),
       };
     })
     .filter((model): model is ServerProviderModel => model !== undefined);
