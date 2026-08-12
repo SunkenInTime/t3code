@@ -10,6 +10,7 @@ import {
 } from "@t3tools/contracts";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Data from "effect/Data";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Encoding from "effect/Encoding";
@@ -957,10 +958,14 @@ it.layer(
   it.effect("shares one Windows process snapshot across terminal checks", () =>
     Effect.gen(function* () {
       const runInputs: ProcessRunner.ProcessRunInput[] = [];
+      const runStarted = yield* Deferred.make<void>();
+      const releaseRun = yield* Deferred.make<void>();
       const processRunner = ProcessRunner.ProcessRunner.of({
         run: (input) =>
-          Effect.sync(() => {
+          Effect.gen(function* () {
             runInputs.push(input);
+            yield* Deferred.succeed(runStarted, undefined);
+            yield* Deferred.await(releaseRun);
             return {
               stdout: ["9100|9000|node.exe", "9200|9100|worker.exe", "9101|9001|python.exe"].join(
                 "\n",
@@ -980,9 +985,15 @@ it.layer(
         1_000,
       ).pipe(Effect.provideService(ProcessRunner.ProcessRunner, processRunner));
 
-      const [first, second] = yield* Effect.all([inspector(9000), inspector(9001)], {
+      const inspections = yield* Effect.all([inspector(9000), inspector(9001)], {
         concurrency: "unbounded",
-      });
+      }).pipe(Effect.forkChild);
+
+      yield* Deferred.await(runStarted);
+      yield* Effect.yieldNow;
+      expect(runInputs).toHaveLength(1);
+      yield* Deferred.succeed(releaseRun, undefined);
+      const [first, second] = yield* Fiber.join(inspections);
 
       expect(first).toEqual({
         hasRunningSubprocess: true,
@@ -994,7 +1005,6 @@ it.layer(
         childCommand: "python",
         processIds: [9001, 9101],
       });
-      expect(runInputs).toHaveLength(1);
       expect(runInputs[0]).toEqual(
         expect.objectContaining({
           command: "powershell.exe",
