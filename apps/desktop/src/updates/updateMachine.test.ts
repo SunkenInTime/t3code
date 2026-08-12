@@ -85,6 +85,7 @@ describe("updateMachine", () => {
   });
 
   it("keeps the installer when the feed still offers its version", () => {
+    const releaseNotes = [{ version: "1.1.0", items: ["fix: queued update"] }];
     const state = reduceDesktopUpdateStateOnUpdateAvailable(
       {
         ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
@@ -92,6 +93,7 @@ describe("updateMachine", () => {
         status: "downloaded",
         availableVersion: "1.1.0",
         downloadedVersion: "1.1.0",
+        releaseNotes,
         downloadPercent: 100,
       },
       "1.1.0",
@@ -100,6 +102,7 @@ describe("updateMachine", () => {
 
     expect(state.status).toBe("downloaded");
     expect(state.downloadedVersion).toBe("1.1.0");
+    expect(state.releaseNotes).toBe(releaseNotes);
     expect(state.downloadPercent).toBe(100);
   });
 

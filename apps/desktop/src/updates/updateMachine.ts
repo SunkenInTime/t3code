@@ -91,12 +91,14 @@ export function reduceDesktopUpdateStateOnUpdateAvailable(
   releaseNotes: ReadonlyArray<DesktopUpdateReleaseNote> = [],
 ): DesktopUpdateState {
   const isDownloadedVersion = state.downloadedVersion === version;
+  const nextReleaseNotes =
+    isDownloadedVersion && releaseNotes.length === 0 ? state.releaseNotes : releaseNotes;
   return {
     ...state,
     status: isDownloadedVersion ? "downloaded" : "available",
     availableVersion: version,
     downloadedVersion: isDownloadedVersion ? version : null,
-    releaseNotes,
+    releaseNotes: nextReleaseNotes,
     downloadPercent: isDownloadedVersion ? 100 : null,
     checkedAt,
     message: null,

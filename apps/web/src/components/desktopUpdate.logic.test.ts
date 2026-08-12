@@ -73,6 +73,21 @@ describe("desktop update button state", () => {
     expect(getDesktopUpdateButtonTooltip(state)).toContain("Click to retry");
   });
 
+  it("keeps install action available after a background updater error", () => {
+    const state: DesktopUpdateState = {
+      ...baseState,
+      status: "error",
+      downloadedVersion: "1.1.0",
+      availableVersion: "1.1.0",
+      message: "background updater error",
+      errorContext: null,
+      canRetry: true,
+    };
+    expect(shouldShowDesktopUpdateButton(state)).toBe(true);
+    expect(resolveDesktopUpdateButtonAction(state)).toBe("install");
+    expect(getDesktopUpdateButtonTooltip(state)).toContain("Click to restart and install");
+  });
+
   it("prefers a newly available release over a stale downloaded version", () => {
     const state: DesktopUpdateState = {
       ...baseState,

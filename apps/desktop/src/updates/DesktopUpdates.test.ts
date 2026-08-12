@@ -345,6 +345,11 @@ describe("DesktopUpdates", () => {
         const updates = yield* DesktopUpdates.DesktopUpdates;
         yield* updates.configure;
 
+        harness.emit("update-available", {
+          version: "1.2.4",
+          releaseNotes: "## What's changed\n- fix: queued update",
+        });
+        yield* flushCallbacks;
         harness.emit("update-downloaded", { version: "1.2.4" });
         yield* flushCallbacks;
 
@@ -357,6 +362,9 @@ describe("DesktopUpdates", () => {
         const unchangedState = yield* updates.getState;
         assert.equal(unchangedState.status, "downloaded");
         assert.equal(unchangedState.downloadedVersion, "1.2.4");
+        assert.deepEqual(unchangedState.releaseNotes, [
+          { version: "1.2.4", items: ["fix: queued update"] },
+        ]);
 
         const nextResult = yield* updates.check("poll");
         assert.isTrue(nextResult.checked);
@@ -431,6 +439,27 @@ describe("DesktopUpdates", () => {
         assert.equal(state.status, "error");
         assert.equal(state.message, "Desktop updater background operation reported an error.");
         assert.notInclude(state.message ?? "", "secret");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("preserves a queued installer after a background updater error", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        harness.emit("error", new Error("background updater failure"));
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.equal(state.status, "error");
+        assert.equal(state.downloadedVersion, "1.2.4");
+        assert.isNull(state.errorContext);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

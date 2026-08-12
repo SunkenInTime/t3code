@@ -26,7 +26,9 @@ export function resolveDesktopUpdateButtonAction(
 ): DesktopUpdateButtonAction {
   if (
     state.downloadedVersion &&
-    (state.status === "downloaded" || state.errorContext === "install")
+    (state.status === "downloaded" ||
+      (state.status === "error" &&
+        (state.errorContext === null || state.errorContext === "install")))
   ) {
     return "install";
   }
@@ -92,6 +94,9 @@ export function getDesktopUpdateButtonTooltip(state: DesktopUpdateState): string
     }
     if (state.errorContext === "install" && state.downloadedVersion) {
       return `Install failed for ${state.downloadedVersion}. Click to retry.`;
+    }
+    if (state.downloadedVersion) {
+      return `Update ${state.downloadedVersion} downloaded. Click to restart and install.`;
     }
     return state.message ?? "Update failed";
   }
