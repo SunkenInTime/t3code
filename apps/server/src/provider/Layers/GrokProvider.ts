@@ -42,7 +42,7 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
 const LEGACY_GROK_REASONING_EFFORTS = ["xhigh", "high", "medium", "low"] as const;
-const GROK_REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
+const FALLBACK_GROK_REASONING_LABELS: Readonly<Record<string, string>> = {
   none: "None",
   minimal: "Minimal",
   low: "Low",
@@ -117,8 +117,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function grokReasoningEffortLabel(value: string): string {
-  return GROK_REASONING_EFFORT_LABELS[value] ?? value;
+function fallbackGrokReasoningLabel(value: string): string {
+  return FALLBACK_GROK_REASONING_LABELS[value] ?? value;
 }
 
 function grokReasoningOptionsFromModel(
@@ -146,7 +146,7 @@ function grokReasoningOptionsFromModel(
       value,
       label:
         nonEmptyString(isRecord(entry) ? entry.label : undefined) ??
-        grokReasoningEffortLabel(value),
+        fallbackGrokReasoningLabel(value),
       advertisedDefault: isRecord(entry) && entry.default === true,
     });
   }

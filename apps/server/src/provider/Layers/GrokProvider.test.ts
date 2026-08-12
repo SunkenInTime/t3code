@@ -15,7 +15,7 @@ import {
 const decodeGrokSettings = Schema.decodeSync(GrokSettings);
 
 describe("buildGrokModelCapabilities", () => {
-  it("maps model-specific ACP reasoning metadata and its active default", () => {
+  it("preserves ACP-provided reasoning labels and the active default", () => {
     const capabilities = buildGrokModelCapabilities({
       modelId: "grok-4.6",
       name: "Grok 4.6",
@@ -42,6 +42,31 @@ describe("buildGrokModelCapabilities", () => {
           { id: "high", label: "High Effort" },
           { id: "medium", label: "Medium Effort" },
           { id: "low", label: "Low Effort" },
+        ],
+      },
+    ]);
+  });
+
+  it("does not append an Effort suffix when ACP omits option labels", () => {
+    const capabilities = buildGrokModelCapabilities({
+      modelId: "grok-4.6",
+      name: "Grok 4.6",
+      _meta: {
+        supportsReasoningEffort: true,
+        reasoningEffort: "xhigh",
+        reasoningEfforts: [{ value: "xhigh" }, { value: "medium" }],
+      },
+    });
+
+    expect(capabilities.optionDescriptors).toEqual([
+      {
+        id: "reasoningEffort",
+        label: "Reasoning",
+        type: "select",
+        currentValue: "xhigh",
+        options: [
+          { id: "xhigh", label: "Extra High", isDefault: true },
+          { id: "medium", label: "Medium" },
         ],
       },
     ]);
