@@ -451,10 +451,15 @@ export const make = Effect.gen(function* () {
 
   const installDownloadedUpdate = Effect.gen(function* () {
     const state = yield* Ref.get(updateStateRef);
+    const hasInstallableDownload =
+      state.downloadedVersion !== null &&
+      (state.status === "downloaded" ||
+        (state.status === "error" &&
+          (state.errorContext === null || state.errorContext === "install")));
     if (
       (yield* Ref.get(desktopState.quitting)) ||
       !(yield* Ref.get(updaterConfiguredRef)) ||
-      state.status !== "downloaded"
+      !hasInstallableDownload
     ) {
       return { accepted: false, completed: false };
     }

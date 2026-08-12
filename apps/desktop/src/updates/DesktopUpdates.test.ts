@@ -460,6 +460,9 @@ describe("DesktopUpdates", () => {
         assert.equal(state.status, "error");
         assert.equal(state.downloadedVersion, "1.2.4");
         assert.isNull(state.errorContext);
+
+        const result = yield* updates.install;
+        assert.isTrue(result.accepted);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
