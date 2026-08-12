@@ -27,6 +27,7 @@ interface UpdatesHarnessOptions {
     void,
     ElectronUpdater.ElectronUpdaterCheckForUpdatesError
   >;
+  readonly beforeSetUpdateChannel?: Effect.Effect<void>;
   readonly setUpdateChannelError?: DesktopAppSettings.DesktopSettingsWriteError;
   readonly setDisableDifferentialDownload?: Effect.Effect<void>;
   readonly stopBackend?: Effect.Effect<void>;
@@ -153,22 +154,41 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
     ),
   );
 
+  let testSettings: DesktopAppSettings.DesktopSettings = {
+    ...DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS,
+  };
   const setUpdateChannelError = options.setUpdateChannelError;
-  const settingsLayer = setUpdateChannelError
-    ? Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
-        get: Effect.succeed(DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS),
-        load: Effect.succeed(DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS),
-        setMainWindowBounds: () => Effect.die("unexpected main window bounds update"),
-        setServerExposureMode: () => Effect.die("unexpected server exposure update"),
-        setTailscaleServe: () => Effect.die("unexpected Tailscale Serve update"),
-        setUpdateChannel: () => Effect.fail(setUpdateChannelError),
-        setWslBackendEnabled: () => Effect.die("unexpected WSL backend toggle"),
-        setWslDistro: () => Effect.die("unexpected WSL distro change"),
-        setWslOnly: () => Effect.die("unexpected WSL-only toggle"),
-        applyWslWindowsFallback: Effect.die("unexpected WSL Windows fallback"),
-        applyWslWindowsFallbackInMemory: Effect.die("unexpected WSL Windows fallback"),
-      } satisfies DesktopAppSettings.DesktopAppSettings["Service"])
-    : DesktopAppSettings.layer;
+  const settingsLayer =
+    setUpdateChannelError || options.beforeSetUpdateChannel
+      ? Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
+          get: Effect.sync(() => testSettings),
+          load: Effect.sync(() => testSettings),
+          setMainWindowBounds: () => Effect.die("unexpected main window bounds update"),
+          setServerExposureMode: () => Effect.die("unexpected server exposure update"),
+          setTailscaleServe: () => Effect.die("unexpected Tailscale Serve update"),
+          setUpdateChannel: (channel) =>
+            setUpdateChannelError
+              ? Effect.fail(setUpdateChannelError)
+              : (options.beforeSetUpdateChannel ?? Effect.void).pipe(
+                  Effect.andThen(
+                    Effect.sync(() => {
+                      const changed = testSettings.updateChannel !== channel;
+                      testSettings = {
+                        ...testSettings,
+                        updateChannel: channel,
+                        updateChannelConfiguredByUser: true,
+                      };
+                      return { settings: testSettings, changed };
+                    }),
+                  ),
+                ),
+          setWslBackendEnabled: () => Effect.die("unexpected WSL backend toggle"),
+          setWslDistro: () => Effect.die("unexpected WSL distro change"),
+          setWslOnly: () => Effect.die("unexpected WSL-only toggle"),
+          applyWslWindowsFallback: Effect.die("unexpected WSL Windows fallback"),
+          applyWslWindowsFallbackInMemory: Effect.die("unexpected WSL Windows fallback"),
+        } satisfies DesktopAppSettings.DesktopAppSettings["Service"])
+      : DesktopAppSettings.layer;
 
   const layer = DesktopUpdates.layer.pipe(
     Layer.provideMerge(updaterLayer),
@@ -684,6 +704,38 @@ describe("DesktopUpdates", () => {
 
           yield* Deferred.succeed(releaseCheck, undefined);
           yield* Fiber.join(checkFiber);
+        }),
+      ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+    }),
+  );
+
+  it.effect("rejects checks while an update channel change is being persisted", () =>
+    Effect.gen(function* () {
+      const channelChangeStarted = yield* Deferred.make<void>();
+      const releaseChannelChange = yield* Deferred.make<void>();
+      const harness = makeHarness({
+        beforeSetUpdateChannel: Deferred.succeed(channelChangeStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseChannelChange)),
+        ),
+      });
+
+      yield* Effect.scoped(
+        Effect.gen(function* () {
+          const updates = yield* DesktopUpdates.DesktopUpdates;
+          yield* updates.configure;
+
+          const channelFiber = yield* updates.setChannel("nightly").pipe(Effect.forkScoped);
+          yield* Deferred.await(channelChangeStarted);
+
+          const checkResult = yield* updates.check("manual");
+          assert.isFalse(checkResult.checked);
+          assert.equal(harness.checkCount(), 0);
+
+          yield* Deferred.succeed(releaseChannelChange, undefined);
+          const state = yield* Fiber.join(channelFiber);
+
+          assert.equal(state.channel, "nightly");
+          assert.equal(harness.checkCount(), 1);
         }),
       ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
     }),

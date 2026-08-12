@@ -45,7 +45,7 @@ import {
 const AUTO_UPDATE_STARTUP_DELAY = "15 seconds";
 const AUTO_UPDATE_POLL_INTERVAL = "4 minutes";
 
-type UpdateAction = "check" | "download" | "install";
+type UpdateAction = "check" | "download" | "install" | "channel";
 
 const AppUpdateYmlConfig = Schema.Record(Schema.String, Schema.String);
 type AppUpdateYmlConfig = typeof AppUpdateYmlConfig.Type;
@@ -70,7 +70,7 @@ const currentIsoTimestamp = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 export class DesktopUpdateActionInProgressError extends Schema.TaggedErrorClass<DesktopUpdateActionInProgressError>()(
   "DesktopUpdateActionInProgressError",
   {
-    action: Schema.Literals(["check", "download", "install"]),
+    action: Schema.Literals(["check", "download", "install", "channel"]),
     requestedChannel: DesktopUpdateChannelSchema,
   },
 ) {
@@ -118,7 +118,7 @@ export class DesktopUpdateEventHandlingError extends Schema.TaggedErrorClass<Des
 export class DesktopUpdaterReportedError extends Schema.TaggedErrorClass<DesktopUpdaterReportedError>()(
   "DesktopUpdaterReportedError",
   {
-    operation: Schema.Literals(["check", "download", "install", "background"]),
+    operation: Schema.Literals(["check", "download", "install", "channel", "background"]),
     cause: Schema.Defect(),
   },
 ) {
@@ -320,6 +320,12 @@ export const make = Effect.gen(function* () {
       Option.isSome(activeAction) ? [false, activeAction] : [true, Option.some(action)],
     );
 
+  const tryStartChannelChange = Ref.modify(activeUpdateActionRef, (activeAction) =>
+    Option.isSome(activeAction)
+      ? [activeAction, activeAction]
+      : [Option.none<UpdateAction>(), Option.some<UpdateAction>("channel")],
+  );
+
   const finishUpdateAction = (action: UpdateAction): Effect.Effect<void> =>
     Ref.update(activeUpdateActionRef, (activeAction) =>
       Option.isSome(activeAction) && activeAction.value === action ? Option.none() : activeAction,
@@ -344,7 +350,10 @@ export const make = Effect.gen(function* () {
 
   const shouldEnableAutoUpdates = resolveDisabledReason.pipe(Effect.map(Option.isNone));
 
-  const checkForUpdates = Effect.fn("desktop.updates.checkForUpdates")(function* (reason: string) {
+  const checkForUpdates = Effect.fn("desktop.updates.checkForUpdates")(function* (
+    reason: string,
+    actionReservation: "acquire" | "held" = "acquire",
+  ) {
     yield* Effect.annotateCurrentSpan({ reason });
     if (yield* Ref.get(desktopState.quitting)) return false;
     if (!(yield* Ref.get(updaterConfiguredRef))) return false;
@@ -358,9 +367,9 @@ export const make = Effect.gen(function* () {
       return false;
     }
 
-    if (!(yield* tryStartUpdateAction("check"))) return false;
+    if (actionReservation === "acquire" && !(yield* tryStartUpdateAction("check"))) return false;
 
-    return yield* Effect.gen(function* () {
+    const check = Effect.gen(function* () {
       const checkedAt = yield* currentIsoTimestamp;
       yield* setState(reduceDesktopUpdateStateOnCheckStart(state, checkedAt));
       yield* logUpdaterInfo("checking for updates", { reason });
@@ -383,7 +392,11 @@ export const make = Effect.gen(function* () {
           }),
         }),
       );
-    }).pipe(Effect.ensuring(finishUpdateAction("check")));
+    });
+
+    return yield* actionReservation === "held"
+      ? check
+      : check.pipe(Effect.ensuring(finishUpdateAction("check")));
   });
 
   const downloadAvailableUpdate = Effect.gen(function* () {
@@ -778,7 +791,7 @@ export const make = Effect.gen(function* () {
       nextChannel: DesktopUpdateChannel,
     ) {
       yield* Effect.annotateCurrentSpan({ channel: nextChannel });
-      const activeAction = yield* activeUpdateAction;
+      const activeAction = yield* tryStartChannelChange;
       if (Option.isSome(activeAction)) {
         return yield* new DesktopUpdateActionInProgressError({
           action: activeAction.value,
@@ -786,33 +799,35 @@ export const make = Effect.gen(function* () {
         });
       }
 
-      const state = yield* Ref.get(updateStateRef);
-      if (nextChannel === state.channel) {
-        return state;
-      }
+      return yield* Effect.gen(function* () {
+        const state = yield* Ref.get(updateStateRef);
+        if (nextChannel === state.channel) {
+          return state;
+        }
 
-      yield* desktopSettings
-        .setUpdateChannel(nextChannel)
-        .pipe(
-          Effect.mapError(
-            (cause) => new DesktopUpdateChannelPersistenceError({ channel: nextChannel, cause }),
-          ),
+        yield* desktopSettings
+          .setUpdateChannel(nextChannel)
+          .pipe(
+            Effect.mapError(
+              (cause) => new DesktopUpdateChannelPersistenceError({ channel: nextChannel, cause }),
+            ),
+          );
+
+        const enabled = yield* shouldEnableAutoUpdates;
+        yield* setState(createBaseUpdateState(nextChannel, enabled, environment));
+
+        if (!enabled || !(yield* Ref.get(updaterConfiguredRef))) {
+          return yield* Ref.get(updateStateRef);
+        }
+
+        yield* applyAutoUpdaterChannel(nextChannel);
+        const allowDowngrade = yield* electronUpdater.allowDowngrade;
+        yield* electronUpdater.setAllowDowngrade(true);
+        yield* checkForUpdates("channel-change", "held").pipe(
+          Effect.ensuring(electronUpdater.setAllowDowngrade(allowDowngrade).pipe(Effect.ignore)),
         );
-
-      const enabled = yield* shouldEnableAutoUpdates;
-      yield* setState(createBaseUpdateState(nextChannel, enabled, environment));
-
-      if (!enabled || !(yield* Ref.get(updaterConfiguredRef))) {
         return yield* Ref.get(updateStateRef);
-      }
-
-      yield* applyAutoUpdaterChannel(nextChannel);
-      const allowDowngrade = yield* electronUpdater.allowDowngrade;
-      yield* electronUpdater.setAllowDowngrade(true);
-      yield* checkForUpdates("channel-change").pipe(
-        Effect.ensuring(electronUpdater.setAllowDowngrade(allowDowngrade).pipe(Effect.ignore)),
-      );
-      return yield* Ref.get(updateStateRef);
+      }).pipe(Effect.ensuring(finishUpdateAction("channel")));
     }),
     check: Effect.fn("desktop.updates.check")(function* (reason: string) {
       yield* Effect.annotateCurrentSpan({ reason });
