@@ -614,8 +614,19 @@ interface TerminalProcessTableSnapshot {
   readonly commandById: ReadonlyMap<number, string>;
 }
 
-function emptyProcessTableSnapshot(): TerminalProcessTableSnapshot {
-  return { childrenByParent: new Map(), commandById: new Map() };
+// A failed, timed-out, or truncated snapshot is not authoritative: treating it
+// as an empty table would mark every terminal idle and clear its registered
+// process ids. Fail instead so the poll tick is skipped and prior state kept.
+function snapshotFailure(
+  command: "powershell" | "ps",
+  result: ProcessRunner.ProcessRunOutput,
+): TerminalSubprocessCheckError {
+  return new TerminalSubprocessCheckError({
+    command,
+    cause: new Error(
+      `process table snapshot unusable (code ${result.code}, timedOut ${result.timedOut}, truncated ${result.stdoutTruncated})`,
+    ),
+  });
 }
 
 function parsePosixProcessTable(stdout: string): TerminalProcessTableSnapshot {
@@ -721,8 +732,8 @@ const posixProcessTableSnapshot = Effect.fn("terminal.posixProcessTableSnapshot"
           }),
       ),
     );
-  if (result.code !== 0) {
-    return emptyProcessTableSnapshot();
+  if (result.code !== 0 || result.timedOut || result.stdoutTruncated) {
+    return yield* snapshotFailure("ps", result);
   }
   return parsePosixProcessTable(result.stdout);
 });
@@ -757,8 +768,8 @@ const windowsProcessTableSnapshot = Effect.fn("terminal.windowsProcessTableSnaps
             }),
         ),
       );
-    if (result.code !== 0) {
-      return emptyProcessTableSnapshot();
+    if (result.code !== 0 || result.timedOut || result.stdoutTruncated) {
+      return yield* snapshotFailure("powershell", result);
     }
     return parseWindowsProcessTable(result.stdout);
   },

@@ -973,6 +973,8 @@ it.layer(
               timedOut: false,
               stdoutTruncated: false,
               stderrTruncated: false,
+              stdoutInvalidUtf8: false,
+              stderrInvalidUtf8: false,
             };
           }),
       };
@@ -1014,6 +1016,60 @@ it.layer(
       // Every spawn is the shared table snapshot — no per-terminal `pgrep`
       // or per-child `ps -p` invocations.
       expect(runCalls.every((call) => call.args.join(" ") === "-eo pid=,ppid=,comm=")).toBe(true);
+    }),
+  );
+
+  it.effect("keeps last known subprocess state when the process snapshot fails", () =>
+    Effect.gen(function* () {
+      let failSnapshots = false;
+      let failedCalls = 0;
+      const processRunner: ProcessRunner.ProcessRunner["Service"] = {
+        run: () =>
+          Effect.sync(() => {
+            if (failSnapshots) failedCalls += 1;
+            return {
+              stdout: failSnapshots ? "" : "  100  9000 vim",
+              stderr: "",
+              code: ChildProcessSpawner.ExitCode(failSnapshots ? 1 : 0),
+              timedOut: false,
+              stdoutTruncated: false,
+              stderrTruncated: false,
+              stdoutInvalidUtf8: false,
+              stderrInvalidUtf8: false,
+            };
+          }),
+      };
+
+      const { manager, getEvents } = yield* createManager(5, {
+        subprocessPollIntervalMs: 20,
+      }).pipe(
+        Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+        Effect.provide(withHostPlatform("linux")),
+      );
+
+      yield* manager.open(openInput());
+      yield* waitFor(
+        Effect.map(getEvents, (events) =>
+          events.some(
+            (event) =>
+              event.type === "activity" &&
+              event.hasRunningSubprocess === true &&
+              event.label === "vim",
+          ),
+        ),
+        "1200 millis",
+      );
+
+      failSnapshots = true;
+      yield* waitFor(
+        Effect.sync(() => failedCalls >= 3),
+        "1200 millis",
+      );
+
+      // A failed snapshot is not authoritative: no terminal flips to idle.
+      const activityEvents = (yield* getEvents).filter((event) => event.type === "activity");
+      expect(activityEvents.length).toBeGreaterThan(0);
+      expect(activityEvents.every((event) => event.hasRunningSubprocess === true)).toBe(true);
     }),
   );
 
