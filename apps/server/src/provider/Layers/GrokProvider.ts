@@ -41,15 +41,6 @@ const GROK_PRESENTATION = {
 const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
 });
-const LEGACY_GROK_REASONING_EFFORTS = ["xhigh", "high", "medium", "low"] as const;
-const FALLBACK_GROK_REASONING_LABELS: Readonly<Record<string, string>> = {
-  none: "None",
-  minimal: "Minimal",
-  low: "Low",
-  medium: "Medium",
-  high: "High",
-  xhigh: "Extra High",
-};
 
 const VERSION_PROBE_TIMEOUT_MS = 4_000;
 const GROK_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
@@ -117,10 +108,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function fallbackGrokReasoningLabel(value: string): string {
-  return FALLBACK_GROK_REASONING_LABELS[value] ?? value;
-}
-
 function grokReasoningOptionsFromModel(
   model: EffectAcpSchema.ModelInfo,
 ): ReadonlyArray<{ value: string; label: string; isDefault?: boolean }> {
@@ -130,9 +117,7 @@ function grokReasoningOptionsFromModel(
   }
 
   const defaultEffort = nonEmptyString(meta.reasoningEffort);
-  const advertisedOptions = Array.isArray(meta.reasoningEfforts)
-    ? meta.reasoningEfforts
-    : LEGACY_GROK_REASONING_EFFORTS;
+  const advertisedOptions = Array.isArray(meta.reasoningEfforts) ? meta.reasoningEfforts : [];
   const seen = new Set<string>();
   const options: Array<{ value: string; label: string; advertisedDefault: boolean }> = [];
 
@@ -144,9 +129,7 @@ function grokReasoningOptionsFromModel(
     seen.add(value);
     options.push({
       value,
-      label:
-        nonEmptyString(isRecord(entry) ? entry.label : undefined) ??
-        fallbackGrokReasoningLabel(value),
+      label: nonEmptyString(isRecord(entry) ? entry.label : undefined) ?? value,
       advertisedDefault: isRecord(entry) && entry.default === true,
     });
   }

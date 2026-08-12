@@ -47,7 +47,7 @@ describe("buildGrokModelCapabilities", () => {
     ]);
   });
 
-  it("does not append an Effort suffix when ACP omits option labels", () => {
+  it("uses raw ACP values when option labels are omitted", () => {
     const capabilities = buildGrokModelCapabilities({
       modelId: "grok-4.6",
       name: "Grok 4.6",
@@ -65,11 +65,21 @@ describe("buildGrokModelCapabilities", () => {
         type: "select",
         currentValue: "xhigh",
         options: [
-          { id: "xhigh", label: "Extra High", isDefault: true },
-          { id: "medium", label: "Medium" },
+          { id: "xhigh", label: "xhigh", isDefault: true },
+          { id: "medium", label: "medium" },
         ],
       },
     ]);
+  });
+
+  it("does not synthesize a reasoning menu when ACP omits it", () => {
+    expect(
+      buildGrokModelCapabilities({
+        modelId: "grok-4.6",
+        name: "Grok 4.6",
+        _meta: { supportsReasoningEffort: true, reasoningEffort: "xhigh" },
+      }).optionDescriptors,
+    ).toEqual([]);
   });
 
   it("keeps non-reasoning Grok models free of reasoning controls", () => {
