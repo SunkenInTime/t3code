@@ -81,6 +81,7 @@ import {
   type MarkdownFileLinkMeta,
 } from "../markdown-links";
 import { readLocalApi } from "../localApi";
+import { useAssetUrlState } from "../assets/assetUrls";
 import { cn } from "../lib/utils";
 import { useRightPanelStore } from "../rightPanelStore";
 import { useActiveEnvironmentId } from "../state/entities";
@@ -186,6 +187,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   protocols: {
     ...defaultSchema.protocols,
     href: [...(defaultSchema.protocols?.href ?? []), "file"],
+    src: [...(defaultSchema.protocols?.src ?? []), "file"],
   },
 } satisfies Parameters<typeof rehypeSanitize>[0];
 
@@ -950,6 +952,57 @@ const MarkdownLinkFavicon = memo(function MarkdownLinkFavicon({ host }: { host: 
   );
 });
 
+const CHAT_MARKDOWN_IMAGE_CLASS_NAME =
+  "my-1 block max-h-96 max-w-full rounded-lg border border-border/40 object-contain";
+
+/** A remote src the browser can fetch on its own — no workspace resolution needed. */
+const DIRECTLY_LOADABLE_IMAGE_SRC_PATTERN = /^(?:https?:|data:|blob:)/i;
+
+function ChatMarkdownImageFallback(props: { readonly alt: string }) {
+  return (
+    <span className="my-1 inline-flex items-center gap-1.5 rounded-md border border-border/40 bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
+      <TriangleAlertIcon aria-hidden className="size-3.5 shrink-0" />
+      {props.alt.length > 0 ? `Image unavailable · ${props.alt}` : "Image unavailable"}
+    </span>
+  );
+}
+
+/** Markdown images whose src is a workspace file path load through a signed asset URL. */
+const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(props: {
+  readonly threadRef: ScopedThreadRef;
+  readonly path: string;
+  readonly alt: string;
+}) {
+  const assetUrl = useAssetUrlState(props.threadRef.environmentId, {
+    _tag: "workspace-file",
+    threadId: props.threadRef.threadId,
+    path: props.path,
+  });
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+
+  if (assetUrl._tag === "Failure" || (assetUrl._tag === "Success" && failedUrl === assetUrl.url)) {
+    return <ChatMarkdownImageFallback alt={props.alt} />;
+  }
+  if (assetUrl._tag !== "Success") {
+    return (
+      <span
+        aria-label="Loading image"
+        className="my-1 block aspect-video w-full max-w-md animate-pulse rounded-lg bg-muted/60"
+      />
+    );
+  }
+  return (
+    <img
+      src={assetUrl.url}
+      alt={props.alt}
+      loading="lazy"
+      draggable={false}
+      className={CHAT_MARKDOWN_IMAGE_CLASS_NAME}
+      onError={() => setFailedUrl(assetUrl.url)}
+    />
+  );
+});
+
 function leadingExternalLinkTextLength(text: string): number {
   const protocol = /^(?:https?:\/\/)/i.exec(text)?.[0];
   if (protocol) return protocol.length;
@@ -1710,9 +1763,6 @@ function ChatMarkdown({
           props.className,
         );
       },
-      img({ node: _node, title: _title, ...props }) {
-        return <img {...props} />;
-      },
       code({ node, children, className, ...props }) {
         if (node?.properties?.dataInlineCode != null) {
           const codeText = nodeToPlainText(children);
@@ -1728,6 +1778,29 @@ function ChatMarkdown({
             {children}
           </code>
         );
+      },
+      img({ node: _node, title: _title, src, alt, ...props }) {
+        const srcString = typeof src === "string" ? normalizeMarkdownLinkDestination(src) : "";
+        const altText = alt ?? "";
+        if (srcString.length === 0) {
+          return <ChatMarkdownImageFallback alt={altText} />;
+        }
+        if (!DIRECTLY_LOADABLE_IMAGE_SRC_PATTERN.test(srcString)) {
+          // Agents reference screenshots they saved into the workspace by path
+          // (relative, absolute, or file://); those bytes only exist on the
+          // environment host, so they load through a signed asset URL.
+          const fileMeta = resolveMarkdownFileLinkMeta(srcString, cwd);
+          if (fileMeta && threadRef) {
+            return (
+              <ChatMarkdownWorkspaceImage
+                threadRef={threadRef}
+                path={fileMeta.filePath}
+                alt={altText}
+              />
+            );
+          }
+        }
+        return <img {...props} src={srcString} alt={altText} loading="lazy" />;
       },
       table({ node: _node, ...props }) {
         return <MarkdownTable {...props} />;
