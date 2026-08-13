@@ -1,11 +1,51 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  extractMarkdownLinkHrefs,
   resolveInlineCodeFileLinkMeta,
   resolveMarkdownFileLinkMeta,
   resolveMarkdownFileLinkTarget,
   rewriteMarkdownFileUriHref,
+  shouldOpenMarkdownFileLinkInEditor,
 } from "./markdown-links";
+
+describe("extractMarkdownLinkHrefs", () => {
+  it("extracts angle-bracketed paths containing spaces", () => {
+    expect(
+      extractMarkdownLinkHrefs(
+        "[Open the Bike Receipts folder](</Users/dara/Downloads/Lime Ride Artifacts/Bike Receipts>)",
+      ),
+    ).toEqual(["/Users/dara/Downloads/Lime Ride Artifacts/Bike Receipts"]);
+  });
+
+  it("preserves ordinary destinations and ignores link titles", () => {
+    expect(
+      extractMarkdownLinkHrefs(
+        '[source](apps/web/src/markdown-links.ts "implementation") and [docs](https://example.com)',
+      ),
+    ).toEqual(["apps/web/src/markdown-links.ts", "https://example.com"]);
+  });
+});
+
+describe("shouldOpenMarkdownFileLinkInEditor", () => {
+  it("uses command-click on macOS", () => {
+    expect(shouldOpenMarkdownFileLinkInEditor({ metaKey: true, ctrlKey: false }, "MacIntel")).toBe(
+      true,
+    );
+    expect(shouldOpenMarkdownFileLinkInEditor({ metaKey: false, ctrlKey: true }, "MacIntel")).toBe(
+      false,
+    );
+  });
+
+  it("uses control-click on other platforms", () => {
+    expect(
+      shouldOpenMarkdownFileLinkInEditor({ metaKey: false, ctrlKey: true }, "Linux x86_64"),
+    ).toBe(true);
+    expect(
+      shouldOpenMarkdownFileLinkInEditor({ metaKey: true, ctrlKey: false }, "Linux x86_64"),
+    ).toBe(false);
+  });
+});
 
 describe("rewriteMarkdownFileUriHref", () => {
   it("rewrites file uri hrefs into direct path hrefs", () => {
@@ -85,6 +125,19 @@ describe("resolveMarkdownFileLinkTarget", () => {
     ).toMatchObject({
       displayPath: "t3code/apps/web/src/session-logic.ts:501",
       workspaceRelativePath: "apps/web/src/session-logic.ts",
+    });
+  });
+
+  it("resolves the encoded spaces emitted by the markdown renderer", () => {
+    expect(
+      resolveMarkdownFileLinkMeta(
+        "/Users/dara/Downloads/Lime%20Ride%20Artifacts/Bike%20Receipts",
+        "/Users/dara/Downloads/Lime Ride Artifacts",
+      ),
+    ).toMatchObject({
+      targetPath: "/Users/dara/Downloads/Lime Ride Artifacts/Bike Receipts",
+      workspaceRelativePath: "Bike Receipts",
+      basename: "Bike Receipts",
     });
   });
 
