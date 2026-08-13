@@ -257,8 +257,29 @@ export function makeXAiExitPlanModeCapturedResponse(feedback?: string): XAiExitP
   };
 }
 
-function normalizeFilePath(path: string): string {
-  return path.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+function isWindowsStylePath(path: string): boolean {
+  return /^[a-zA-Z]:[\\/]/.test(path) || path.startsWith("\\\\");
+}
+
+function resolveAbsoluteFilePath(path: string, caseInsensitive: boolean): string | undefined {
+  const normalized = path.trim().replace(/\\/g, "/");
+  const drive = normalized.match(/^([a-zA-Z]:)\//)?.[1];
+  if (drive === undefined && !normalized.startsWith("/")) {
+    return undefined;
+  }
+  const segments: string[] = [];
+  for (const segment of normalized.slice(drive?.length ?? 0).split("/")) {
+    if (segment === "" || segment === ".") {
+      continue;
+    }
+    if (segment === "..") {
+      segments.pop();
+      continue;
+    }
+    segments.push(segment);
+  }
+  const resolved = `${drive ?? ""}/${segments.join("/")}`;
+  return caseInsensitive ? resolved.toLowerCase() : resolved;
 }
 
 /** Match only Grok's private session plan below the environment user's home directory. */
@@ -269,12 +290,17 @@ export function isGrokPlanMarkdownPath(
   if (typeof path !== "string") {
     return false;
   }
-  const normalized = normalizeFilePath(path);
-  const privateSessionRoot = `${normalizeFilePath(homeDirectory)}/.grok/sessions/`;
-  if (!normalized.startsWith(privateSessionRoot)) {
+  const caseInsensitive = isWindowsStylePath(path) || isWindowsStylePath(homeDirectory);
+  const resolvedHome = resolveAbsoluteFilePath(homeDirectory, caseInsensitive);
+  const resolvedPath = resolveAbsoluteFilePath(path, caseInsensitive);
+  if (resolvedHome === undefined || resolvedPath === undefined) {
     return false;
   }
-  const sessionPlanSegments = normalized.slice(privateSessionRoot.length).split("/");
+  const privateSessionRoot = `${resolvedHome.replace(/\/+$/, "")}/.grok/sessions/`;
+  if (!resolvedPath.startsWith(privateSessionRoot)) {
+    return false;
+  }
+  const sessionPlanSegments = resolvedPath.slice(privateSessionRoot.length).split("/");
   return (
     sessionPlanSegments.length === 2 &&
     sessionPlanSegments[0] !== "" &&
