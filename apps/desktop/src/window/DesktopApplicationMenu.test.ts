@@ -80,8 +80,6 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     handleBackendNotReady: Effect.void,
     flushMainWindowBounds: Effect.void,
     dispatchMenuAction: (action) => Deferred.succeed(selectedAction, action).pipe(Effect.asVoid),
-    zoomMain: (direction) =>
-      Deferred.succeed(selectedAction, `zoom-${direction}`).pipe(Effect.asVoid),
     syncAppearance: Effect.void,
   } satisfies DesktopWindow.DesktopWindow["Service"]);
 
@@ -146,10 +144,7 @@ describe("DesktopApplicationMenu", () => {
     }),
   );
 
-  // Zoom must route through DesktopWindow.zoomMain instead of the Electron
-  // zoom roles: the roles zoom whichever webContents has focus, which breaks
-  // app zoom while an embedded preview WebContentsView holds focus.
-  it.effect("routes View menu zoom to the main window instead of zoom roles", () =>
+  it.effect("uses focused-page zoom roles in the View menu", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();
       const applicationMenuTemplate =
@@ -164,19 +159,20 @@ describe("DesktopApplicationMenu", () => {
         throw new Error("Expected View menu submenu to be an array.");
       }
 
-      assert.isUndefined(
-        viewMenu.submenu.find((item) => item.role?.toLowerCase().includes("zoom")),
+      const resetZoom = viewMenu.submenu.find((item) => item.role === "resetZoom");
+      const zoomIn = viewMenu.submenu.find(
+        (item) => item.role === "zoomIn" && item.visible !== false,
       );
-
-      const zoomIn = viewMenu.submenu.find((item) => item.label === "Zoom In");
+      const alternateZoomIn = viewMenu.submenu.find(
+        (item) => item.role === "zoomIn" && item.visible === false,
+      );
+      const zoomOut = viewMenu.submenu.find((item) => item.role === "zoomOut");
+      assert.isDefined(resetZoom);
       assert.isDefined(zoomIn);
+      assert.isDefined(alternateZoomIn);
+      assert.isDefined(zoomOut);
       assert.equal(zoomIn.accelerator, "CmdOrCtrl+=");
-      if (typeof zoomIn.click !== "function") {
-        throw new Error("Expected Zoom In menu item to have a click handler.");
-      }
-
-      zoomIn.click({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
-      assert.equal(yield* Deferred.await(selectedAction), "zoom-in");
+      assert.equal(alternateZoomIn.accelerator, "CmdOrCtrl+Plus");
     }),
   );
 });
