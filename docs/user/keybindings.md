@@ -55,6 +55,9 @@ characters and uses SQLite's ASCII case-insensitive matching.
 The full command list and the current defaults are shown in **Settings** → **Keybindings**, which
 always matches the build you are running. Use that rather than a copied list.
 
+On desktop, app UI zoom and integrated-browser zoom are independent. New browser previews start at
+100%, and the preview's three-dot menu changes only that browser tab's zoom.
+
 Note that `chat.new` and `chat.newLocal` both create a thread through the same path. A new thread
 inherits the project you were in, along with model and mode selections. Branch, worktree, and
 environment mode always come from your configured defaults, not from the thread you were looking
