@@ -43,9 +43,9 @@ function parseWebPreferences(input: string): Record<string, unknown> {
 describe("PREVIEW_WEBVIEW_PREFERENCES", () => {
   const parsed = parseWebPreferences(PREVIEW_WEBVIEW_PREFERENCES);
 
-  it("contains only the required preview overrides", () => {
+  it("contains exactly the three security-critical keys", () => {
     expect(Object.keys(parsed).toSorted()).toEqual(
-      ["contextIsolation", "nodeIntegration", "sandbox", "zoomFactor"].toSorted(),
+      ["contextIsolation", "nodeIntegration", "sandbox"].toSorted(),
     );
   });
 
@@ -53,13 +53,9 @@ describe("PREVIEW_WEBVIEW_PREFERENCES", () => {
     // `value="no"` is a TRUTHY string when assigned to webPreferences.X — so
     // `contextIsolation="no"` would silently leave isolation ENABLED. Lock
     // the values to `"true"` / `"false"` so the parser does the right thing.
-    for (const key of ["contextIsolation", "nodeIntegration", "sandbox"]) {
-      expect(parsed[key]).toMatch(/^(true|false)$/);
+    for (const value of Object.values(parsed)) {
+      expect(value).toMatch(/^(true|false)$/);
     }
-  });
-
-  it("starts previews at 100% independently of the app zoom", () => {
-    expect(parsed["zoomFactor"]).toBe("1");
   });
 
   it("disables context isolation (so react-grab can see the page's React DevTools hook)", () => {

@@ -457,6 +457,9 @@ export const make = Effect.gen(function* () {
       webPreferences.nodeIntegration = false;
       webPreferences.nodeIntegrationInSubFrames = false;
       webPreferences.contextIsolation = false;
+      // Electron otherwise copies the app renderer's current zoom into each
+      // new guest, coupling preview zoom to the surrounding T3 UI.
+      webPreferences.zoomFactor = 1;
     });
 
     window.webContents.on("context-menu", (event, params) => {
