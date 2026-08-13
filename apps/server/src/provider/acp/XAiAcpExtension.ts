@@ -1,6 +1,7 @@
 import type { ProviderUserInputAnswers, UserInputQuestion } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Predicate from "effect/Predicate";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import type * as EffectAcpSchema from "effect-acp/schema";
@@ -194,6 +195,108 @@ export function makeXAiAskUserQuestionResponse(
 
 export function makeXAiAskUserQuestionCancelledResponse(): XAiAskUserQuestionCancelledResponse {
   return { outcome: "cancelled" };
+}
+
+const XAiExitPlanModeParams = Schema.Struct({
+  sessionId: Schema.String,
+  toolCallId: Schema.String,
+  planContent: Schema.optional(Schema.NullOr(Schema.String)),
+});
+
+const XAiWrappedExitPlanModeParams = Schema.Struct({
+  method: Schema.Literals(["x.ai/exit_plan_mode", "_x.ai/exit_plan_mode"]),
+  params: XAiExitPlanModeParams,
+});
+
+export const XAiExitPlanModeRequest = Schema.Union([
+  XAiExitPlanModeParams,
+  XAiWrappedExitPlanModeParams,
+]);
+
+type XAiExitPlanModeRequestParams = typeof XAiExitPlanModeParams.Type;
+type XAiExitPlanModeRequest = typeof XAiExitPlanModeRequest.Type;
+
+function unwrapExitPlanModeParams(params: XAiExitPlanModeRequest): XAiExitPlanModeRequestParams {
+  return "params" in params ? params.params : params;
+}
+
+export const XAI_EMPTY_PLAN_MARKDOWN =
+  "# No plan written yet\n\n(The agent exited plan mode without writing a plan.)";
+
+export function extractXAiExitPlanMarkdown(
+  params: XAiExitPlanModeRequest,
+  fallback?: string | null,
+): string {
+  const content = unwrapExitPlanModeParams(params).planContent;
+  const fromRequest = typeof content === "string" ? trimmed(content) : undefined;
+  if (fromRequest) {
+    return fromRequest;
+  }
+  return trimmed(fallback ?? undefined) ?? XAI_EMPTY_PLAN_MARKDOWN;
+}
+
+export type XAiExitPlanModeOutcome = "approved" | "abandoned" | "request_changes";
+
+export interface XAiExitPlanModeResponse {
+  readonly outcome: XAiExitPlanModeOutcome;
+  readonly feedback?: string;
+}
+
+/**
+ * T3 has captured the plan into its proposed-plan flow. Abandon Grok's native
+ * approval gate so this turn can finish without implicitly approving work.
+ */
+export function makeXAiExitPlanModeCapturedResponse(feedback?: string): XAiExitPlanModeResponse {
+  return {
+    outcome: "abandoned",
+    feedback:
+      feedback ??
+      "The client captured your proposed plan. Stop here and wait for the user's feedback or implementation request in a later turn.",
+  };
+}
+
+/** Match only Grok's private session plan, never a workspace plan.md file. */
+export function isGrokPlanMarkdownPath(path: string | undefined | null): boolean {
+  if (typeof path !== "string") {
+    return false;
+  }
+  const normalized = path.trim().replace(/\\/g, "/");
+  return normalized.endsWith("/plan.md") && normalized.includes("/.grok/sessions/");
+}
+
+/** Extract the latest plan body from Grok's ACP write/edit tool payload. */
+export function extractGrokPlanMarkdownFromToolCallData(
+  data: Record<string, unknown> | undefined,
+): string | undefined {
+  if (!data) {
+    return undefined;
+  }
+
+  const rawInput = data.rawInput;
+  if (Predicate.isObject(rawInput)) {
+    const filePath =
+      (typeof rawInput.file_path === "string" ? rawInput.file_path : undefined) ??
+      (typeof rawInput.path === "string" ? rawInput.path : undefined);
+    const content = typeof rawInput.content === "string" ? trimmed(rawInput.content) : undefined;
+    if (isGrokPlanMarkdownPath(filePath) && content) {
+      return content;
+    }
+  }
+
+  if (!Array.isArray(data.content)) {
+    return undefined;
+  }
+  for (const block of data.content) {
+    if (!Predicate.isObject(block) || block.type !== "diff") {
+      continue;
+    }
+    const path = typeof block.path === "string" ? block.path : undefined;
+    const newText = typeof block.newText === "string" ? trimmed(block.newText) : undefined;
+    if (isGrokPlanMarkdownPath(path) && newText) {
+      return newText;
+    }
+  }
+  return undefined;
 }
 
 /**

@@ -9,11 +9,17 @@ import * as Schema from "effect/Schema";
 import { describe, expect } from "vite-plus/test";
 
 import {
+  extractGrokPlanMarkdownFromToolCallData,
   extractXAiAskUserQuestions,
+  extractXAiExitPlanMarkdown,
+  isGrokPlanMarkdownPath,
   makeXAiAskUserQuestionCancelledResponse,
   makeXAiAskUserQuestionResponse,
+  makeXAiExitPlanModeCapturedResponse,
   makeXAiPromptCompletionRuntime,
+  XAI_EMPTY_PLAN_MARKDOWN,
   XAiAskUserQuestionRequest,
+  XAiExitPlanModeRequest,
 } from "./XAiAcpExtension.ts";
 import * as AcpSessionRuntime from "./AcpSessionRuntime.ts";
 
@@ -329,4 +335,66 @@ describe("XAiAcpExtension", () => {
       });
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
   );
+
+  it("extracts plan markdown from direct and wrapped exit_plan_mode payloads", () => {
+    const decode = Schema.decodeUnknownSync(XAiExitPlanModeRequest);
+    const direct = decode({
+      sessionId: "session-1",
+      toolCallId: "exit-1",
+      planContent: "# Plan\n\n- do the thing\n",
+    });
+    expect(extractXAiExitPlanMarkdown(direct)).toBe("# Plan\n\n- do the thing");
+
+    const wrapped = decode({
+      method: "_x.ai/exit_plan_mode",
+      params: {
+        sessionId: "session-1",
+        toolCallId: "exit-1",
+        planContent: null,
+      },
+    });
+    expect(extractXAiExitPlanMarkdown(wrapped, "  # fallback plan  ")).toBe("# fallback plan");
+    expect(extractXAiExitPlanMarkdown(wrapped)).toBe(XAI_EMPTY_PLAN_MARKDOWN);
+  });
+
+  it("builds a non-approving exit_plan_mode response", () => {
+    expect(makeXAiExitPlanModeCapturedResponse()).toEqual({
+      outcome: "abandoned",
+      feedback:
+        "The client captured your proposed plan. Stop here and wait for the user's feedback or implementation request in a later turn.",
+    });
+  });
+
+  it("extracts Grok session plan writes without matching workspace plan files", () => {
+    expect(isGrokPlanMarkdownPath("/home/x/.grok/sessions/abc/plan.md")).toBe(true);
+    expect(isGrokPlanMarkdownPath("C:\\Users\\x\\.grok\\sessions\\abc\\plan.md")).toBe(true);
+    expect(isGrokPlanMarkdownPath("plan.md")).toBe(false);
+    expect(isGrokPlanMarkdownPath("/repo/docs/plan.md")).toBe(false);
+
+    expect(
+      extractGrokPlanMarkdownFromToolCallData({
+        rawInput: {
+          file_path: "/home/x/.grok/sessions/sess/plan.md",
+          content: "# From rawInput\n\n- a\n",
+        },
+      }),
+    ).toBe("# From rawInput\n\n- a");
+    expect(
+      extractGrokPlanMarkdownFromToolCallData({
+        content: [
+          {
+            type: "diff",
+            path: "/home/x/.grok/sessions/sess/plan.md",
+            oldText: "",
+            newText: "# From diff\n\n- b\n",
+          },
+        ],
+      }),
+    ).toBe("# From diff\n\n- b");
+    expect(
+      extractGrokPlanMarkdownFromToolCallData({
+        rawInput: { file_path: "/repo/docs/plan.md", content: "# Project plan\n" },
+      }),
+    ).toBeUndefined();
+  });
 });
