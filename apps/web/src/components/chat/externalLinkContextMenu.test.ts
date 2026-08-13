@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vite-plus/test";
 
-import { resolveExternalWebLinkHost, showExternalLinkContextMenu } from "./externalLinkContextMenu";
+import {
+  resolveExternalWebLinkHost,
+  shouldOpenExternalLinkInPreview,
+  showExternalLinkContextMenu,
+} from "./externalLinkContextMenu";
 
 function createHarness(selection: "open-in-preview" | "open-external" | "copy-link" | null) {
   const showContextMenu = vi.fn().mockResolvedValue(selection);
@@ -143,5 +147,40 @@ describe("external chat link context menu", () => {
     [undefined, null],
   ])("resolves the external web-link host for %s as %s", (href, expected) => {
     expect(resolveExternalWebLinkHost(href)).toBe(expected);
+  });
+});
+
+describe("preferred external link destination", () => {
+  const plainClick = { altKey: false, ctrlKey: false, metaKey: false, shiftKey: false };
+
+  it("uses the integrated browser only for an available, unmodified preferred click", () => {
+    expect(
+      shouldOpenExternalLinkInPreview({
+        mode: "integrated",
+        canOpenInPreview: true,
+        event: plainClick,
+      }),
+    ).toBe(true);
+    expect(
+      shouldOpenExternalLinkInPreview({
+        mode: "external",
+        canOpenInPreview: true,
+        event: plainClick,
+      }),
+    ).toBe(false);
+    expect(
+      shouldOpenExternalLinkInPreview({
+        mode: "integrated",
+        canOpenInPreview: false,
+        event: plainClick,
+      }),
+    ).toBe(false);
+    expect(
+      shouldOpenExternalLinkInPreview({
+        mode: "integrated",
+        canOpenInPreview: true,
+        event: { ...plainClick, metaKey: true },
+      }),
+    ).toBe(false);
   });
 });
