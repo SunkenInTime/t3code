@@ -956,7 +956,7 @@ const CHAT_MARKDOWN_IMAGE_CLASS_NAME =
   "my-1 block max-h-96 max-w-full rounded-lg border border-border/40 object-contain";
 
 /** A remote src the browser can fetch on its own — no workspace resolution needed. */
-const DIRECTLY_LOADABLE_IMAGE_SRC_PATTERN = /^(?:https?:|data:|blob:)/i;
+const DIRECTLY_LOADABLE_IMAGE_SRC_PATTERN = /^(?:https?:|data:|blob:|\/\/)/i;
 
 function ChatMarkdownImageFallback(props: { readonly alt: string }) {
   return (
