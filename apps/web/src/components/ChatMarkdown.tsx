@@ -1604,7 +1604,6 @@ function ChatMarkdown({
                         { operation: "open-link-in-preview", target: href },
                         cause,
                       );
-                      openInSystemBrowser();
                     },
                   );
                 }
