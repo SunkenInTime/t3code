@@ -156,6 +156,7 @@ describe("preferred external link destination", () => {
   it("uses the integrated browser only for an available, unmodified preferred click", () => {
     expect(
       shouldOpenExternalLinkInPreview({
+        href: "https://example.com/docs",
         mode: "integrated",
         canOpenInPreview: true,
         event: plainClick,
@@ -163,6 +164,7 @@ describe("preferred external link destination", () => {
     ).toBe(true);
     expect(
       shouldOpenExternalLinkInPreview({
+        href: "https://example.com/docs",
         mode: "external",
         canOpenInPreview: true,
         event: plainClick,
@@ -170,6 +172,7 @@ describe("preferred external link destination", () => {
     ).toBe(false);
     expect(
       shouldOpenExternalLinkInPreview({
+        href: "https://example.com/docs",
         mode: "integrated",
         canOpenInPreview: false,
         event: plainClick,
@@ -177,9 +180,18 @@ describe("preferred external link destination", () => {
     ).toBe(false);
     expect(
       shouldOpenExternalLinkInPreview({
+        href: "https://example.com/docs",
         mode: "integrated",
         canOpenInPreview: true,
         event: { ...plainClick, metaKey: true },
+      }),
+    ).toBe(false);
+    expect(
+      shouldOpenExternalLinkInPreview({
+        href: "mailto:hello@example.com",
+        mode: "integrated",
+        canOpenInPreview: true,
+        event: plainClick,
       }),
     ).toBe(false);
   });

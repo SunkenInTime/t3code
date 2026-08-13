@@ -64,6 +64,7 @@ export function resolveExternalWebLinkHost(href: string | undefined): string | n
 }
 
 export function shouldOpenExternalLinkInPreview(options: {
+  readonly href: string;
   readonly mode: ExternalLinkOpenMode;
   readonly canOpenInPreview: boolean;
   readonly event: {
@@ -73,10 +74,11 @@ export function shouldOpenExternalLinkInPreview(options: {
     readonly shiftKey: boolean;
   };
 }): boolean {
-  const { mode, canOpenInPreview, event } = options;
+  const { href, mode, canOpenInPreview, event } = options;
   return (
     mode === "integrated" &&
     canOpenInPreview &&
+    resolveExternalWebLinkHost(href) !== null &&
     !event.altKey &&
     !event.ctrlKey &&
     !event.metaKey &&

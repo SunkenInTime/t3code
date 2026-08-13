@@ -1571,6 +1571,7 @@ function ChatMarkdown({
                 if (!href || openChangeRequestLink(event, href)) return;
                 if (
                   shouldOpenExternalLinkInPreview({
+                    href,
                     mode: getClientSettings().externalLinkOpenMode,
                     canOpenInPreview,
                     event,
