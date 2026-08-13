@@ -1579,6 +1579,16 @@ function ChatMarkdown({
                 ) {
                   event.preventDefault();
                   event.stopPropagation();
+                  const openInSystemBrowser = () => {
+                    void readLocalApi()
+                      ?.shell.openExternal(href)
+                      .catch((cause) => {
+                        reportMarkdownActionFailure(
+                          { operation: "open-link-external", target: href },
+                          cause,
+                        );
+                      });
+                  };
                   void openExternalLinkInPreview(href).then(
                     (result) => {
                       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
@@ -1586,6 +1596,7 @@ function ChatMarkdown({
                           { operation: "open-link-in-preview", target: href },
                           result.cause,
                         );
+                        openInSystemBrowser();
                       }
                     },
                     (cause) => {
@@ -1593,6 +1604,7 @@ function ChatMarkdown({
                         { operation: "open-link-in-preview", target: href },
                         cause,
                       );
+                      openInSystemBrowser();
                     },
                   );
                 }
