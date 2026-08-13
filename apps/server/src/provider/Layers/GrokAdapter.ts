@@ -59,6 +59,7 @@ import {
   currentGrokModelIdFromSessionSetup,
   currentGrokReasoningEffortFromSessionSetup,
   makeGrokAcpRuntime,
+  normalizeGrokReasoningEffort,
   resolveGrokAcpBaseModelId,
 } from "../acp/GrokAcpSupport.ts";
 import {
@@ -751,8 +752,6 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             grokModelSelection,
             "reasoningEffort",
           );
-          const startModelChanged =
-            requestedStartModelId !== undefined && requestedStartModelId !== currentStartModelId;
           const boundModelId = yield* applyGrokAcpModelSelection({
             runtime: acp,
             currentModelId: currentStartModelId,
@@ -796,8 +795,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             promptsInFlight: 0,
             currentModelId: boundModelId,
             currentReasoningEffort:
-              requestedStartReasoningEffort ??
-              (startModelChanged ? undefined : currentStartReasoningEffort),
+              requestedStartModelId !== undefined
+                ? normalizeGrokReasoningEffort(requestedStartReasoningEffort)
+                : currentStartReasoningEffort,
             stopped: false,
           };
 
@@ -966,9 +966,6 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 turnModelSelection,
                 "reasoningEffort",
               );
-              const modelChanged =
-                requestedTurnModelId !== undefined && requestedTurnModelId !== ctx.currentModelId;
-
               const text = input.input?.trim();
               const imagePromptParts = yield* Effect.forEach(
                 input.attachments ?? [],
@@ -1026,10 +1023,10 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   mapAcpToAdapterError(PROVIDER, input.threadId, "session/set_model", cause),
               });
               ctx.currentModelId = currentModelId;
-              if (requestedTurnReasoningEffort !== undefined) {
-                ctx.currentReasoningEffort = requestedTurnReasoningEffort;
-              } else if (modelChanged) {
-                ctx.currentReasoningEffort = undefined;
+              if (requestedTurnModelId !== undefined) {
+                ctx.currentReasoningEffort = normalizeGrokReasoningEffort(
+                  requestedTurnReasoningEffort,
+                );
               }
               const displayModel = currentModelId
                 ? resolveGrokAcpBaseModelId(currentModelId)

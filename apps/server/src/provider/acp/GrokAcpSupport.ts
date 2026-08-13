@@ -82,6 +82,17 @@ export function resolveGrokAcpBaseModelId(model: string | null | undefined): str
   return normalizeModelSlug(base, GROK_DRIVER_KIND) ?? "grok-build";
 }
 
+const GROK_REASONING_EFFORT_TOKEN = /^[a-z0-9][a-z0-9._-]{0,31}$/i;
+
+export function isValidGrokReasoningEffortToken(value: string): boolean {
+  return GROK_REASONING_EFFORT_TOKEN.test(value);
+}
+
+export function normalizeGrokReasoningEffort(value: string | undefined): string | undefined {
+  const effort = value?.trim();
+  return effort && isValidGrokReasoningEffortToken(effort) ? effort : undefined;
+}
+
 export function currentGrokModelIdFromSessionSetup(
   sessionSetupResult:
     | EffectAcpSchema.LoadSessionResponse
@@ -109,7 +120,9 @@ export function currentGrokReasoningEffortFromSessionSetup(
     (model) => model.modelId.trim() === currentModelId,
   );
   const reasoningEffort = currentModel?._meta?.reasoningEffort;
-  return typeof reasoningEffort === "string" ? reasoningEffort.trim() || undefined : undefined;
+  return typeof reasoningEffort === "string"
+    ? normalizeGrokReasoningEffort(reasoningEffort)
+    : undefined;
 }
 
 export function applyGrokAcpModelSelection<E>(input: {
@@ -122,9 +135,9 @@ export function applyGrokAcpModelSelection<E>(input: {
 }): Effect.Effect<string | undefined, E> {
   const modelChanged =
     input.requestedModelId !== undefined && input.requestedModelId !== input.currentModelId;
-  const reasoningEffort = input.requestedReasoningEffort?.trim() || undefined;
+  const reasoningEffort = normalizeGrokReasoningEffort(input.requestedReasoningEffort);
   const reasoningEffortChanged =
-    reasoningEffort !== undefined && reasoningEffort !== input.currentReasoningEffort;
+    input.requestedModelId !== undefined && reasoningEffort !== input.currentReasoningEffort;
   const targetModelId = input.requestedModelId ?? input.currentModelId;
   if ((!modelChanged && !reasoningEffortChanged) || targetModelId === undefined) {
     return Effect.succeed(input.currentModelId);

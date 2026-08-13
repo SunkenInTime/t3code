@@ -18,7 +18,6 @@ import { createModelCapabilities } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
 import {
-  buildSelectOptionDescriptor,
   buildServerProvider,
   isCommandMissingCause,
   parseGenericCliVersion,
@@ -30,7 +29,11 @@ import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
 } from "../providerMaintenance.ts";
-import { makeGrokAcpRuntime, resolveGrokAcpBaseModelId } from "../acp/GrokAcpSupport.ts";
+import {
+  isValidGrokReasoningEffortToken,
+  makeGrokAcpRuntime,
+  resolveGrokAcpBaseModelId,
+} from "../acp/GrokAcpSupport.ts";
 
 const GROK_PRESENTATION = {
   displayName: "Grok",
@@ -108,51 +111,91 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function grokReasoningOptionsFromModel(
-  model: EffectAcpSchema.ModelInfo,
-): ReadonlyArray<{ value: string; label: string; isDefault?: boolean }> {
+function grokReasoningOptionsFromModel(model: EffectAcpSchema.ModelInfo): {
+  readonly options: ReadonlyArray<{
+    value: string;
+    label: string;
+    description?: string;
+    isDefault?: boolean;
+  }>;
+  readonly currentValue: string | undefined;
+} {
   const meta = model._meta;
-  if (!meta || meta.supportsReasoningEffort !== true) {
-    return [];
+  if (!meta || meta.supportsReasoningEffort === false) {
+    return { options: [], currentValue: undefined };
   }
 
-  const defaultEffort = nonEmptyString(meta.reasoningEffort);
+  const currentEffort = nonEmptyString(meta.reasoningEffort);
   const advertisedOptions = Array.isArray(meta.reasoningEfforts) ? meta.reasoningEfforts : [];
   const seen = new Set<string>();
-  const options: Array<{ value: string; label: string; advertisedDefault: boolean }> = [];
+  const options: Array<{
+    value: string;
+    label: string;
+    description?: string;
+    advertisedDefault: boolean;
+  }> = [];
 
   for (const entry of advertisedOptions) {
-    const value = nonEmptyString(isRecord(entry) ? (entry.value ?? entry.id) : entry);
-    if (!value || seen.has(value)) {
+    if (!isRecord(entry)) {
+      continue;
+    }
+    const rawValue = nonEmptyString(entry.value);
+    const rawId = nonEmptyString(entry.id);
+    const value =
+      rawValue && isValidGrokReasoningEffortToken(rawValue)
+        ? rawValue
+        : rawId && isValidGrokReasoningEffortToken(rawId)
+          ? rawId
+          : undefined;
+    if (value === undefined || seen.has(value)) {
       continue;
     }
     seen.add(value);
+    const description = nonEmptyString(entry.description);
     options.push({
       value,
-      label: nonEmptyString(isRecord(entry) ? entry.label : undefined) ?? value,
-      advertisedDefault: isRecord(entry) && entry.default === true,
+      label: nonEmptyString(entry.label) ?? value,
+      ...(description ? { description } : {}),
+      advertisedDefault: entry.default === true || entry.isDefault === true,
     });
   }
 
+  const currentValue =
+    currentEffort && options.some((option) => option.value === currentEffort)
+      ? currentEffort
+      : undefined;
+  const advertisedDefaults = options.filter((option) => option.advertisedDefault);
   const selectedDefault =
-    (defaultEffort && options.some((option) => option.value === defaultEffort)
-      ? defaultEffort
-      : undefined) ?? options.find((option) => option.advertisedDefault)?.value;
-  return options.map(({ value, label }) =>
-    value === selectedDefault ? { value, label, isDefault: true } : { value, label },
-  );
+    advertisedDefaults.find((option) => option.value === currentValue)?.value ??
+    advertisedDefaults[0]?.value;
+  return {
+    options: options.map(({ value, label, description }) => ({
+      value,
+      label,
+      ...(description ? { description } : {}),
+      ...(value === selectedDefault ? { isDefault: true } : {}),
+    })),
+    currentValue: currentValue ?? selectedDefault,
+  };
 }
 
 export function buildGrokModelCapabilities(model: EffectAcpSchema.ModelInfo): ModelCapabilities {
-  const reasoningOptions = grokReasoningOptionsFromModel(model);
-  return reasoningOptions.length > 0
+  const reasoning = grokReasoningOptionsFromModel(model);
+  return reasoning.options.length > 0
     ? createModelCapabilities({
         optionDescriptors: [
-          buildSelectOptionDescriptor({
+          {
             id: "reasoningEffort",
             label: "Reasoning",
-            options: reasoningOptions,
-          }),
+            type: "select",
+            options: reasoning.options.map((option) => ({
+              id: option.value,
+              label: option.label,
+              ...(option.description ? { description: option.description } : {}),
+              ...(option.isDefault ? { isDefault: true } : {}),
+            })),
+            ...(reasoning.currentValue ? { currentValue: reasoning.currentValue } : {}),
+          },
         ],
       })
     : EMPTY_CAPABILITIES;

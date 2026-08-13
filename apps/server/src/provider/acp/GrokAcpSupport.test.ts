@@ -5,6 +5,7 @@ import * as EffectAcpErrors from "effect-acp/errors";
 import {
   applyGrokAcpModelSelection,
   buildGrokAcpSpawnInput,
+  isValidGrokReasoningEffortToken,
   resolveGrokAcpBaseModelId,
 } from "./GrokAcpSupport.ts";
 
@@ -32,6 +33,16 @@ describe("buildGrokAcpSpawnInput", () => {
         GROK_OAUTH2_REFERRER: "t3code",
       },
     });
+  });
+});
+
+describe("isValidGrokReasoningEffortToken", () => {
+  it("accepts future ACP tokens and rejects malformed metadata values", () => {
+    expect(isValidGrokReasoningEffortToken("xhigh")).toBe(true);
+    expect(isValidGrokReasoningEffortToken("turbo_v2")).toBe(true);
+    expect(isValidGrokReasoningEffortToken("not a token")).toBe(false);
+    expect(isValidGrokReasoningEffortToken("-leading-dash")).toBe(false);
+    expect(isValidGrokReasoningEffortToken("x".repeat(33))).toBe(false);
   });
 });
 
@@ -79,6 +90,37 @@ describe("applyGrokAcpModelSelection", () => {
       });
       expect(modelCalls).toEqual([{ modelId: "grok-4.6", meta: { reasoningEffort: "xhigh" } }]);
       expect(result).toBe("grok-4.6");
+    }),
+  );
+
+  it.effect("clears reasoning metadata when an explicit same-model selection omits effort", () =>
+    Effect.gen(function* () {
+      const { runtime, modelCalls } = makeRecordingRuntime();
+      const result = yield* applyGrokAcpModelSelection({
+        runtime,
+        currentModelId: "grok-4.6",
+        currentReasoningEffort: "high",
+        requestedModelId: "grok-4.6",
+        requestedReasoningEffort: undefined,
+        mapError: (cause) => cause.message,
+      });
+      expect(modelCalls).toEqual([{ modelId: "grok-4.6" }]);
+      expect(result).toBe("grok-4.6");
+    }),
+  );
+
+  it.effect("drops malformed effort metadata instead of sending it", () =>
+    Effect.gen(function* () {
+      const { runtime, modelCalls } = makeRecordingRuntime();
+      yield* applyGrokAcpModelSelection({
+        runtime,
+        currentModelId: "grok-4.6",
+        currentReasoningEffort: "high",
+        requestedModelId: "grok-4.6",
+        requestedReasoningEffort: "not a token",
+        mapError: (cause) => cause.message,
+      });
+      expect(modelCalls).toEqual([{ modelId: "grok-4.6" }]);
     }),
   );
 

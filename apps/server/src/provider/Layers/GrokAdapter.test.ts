@@ -237,6 +237,60 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
     }),
   );
 
+  it.effect("clears and reapplies reasoning effort on the same model", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-same-model-effort-clear");
+      const tempDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "grok-same-model-effort-clear-")),
+      );
+      const requestLogPath = NodePath.join(tempDir, "requests.ndjson");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ T3_ACP_REQUEST_LOG_PATH: requestLogPath }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const selection = (effort?: string) => ({
+        instanceId: ProviderInstanceId.make("grok"),
+        model: "grok-build",
+        ...(effort ? { options: [{ id: "reasoningEffort", value: effort }] } : {}),
+      });
+
+      yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access",
+        modelSelection: selection(),
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "use high effort",
+        attachments: [],
+        modelSelection: selection("high"),
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "use the model default",
+        attachments: [],
+        modelSelection: selection(),
+      });
+      yield* adapter.sendTurn({
+        threadId,
+        input: "use high effort again",
+        attachments: [],
+        modelSelection: selection("high"),
+      });
+
+      const requests = yield* Effect.promise(() => readJsonLines(requestLogPath));
+      const setModelRequests = requests.filter((entry) => entry.method === "session/set_model");
+      assert.lengthOf(setModelRequests, 3);
+      assert.nestedPropertyVal(setModelRequests[0], "params._meta.reasoningEffort", "high");
+      assert.notNestedProperty(setModelRequests[1], "params._meta");
+      assert.nestedPropertyVal(setModelRequests[2], "params._meta.reasoningEffort", "high");
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("closes the ACP child process when a session stops", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-stop-session-close");
