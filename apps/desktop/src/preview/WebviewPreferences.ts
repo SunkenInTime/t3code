@@ -21,6 +21,7 @@
  *   the preload's `import { ipcRenderer }` line, but no Node globals leak.
  * - `nodeIntegration=false`: pinned for clarity (the page itself never gets
  *   Node access).
+ *
  * Format notes (locked down by `WebviewPreferences.test.ts`):
  * - Whitespace-free. Electron's webpreferences parser splits on `,` and
  *   does not trim, so a leading space would turn a key into an unknown one
