@@ -366,35 +366,70 @@ describe("XAiAcpExtension", () => {
   });
 
   it("extracts Grok session plan writes without matching workspace plan files", () => {
-    expect(isGrokPlanMarkdownPath("/home/x/.grok/sessions/abc/plan.md")).toBe(true);
-    expect(isGrokPlanMarkdownPath("C:\\Users\\x\\.grok\\sessions\\abc\\plan.md")).toBe(true);
-    expect(isGrokPlanMarkdownPath("plan.md")).toBe(false);
-    expect(isGrokPlanMarkdownPath("/repo/docs/plan.md")).toBe(false);
+    expect(isGrokPlanMarkdownPath("/home/x/.grok/sessions/abc/plan.md", "/home/x")).toBe(true);
+    expect(
+      isGrokPlanMarkdownPath("C:\\Users\\x\\.grok\\sessions\\abc\\plan.md", "C:\\Users\\x"),
+    ).toBe(true);
+    expect(isGrokPlanMarkdownPath("plan.md", "/home/x")).toBe(false);
+    expect(isGrokPlanMarkdownPath("/repo/docs/plan.md", "/home/x")).toBe(false);
+    expect(isGrokPlanMarkdownPath("/repo/.grok/sessions/abc/plan.md", "/home/x")).toBe(false);
 
     expect(
-      extractGrokPlanMarkdownFromToolCallData({
-        rawInput: {
-          file_path: "/home/x/.grok/sessions/sess/plan.md",
-          content: "# From rawInput\n\n- a\n",
+      extractGrokPlanMarkdownFromToolCallData(
+        {
+          rawInput: {
+            file_path: "/home/x/.grok/sessions/sess/plan.md",
+            content: "# From rawInput\n\n- a\n",
+          },
         },
-      }),
+        "/home/x",
+      ),
     ).toBe("# From rawInput\n\n- a");
     expect(
-      extractGrokPlanMarkdownFromToolCallData({
-        content: [
-          {
-            type: "diff",
-            path: "/home/x/.grok/sessions/sess/plan.md",
-            oldText: "",
-            newText: "# From diff\n\n- b\n",
-          },
-        ],
-      }),
+      extractGrokPlanMarkdownFromToolCallData(
+        {
+          content: [
+            {
+              type: "diff",
+              path: "/home/x/.grok/sessions/sess/plan.md",
+              oldText: "",
+              newText: "# From diff\n\n- b\n",
+            },
+          ],
+        },
+        "/home/x",
+      ),
     ).toBe("# From diff\n\n- b");
     expect(
-      extractGrokPlanMarkdownFromToolCallData({
-        rawInput: { file_path: "/repo/docs/plan.md", content: "# Project plan\n" },
-      }),
+      extractGrokPlanMarkdownFromToolCallData(
+        {
+          rawInput: { file_path: "/repo/docs/plan.md", content: "# Project plan\n" },
+        },
+        "/home/x",
+      ),
     ).toBeUndefined();
+    expect(
+      extractGrokPlanMarkdownFromToolCallData(
+        {
+          rawInput: { file_path: "/home/x/.grok/sessions/sess/plan.md", content: "  " },
+        },
+        "/home/x",
+      ),
+    ).toBe(XAI_EMPTY_PLAN_MARKDOWN);
+    expect(
+      extractGrokPlanMarkdownFromToolCallData(
+        {
+          content: [
+            {
+              type: "diff",
+              path: "/home/x/.grok/sessions/sess/plan.md",
+              oldText: "# stale plan",
+              newText: "",
+            },
+          ],
+        },
+        "/home/x",
+      ),
+    ).toBe(XAI_EMPTY_PLAN_MARKDOWN);
   });
 });

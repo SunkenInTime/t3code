@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
+import * as NodeOS from "node:os";
 
 import * as Effect from "effect/Effect";
 
@@ -815,7 +816,7 @@ const program = Effect.gen(function* () {
       }
 
       if (emitXAiPlanMdWrite) {
-        const planPath = `/tmp/mock-home/.grok/sessions/${requestedSessionId}/plan.md`;
+        const planPath = `${NodeOS.homedir().replace(/\\/g, "/")}/.grok/sessions/${requestedSessionId}/plan.md`;
         const planBody = "# Mock plan\n\n- Write the feature\n- Add a test\n- Ship it\n";
         yield* agent.client.sessionUpdate({
           sessionId: requestedSessionId,
@@ -862,25 +863,42 @@ const program = Effect.gen(function* () {
       }
 
       if (emitXAiExitPlanMode) {
-        const result = yield* agent.client.extRequest("_x.ai/exit_plan_mode", {
-          method: "x.ai/exit_plan_mode",
-          params: {
+        const planCycles = [
+          { id: "1", planContent: "# Exit plan\n\n- Step one\n- Step two\n" },
+          { id: "2", planContent: null },
+        ] as const;
+        for (const cycle of planCycles) {
+          yield* agent.client.sessionUpdate({
             sessionId: requestedSessionId,
-            toolCallId: "exit-plan-mode-tool-call-1",
-            planContent: "# Exit plan\n\n- Step one\n- Step two\n",
-          },
-        });
-        if (typeof result !== "object" || result === null || !("outcome" in result)) {
-          throw new Error("Expected _x.ai/exit_plan_mode response outcome.");
-        }
-        if (
-          result.outcome !== "abandoned" &&
-          result.outcome !== "approved" &&
-          result.outcome !== "request_changes"
-        ) {
-          throw new Error(
-            `Expected exit_plan_mode outcome abandoned|approved|request_changes, got ${String(result.outcome)}`,
-          );
+            update: {
+              sessionUpdate: "tool_call",
+              toolCallId: `enter-plan-mode-${cycle.id}`,
+              title: "enter_plan_mode",
+              kind: "other",
+              status: "completed",
+              rawInput: { variant: "EnterPlanMode" },
+            },
+          });
+          const result = yield* agent.client.extRequest("_x.ai/exit_plan_mode", {
+            method: "x.ai/exit_plan_mode",
+            params: {
+              sessionId: requestedSessionId,
+              toolCallId: `exit-plan-mode-tool-call-${cycle.id}`,
+              planContent: cycle.planContent,
+            },
+          });
+          if (typeof result !== "object" || result === null || !("outcome" in result)) {
+            throw new Error("Expected _x.ai/exit_plan_mode response outcome.");
+          }
+          if (
+            result.outcome !== "abandoned" &&
+            result.outcome !== "approved" &&
+            result.outcome !== "request_changes"
+          ) {
+            throw new Error(
+              `Expected exit_plan_mode outcome abandoned|approved|request_changes, got ${String(result.outcome)}`,
+            );
+          }
         }
         return { stopReason: "end_turn" };
       }

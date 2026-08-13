@@ -1,3 +1,5 @@
+import * as NodeOS from "node:os";
+
 import type { ProviderUserInputAnswers, UserInputQuestion } from "@t3tools/contracts";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -255,18 +257,35 @@ export function makeXAiExitPlanModeCapturedResponse(feedback?: string): XAiExitP
   };
 }
 
-/** Match only Grok's private session plan, never a workspace plan.md file. */
-export function isGrokPlanMarkdownPath(path: string | undefined | null): boolean {
+function normalizeFilePath(path: string): string {
+  return path.trim().replace(/\\/g, "/").replace(/\/+$/, "");
+}
+
+/** Match only Grok's private session plan below the environment user's home directory. */
+export function isGrokPlanMarkdownPath(
+  path: string | undefined | null,
+  homeDirectory = NodeOS.homedir(),
+): boolean {
   if (typeof path !== "string") {
     return false;
   }
-  const normalized = path.trim().replace(/\\/g, "/");
-  return normalized.endsWith("/plan.md") && normalized.includes("/.grok/sessions/");
+  const normalized = normalizeFilePath(path);
+  const privateSessionRoot = `${normalizeFilePath(homeDirectory)}/.grok/sessions/`;
+  if (!normalized.startsWith(privateSessionRoot)) {
+    return false;
+  }
+  const sessionPlanSegments = normalized.slice(privateSessionRoot.length).split("/");
+  return (
+    sessionPlanSegments.length === 2 &&
+    sessionPlanSegments[0] !== "" &&
+    sessionPlanSegments[1] === "plan.md"
+  );
 }
 
 /** Extract the latest plan body from Grok's ACP write/edit tool payload. */
 export function extractGrokPlanMarkdownFromToolCallData(
   data: Record<string, unknown> | undefined,
+  homeDirectory = NodeOS.homedir(),
 ): string | undefined {
   if (!data) {
     return undefined;
@@ -277,9 +296,9 @@ export function extractGrokPlanMarkdownFromToolCallData(
     const filePath =
       (typeof rawInput.file_path === "string" ? rawInput.file_path : undefined) ??
       (typeof rawInput.path === "string" ? rawInput.path : undefined);
-    const content = typeof rawInput.content === "string" ? trimmed(rawInput.content) : undefined;
-    if (isGrokPlanMarkdownPath(filePath) && content) {
-      return content;
+    const content = typeof rawInput.content === "string" ? rawInput.content.trim() : undefined;
+    if (isGrokPlanMarkdownPath(filePath, homeDirectory) && content !== undefined) {
+      return content || XAI_EMPTY_PLAN_MARKDOWN;
     }
   }
 
@@ -291,9 +310,10 @@ export function extractGrokPlanMarkdownFromToolCallData(
       continue;
     }
     const path = typeof block.path === "string" ? block.path : undefined;
-    const newText = typeof block.newText === "string" ? trimmed(block.newText) : undefined;
-    if (isGrokPlanMarkdownPath(path) && newText) {
-      return newText;
+    // ACP diff blocks carry the complete file content after the modification.
+    const newText = typeof block.newText === "string" ? block.newText.trim() : undefined;
+    if (isGrokPlanMarkdownPath(path, homeDirectory) && newText !== undefined) {
+      return newText || XAI_EMPTY_PLAN_MARKDOWN;
     }
   }
   return undefined;

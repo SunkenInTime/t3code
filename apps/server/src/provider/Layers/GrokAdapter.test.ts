@@ -27,6 +27,7 @@ import {
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../../config.ts";
+import { XAI_EMPTY_PLAN_MARKDOWN } from "../acp/XAiAcpExtension.ts";
 import {
   grokPromptSettlementBelongsToContext,
   isGrokEnterPlanModeToolCall,
@@ -1184,6 +1185,12 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
       yield* Deferred.await(turnCompleted);
       assert.equal(proposedEvent.payload.planMarkdown, "# Exit plan\n\n- Step one\n- Step two");
       assert.equal(proposedEvent.raw?.method, "_x.ai/exit_plan_mode");
+      assert.deepStrictEqual(
+        runtimeEvents
+          .filter((event) => event.type === "turn.proposed.completed")
+          .map((event) => event.payload.planMarkdown),
+        ["# Exit plan\n\n- Step one\n- Step two", XAI_EMPTY_PLAN_MARKDOWN],
+      );
       assert.equal(
         new Set(runtimeEvents.map((event) => String(event.eventId))).size,
         runtimeEvents.length,

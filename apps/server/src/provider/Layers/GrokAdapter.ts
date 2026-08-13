@@ -177,6 +177,15 @@ function clearProposedPlanCapture(ctx: GrokSessionContext): void {
   ctx.planModeActive = false;
 }
 
+function beginProposedPlanCapture(ctx: GrokSessionContext): void {
+  if (ctx.planModeActive) {
+    return;
+  }
+  ctx.lastKnownProposedPlanMarkdown = undefined;
+  ctx.lastKnownProposedPlanTurnId = undefined;
+  ctx.planModeActive = true;
+}
+
 export function isGrokEnterPlanModeToolCall(toolCall: {
   readonly title?: string;
   readonly data: Record<string, unknown>;
@@ -964,7 +973,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                       }),
                     );
                     if (isGrokEnterPlanModeToolCall(event.toolCall)) {
-                      ctx.planModeActive = true;
+                      beginProposedPlanCapture(ctx);
                     }
                     if (ctx.planModeActive) {
                       const planMarkdown = extractGrokPlanMarkdownFromToolCallData(
