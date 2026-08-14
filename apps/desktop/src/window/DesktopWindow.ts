@@ -89,6 +89,10 @@ export class DesktopWindow extends Context.Service<
     readonly handleBackendNotReady: Effect.Effect<void>;
     readonly flushMainWindowBounds: Effect.Effect<void>;
     readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
+    // Zooms the main window's own webContents. Electron's native zoom roles
+    // can keep targeting an embedded preview after focus returns to the app.
+    // PreviewManager consumes guest shortcuts before application-menu actions
+    // reach this explicit main-window fallback.
     readonly zoomMain: (direction: MainWindowZoomDirection) => Effect.Effect<void>;
     readonly syncAppearance: Effect.Effect<void>;
   }
@@ -849,6 +853,7 @@ export const make = Effect.gen(function* () {
         return;
       }
       const webContents = window.value.webContents;
+      // Same step size as Electron's zoomIn and zoomOut menu roles.
       webContents.setZoomLevel(
         direction === "reset" ? 0 : webContents.getZoomLevel() + (direction === "in" ? 0.5 : -0.5),
       );

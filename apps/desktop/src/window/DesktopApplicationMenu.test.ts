@@ -146,7 +146,9 @@ describe("DesktopApplicationMenu", () => {
     }),
   );
 
-  it.effect("routes app zoom through the main window after preview focus", () =>
+  // Zoom must route through DesktopWindow.zoomMain instead of Electron's zoom
+  // roles, which can keep targeting a preview guest after focus returns to T3.
+  it.effect("routes app zoom to the main window without native zoom roles", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();
       const applicationMenuTemplate =

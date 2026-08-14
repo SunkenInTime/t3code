@@ -191,9 +191,10 @@ export const make = Effect.gen(function* () {
           { role: "forceReload" },
           { role: "toggleDevTools" },
           { type: "separator" },
-          // A focused preview guest consumes zoom shortcuts in PreviewManager.
-          // Reaching this menu means the app renderer owns the shortcut, so do
-          // not let Electron's stale guest focus choose the zoom target.
+          // Do not use Electron's zoom roles: they can keep targeting a
+          // previously focused preview guest. PreviewManager consumes guest
+          // shortcuts first; keyboard and mouse actions that reach this menu
+          // deliberately zoom the main T3 window.
           { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: zoomClick("reset") },
           { label: "Zoom In", accelerator: "CmdOrCtrl+=", click: zoomClick("in") },
           {
