@@ -176,6 +176,36 @@ export function orderedListGutterStyle(
   return { "--list-gutter": `${digits + 1}ch` };
 }
 
+type MarkdownHtmlAstNode = {
+  type?: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: MarkdownHtmlAstNode[];
+};
+
+/** Preserve Windows drive paths through the protocol allowlist in rehype-sanitize. */
+function rehypeNormalizeWindowsImageSrc() {
+  return (tree: MarkdownHtmlAstNode) => {
+    const visit = (node: MarkdownHtmlAstNode) => {
+      const src = node.properties?.src;
+      if (
+        node.type === "element" &&
+        node.tagName === "img" &&
+        typeof src === "string" &&
+        /^[A-Za-z]:[\\/]/.test(src)
+      ) {
+        node.properties = {
+          ...node.properties,
+          src: `file:///${src.replaceAll("\\", "/")}`,
+        };
+      }
+      node.children?.forEach(visit);
+    };
+
+    visit(tree);
+  };
+}
+
 const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
   ...defaultSchema,
   attributes: {
@@ -210,6 +240,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
 
 const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   rehypeRaw,
+  rehypeNormalizeWindowsImageSrc,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
 ] satisfies NonNullable<ReactMarkdownOptions["rehypePlugins"]>;
 
