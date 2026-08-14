@@ -1279,19 +1279,24 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     tabId: string,
     transform: (current: number) => number,
   ) {
-    const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
-    if (!tab) return;
-    const next = transform(tab.zoomFactor);
-    if (Math.abs(next - tab.zoomFactor) < ZOOM_EPSILON) return;
-    if (tab.webContentsId != null) {
-      const wc = webContents.fromId(tab.webContentsId);
-      if (wc && !wc.isDestroyed()) {
-        yield* attempt({ operation: "applyZoom", tabId, webContentsId: wc.id }, () =>
-          wc.setZoomFactor(next),
-        );
-      }
-    }
-    yield* update(tabId, { zoomFactor: next });
+    yield* withTabLifecycleLock(
+      tabId,
+      Effect.gen(function* () {
+        const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId);
+        if (!tab) return;
+        const next = transform(tab.zoomFactor);
+        if (Math.abs(next - tab.zoomFactor) < ZOOM_EPSILON) return;
+        if (tab.webContentsId != null) {
+          const wc = webContents.fromId(tab.webContentsId);
+          if (wc && !wc.isDestroyed()) {
+            yield* attempt({ operation: "applyZoom", tabId, webContentsId: wc.id }, () =>
+              wc.setZoomFactor(next),
+            );
+          }
+        }
+        yield* update(tabId, { zoomFactor: next });
+      }),
+    );
   });
 
   const attachListeners = Effect.fn("PreviewManager.attachListeners")(function* (
