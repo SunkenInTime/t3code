@@ -1018,7 +1018,7 @@ const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(prop
     return (
       <span
         aria-label="Loading image"
-        className="my-1 block aspect-video w-full max-w-md animate-pulse rounded-lg bg-muted/60"
+        className="my-1 block aspect-video w-full max-w-md rounded-lg bg-muted/60"
       />
     );
   }

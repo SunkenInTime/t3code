@@ -4,13 +4,16 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 
 const testState = vi.hoisted(() => ({
   resources: [] as Array<unknown>,
+  assetState: "success" as "success" | "loading",
 }));
 
 vi.mock("@effect/atom-react", () => ({ useAtomValue: () => null }));
 vi.mock("../assets/assetUrls", () => ({
   useAssetUrlState: (_environmentId: unknown, resource: unknown) => {
     testState.resources.push(resource);
-    return { _tag: "Success", url: "https://signed.test/workspace-image.svg" };
+    return testState.assetState === "loading"
+      ? { _tag: "Loading" }
+      : { _tag: "Success", url: "https://signed.test/workspace-image.svg" };
   },
 }));
 vi.mock("../hooks/useTheme", () => ({ useTheme: () => ({ resolvedTheme: "dark" }) }));
@@ -42,6 +45,7 @@ function render(markdown: string): string {
 describe("ChatMarkdown workspace images", () => {
   beforeEach(() => {
     testState.resources = [];
+    testState.assetState = "success";
   });
 
   it("loads every Windows workspace path form through a signed asset URL", () => {
@@ -84,5 +88,14 @@ describe("ChatMarkdown workspace images", () => {
       },
     ]);
     expect(html).toContain("https://signed.test/workspace-image.svg");
+  });
+
+  it("uses a static placeholder while a signed asset URL loads", () => {
+    testState.assetState = "loading";
+
+    const html = render("![loading](.t3/workspace-image.svg)");
+
+    expect(html).toContain('aria-label="Loading image"');
+    expect(html).not.toContain("animate-pulse");
   });
 });
