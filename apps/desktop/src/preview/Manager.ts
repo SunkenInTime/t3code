@@ -1299,6 +1299,21 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     );
   });
 
+  const zoomFocusedPreview = Effect.fn("PreviewManager.zoomFocusedPreview")(function* (
+    direction: PreviewZoomShortcutDirection,
+  ) {
+    const focusedWebContents = webContents.getFocusedWebContents();
+    if (!focusedWebContents || focusedWebContents.isDestroyed()) return false;
+
+    const tabId = yield* tabIdForWebContents(focusedWebContents.id);
+    if (tabId === null) return false;
+
+    yield* applyZoom(tabId, (current) =>
+      direction === "reset" ? DEFAULT_ZOOM_FACTOR : nextZoomLevel(current, direction),
+    );
+    return true;
+  });
+
   const attachListeners = Effect.fn("PreviewManager.attachListeners")(function* (
     tabId: string,
     wc: Electron.WebContents,
@@ -3336,6 +3351,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     subscribeRecordingFrames: (listener: RecordingFrameListener) =>
       subscribe(recordingFrameListenersRef, listener),
     subscribeStateChanges: (listener: Listener) => subscribe(listenersRef, listener),
+    zoomFocusedPreview,
     zoomIn: (tabId: string) => applyZoom(tabId, (current) => nextZoomLevel(current, "in")),
     zoomOut: (tabId: string) => applyZoom(tabId, (current) => nextZoomLevel(current, "out")),
   };
@@ -3615,6 +3631,9 @@ export class PreviewManager extends Context.Service<
     readonly goBack: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly goForward: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly refresh: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
+    readonly zoomFocusedPreview: (
+      direction: PreviewZoomShortcutDirection,
+    ) => Effect.Effect<boolean, PreviewManagerError>;
     readonly zoomIn: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly zoomOut: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
     readonly resetZoom: (tabId: string) => Effect.Effect<void, PreviewManagerError>;
@@ -3715,6 +3734,7 @@ export const make = Effect.gen(function* PreviewManagerMake() {
     goBack: operations.goBack,
     goForward: operations.goForward,
     refresh: operations.refresh,
+    zoomFocusedPreview: operations.zoomFocusedPreview,
     zoomIn: operations.zoomIn,
     zoomOut: operations.zoomOut,
     resetZoom: operations.resetZoom,

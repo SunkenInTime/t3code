@@ -49,11 +49,11 @@ const dispatchMenuAction = Effect.fn("desktop.menu.dispatchMenuAction")(function
   yield* desktopWindow.dispatchMenuAction(action);
 });
 
-const zoomMainWindow = Effect.fn("desktop.menu.zoomMainWindow")(function* (
+const zoomFocusedSurface = Effect.fn("desktop.menu.zoomFocusedSurface")(function* (
   direction: DesktopWindow.MainWindowZoomDirection,
-): Effect.fn.Return<void, never, DesktopWindow.DesktopWindow> {
+): Effect.fn.Return<void, DesktopWindow.DesktopWindowError, DesktopWindow.DesktopWindow> {
   const desktopWindow = yield* DesktopWindow.DesktopWindow;
-  yield* desktopWindow.zoomMain(direction);
+  yield* desktopWindow.zoomFocused(direction);
 });
 
 const checkForUpdatesFromMenu = Effect.gen(function* () {
@@ -135,7 +135,7 @@ export const make = Effect.gen(function* () {
       runMenuEffect("open-settings", dispatchMenuAction("open-settings"));
     };
     const zoomClick = (direction: DesktopWindow.MainWindowZoomDirection) => () => {
-      runMenuEffect(`zoom-${direction}`, zoomMainWindow(direction));
+      runMenuEffect(`zoom-${direction}`, zoomFocusedSurface(direction));
     };
     const template: Electron.MenuItemConstructorOptions[] = [];
 
@@ -191,10 +191,8 @@ export const make = Effect.gen(function* () {
           { role: "forceReload" },
           { role: "toggleDevTools" },
           { type: "separator" },
-          // Do not use Electron's zoom roles: they can keep targeting a
-          // previously focused preview guest. PreviewManager consumes guest
-          // shortcuts first; keyboard and mouse actions that reach this menu
-          // deliberately zoom the main T3 window.
+          // Do not use Electron's zoom roles: route explicitly to the managed
+          // preview or the T3 window based on which surface owns focus.
           { label: "Actual Size", accelerator: "CmdOrCtrl+0", click: zoomClick("reset") },
           { label: "Zoom In", accelerator: "CmdOrCtrl+=", click: zoomClick("in") },
           {
