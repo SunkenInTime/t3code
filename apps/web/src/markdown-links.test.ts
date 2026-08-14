@@ -1,4 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import ReactMarkdown from "react-markdown";
 
 import {
   extractMarkdownLinkHrefs,
@@ -8,6 +11,25 @@ import {
   rewriteMarkdownFileUriHref,
   shouldOpenMarkdownFileLinkInEditor,
 } from "./markdown-links";
+
+function renderMarkdownLinkHref(markdown: string): string | undefined {
+  let renderedHref: string | undefined;
+  renderToStaticMarkup(
+    createElement(
+      ReactMarkdown,
+      {
+        components: {
+          a({ href }) {
+            renderedHref = href;
+            return createElement("a", { href });
+          },
+        },
+      },
+      markdown,
+    ),
+  );
+  return renderedHref;
+}
 
 describe("extractMarkdownLinkHrefs", () => {
   it("extracts angle-bracketed paths containing spaces", () => {
@@ -138,6 +160,17 @@ describe("resolveMarkdownFileLinkTarget", () => {
       targetPath: "/Users/dara/Downloads/Lime Ride Artifacts/Bike Receipts",
       workspaceRelativePath: "Bike Receipts",
       basename: "Bike Receipts",
+    });
+  });
+
+  it("resolves relative spaced folders from the markdown renderer", () => {
+    const href = renderMarkdownLinkHref("[folder](<docs/My Folder>)");
+
+    expect(href).toBe("docs/My%20Folder");
+    expect(resolveMarkdownFileLinkMeta(href, "/repo/project")).toMatchObject({
+      targetPath: "/repo/project/docs/My Folder",
+      workspaceRelativePath: "docs/My Folder",
+      basename: "My Folder",
     });
   });
 
