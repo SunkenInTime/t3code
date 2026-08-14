@@ -80,7 +80,7 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     handleBackendNotReady: Effect.void,
     flushMainWindowBounds: Effect.void,
     dispatchMenuAction: (action) => Deferred.succeed(selectedAction, action).pipe(Effect.asVoid),
-    zoomFocused: (direction) =>
+    zoomMain: (direction) =>
       Deferred.succeed(selectedAction, `zoom-${direction}`).pipe(Effect.asVoid),
     syncAppearance: Effect.void,
   } satisfies DesktopWindow.DesktopWindow["Service"]);
@@ -146,7 +146,9 @@ describe("DesktopApplicationMenu", () => {
     }),
   );
 
-  it.effect("routes zoom to the focused surface without native zoom roles", () =>
+  // Zoom must route through DesktopWindow.zoomMain instead of Electron's zoom
+  // roles, which can keep targeting a preview guest after focus returns to T3.
+  it.effect("routes app zoom to the main window without native zoom roles", () =>
     Effect.gen(function* () {
       const selectedAction = yield* Deferred.make<string>();
       const applicationMenuTemplate =

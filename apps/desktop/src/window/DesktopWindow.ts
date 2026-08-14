@@ -89,11 +89,11 @@ export class DesktopWindow extends Context.Service<
     readonly handleBackendNotReady: Effect.Effect<void>;
     readonly flushMainWindowBounds: Effect.Effect<void>;
     readonly dispatchMenuAction: (action: string) => Effect.Effect<void, DesktopWindowError>;
-    // Keeps app and browser zoom independent by routing to the surface that
-    // currently owns focus.
-    readonly zoomFocused: (
-      direction: MainWindowZoomDirection,
-    ) => Effect.Effect<void, DesktopWindowError>;
+    // Zooms the main window's own webContents. Electron's native zoom roles
+    // can keep targeting an embedded preview after focus returns to the app.
+    // PreviewManager consumes guest shortcuts before application-menu actions
+    // reach this explicit main-window fallback.
+    readonly zoomMain: (direction: MainWindowZoomDirection) => Effect.Effect<void>;
     readonly syncAppearance: Effect.Effect<void>;
   }
 >()("@t3tools/desktop/window/DesktopWindow") {}
@@ -846,13 +846,12 @@ export const make = Effect.gen(function* () {
 
       send();
     }),
-    zoomFocused: Effect.fn("desktop.window.zoomFocused")(function* (direction) {
+    zoomMain: Effect.fn("desktop.window.zoomMain")(function* (direction) {
       yield* Effect.annotateCurrentSpan({ direction });
-      if (yield* previewManager.zoomFocusedPreview(direction)) return;
-
       const window = yield* focusedMainWindow;
-      if (Option.isNone(window) || window.value.isDestroyed()) return;
-
+      if (Option.isNone(window) || window.value.isDestroyed()) {
+        return;
+      }
       const webContents = window.value.webContents;
       // Same step size as Electron's zoomIn and zoomOut menu roles.
       webContents.setZoomLevel(
