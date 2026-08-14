@@ -185,6 +185,8 @@ interface TestCapturedPreviewImage {
 const makeTestPreviewWebContents = (
   capturePage: () => Promise<TestCapturedPreviewImage>,
   id = 42,
+  listeners?: Map<string, (...args: unknown[]) => void>,
+  setZoomFactor = vi.fn(),
 ) =>
   ({
     id,
@@ -194,9 +196,13 @@ const makeTestPreviewWebContents = (
     getTitle: () => "Example",
     isLoading: () => false,
     getZoomFactor: () => 1,
-    setZoomFactor: vi.fn(),
-    on: vi.fn(),
-    off: vi.fn(),
+    setZoomFactor,
+    on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+      listeners?.set(event, listener);
+    }),
+    off: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+      if (listeners?.get(event) === listener) listeners.delete(event);
+    }),
     ipc: { on: vi.fn(), off: vi.fn() },
     send: webviewSend,
     navigationHistory: { canGoBack: () => false, canGoForward: () => false },
@@ -497,6 +503,38 @@ describe("PreviewManager", () => {
 
         expect(replacementSetZoomFactor).toHaveBeenCalledWith(1.25);
         expect(states.at(-1)?.zoomFactor).toBe(1.25);
+      }),
+    ),
+  );
+
+  effectIt.effect("routes menu zoom from focus events instead of stale global focus", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const listeners = new Map<string, (...args: unknown[]) => void>();
+        const setZoomFactor = vi.fn();
+        const previewWebContents = makeTestPreviewWebContents(
+          async () => ({
+            toJPEG: () => Buffer.from("unused"),
+            getSize: () => ({ width: 1, height: 1 }),
+          }),
+          42,
+          listeners,
+          setZoomFactor,
+        );
+        fromId.mockReturnValue(previewWebContents);
+
+        yield* manager.createTab("tab_focus_zoom");
+        yield* manager.registerWebview("tab_focus_zoom", 42);
+
+        listeners.get("focus")?.();
+        expect(yield* manager.zoomFocusedPreview("out")).toBe(true);
+        expect(setZoomFactor).toHaveBeenCalledOnce();
+        expect(setZoomFactor).toHaveBeenCalledWith(0.9);
+
+        getFocusedWebContents.mockReturnValue(previewWebContents);
+        listeners.get("blur")?.();
+        expect(yield* manager.zoomFocusedPreview("out")).toBe(false);
+        expect(setZoomFactor).toHaveBeenCalledOnce();
       }),
     ),
   );

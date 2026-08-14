@@ -516,6 +516,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     { readonly semaphore: Semaphore.Semaphore; users: number }
   >();
   const tabLifecycleGenerations = new Map<string, number>();
+  let focusedPreviewTabId: string | null = null;
 
   const attempt = <A>(errorContext: PreviewOperationContext, evaluate: () => A) =>
     Effect.try({
@@ -1302,11 +1303,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const zoomFocusedPreview = Effect.fn("PreviewManager.zoomFocusedPreview")(function* (
     direction: PreviewZoomShortcutDirection,
   ) {
-    const focusedWebContents = webContents.getFocusedWebContents();
-    if (!focusedWebContents || focusedWebContents.isDestroyed()) return false;
-
-    const tabId = yield* tabIdForWebContents(focusedWebContents.id);
-    if (tabId === null) return false;
+    const tabId = focusedPreviewTabId;
+    if (tabId === null || !(yield* SynchronizedRef.get(tabsRef)).has(tabId)) {
+      focusedPreviewTabId = null;
+      return false;
+    }
 
     yield* applyZoom(tabId, (current) =>
       direction === "reset" ? DEFAULT_ZOOM_FACTOR : nextZoomLevel(current, direction),
@@ -1445,15 +1446,24 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       }
       runFork(forwardShortcut(event, input));
     };
+    const focused = () => {
+      focusedPreviewTabId = tabId;
+    };
+    const blurred = () => {
+      if (focusedPreviewTabId === tabId) focusedPreviewTabId = null;
+    };
     yield* Scope.addFinalizer(
       scope,
       attempt({ operation: "detachListeners", tabId, webContentsId: wc.id }, () => {
+        blurred();
         wc.off("did-navigate", syncNavigation);
         wc.off("did-navigate-in-page", syncNavigation);
         wc.off("page-title-updated", sync);
         wc.off("did-start-loading", sync);
         wc.off("did-stop-loading", sync);
         wc.off("did-fail-load", failed as never);
+        wc.off("focus", focused);
+        wc.off("blur", blurred);
         wc.off("before-input-event", beforeInput);
         wc.ipc.off(HUMAN_INPUT_CHANNEL, humanInput);
       }).pipe(Effect.ignore),
@@ -1466,6 +1476,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.on("did-start-loading", sync);
         wc.on("did-stop-loading", sync);
         wc.on("did-fail-load", failed as never);
+        wc.on("focus", focused);
+        wc.on("blur", blurred);
         wc.ipc.on(HUMAN_INPUT_CHANNEL, humanInput);
         wc.setWindowOpenHandler(({ url }) => {
           runFork(
@@ -1489,8 +1501,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   const setMainWindow = Effect.fn("PreviewManager.setMainWindow")(function* (
     window: BrowserWindow,
   ) {
+    const focused = () => {
+      focusedPreviewTabId = null;
+    };
     yield* Ref.set(mainWindowRef, Option.some(window));
+    window.webContents.on("focus", focused);
     window.once("closed", () => {
+      focused();
       runFork(closeAllPictureInPicture());
     });
   });
