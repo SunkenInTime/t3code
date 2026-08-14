@@ -51,6 +51,7 @@ describe("ChatMarkdown workspace images", () => {
         "![relative](.t3/workspace-image.svg)",
         `![absolute](${imagePath})`,
         `![file URL](file:///${imagePath})`,
+        "![UNC file URL](file://server/share/workspace-image.svg)",
       ].join("\n\n"),
     );
 
@@ -62,8 +63,13 @@ describe("ChatMarkdown workspace images", () => {
       },
       { _tag: "workspace-file", threadId: threadRef.threadId, path: imagePath },
       { _tag: "workspace-file", threadId: threadRef.threadId, path: imagePath },
+      {
+        _tag: "workspace-file",
+        threadId: threadRef.threadId,
+        path: "\\\\server\\share\\workspace-image.svg",
+      },
     ]);
-    expect(html.match(/https:\/\/signed\.test\/workspace-image\.svg/g)).toHaveLength(3);
+    expect(html.match(/https:\/\/signed\.test\/workspace-image\.svg/g)).toHaveLength(4);
     expect(html).not.toContain("Image unavailable");
   });
 
