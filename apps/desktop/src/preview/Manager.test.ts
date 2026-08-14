@@ -187,6 +187,7 @@ const makeTestPreviewWebContents = (
   id = 42,
   listeners?: Map<string, (...args: unknown[]) => void>,
   setZoomFactor = vi.fn(),
+  isFocused = () => false,
 ) =>
   ({
     id,
@@ -195,6 +196,7 @@ const makeTestPreviewWebContents = (
     getURL: () => "https://example.com",
     getTitle: () => "Example",
     isLoading: () => false,
+    isFocused,
     getZoomFactor: () => 1,
     setZoomFactor,
     on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
@@ -507,7 +509,7 @@ describe("PreviewManager", () => {
     ),
   );
 
-  effectIt.effect("routes menu zoom from focus events instead of stale global focus", () =>
+  effectIt.effect("seeds preview focus on attach and clears it without global focus", () =>
     withManager((manager) =>
       Effect.gen(function* () {
         const listeners = new Map<string, (...args: unknown[]) => void>();
@@ -520,13 +522,13 @@ describe("PreviewManager", () => {
           42,
           listeners,
           setZoomFactor,
+          () => true,
         );
         fromId.mockReturnValue(previewWebContents);
 
         yield* manager.createTab("tab_focus_zoom");
         yield* manager.registerWebview("tab_focus_zoom", 42);
 
-        listeners.get("focus")?.();
         expect(yield* manager.zoomFocusedPreview("out")).toBe(true);
         expect(setZoomFactor).toHaveBeenCalledOnce();
         expect(setZoomFactor).toHaveBeenCalledWith(0.9);

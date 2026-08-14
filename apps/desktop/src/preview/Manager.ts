@@ -1478,6 +1478,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         wc.on("did-fail-load", failed as never);
         wc.on("focus", focused);
         wc.on("blur", blurred);
+        if (wc.isFocused?.()) focused();
         wc.ipc.on(HUMAN_INPUT_CHANNEL, humanInput);
         wc.setWindowOpenHandler(({ url }) => {
           runFork(
