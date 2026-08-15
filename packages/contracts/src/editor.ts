@@ -47,6 +47,10 @@ export type EditorId = typeof EditorId.Type;
 export const LaunchEditorInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   editor: EditorId,
+  /** Reveal (select) `cwd` in the file manager instead of opening it. Only
+      honored by the "file-manager" editor; clients must check the server's
+      `shellRevealInFileManager` config flag before sending this. */
+  reveal: Schema.optional(Schema.Boolean),
 });
 export type LaunchEditorInput = typeof LaunchEditorInput.Type;
 

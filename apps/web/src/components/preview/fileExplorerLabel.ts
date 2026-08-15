@@ -1,6 +1,16 @@
+import type { ExecutionEnvironmentPlatformOs } from "@t3tools/contracts";
+
 export function revealInFileExplorerLabel(platform: string): string {
   const normalized = platform.toLowerCase();
   if (normalized.includes("mac")) return "Reveal in Finder";
   if (normalized.includes("win")) return "Reveal in File Explorer";
+  return "Reveal in Files";
+}
+
+/** Same wording keyed by an environment's reported OS rather than a
+    navigator platform string, for actions that reveal on the server machine. */
+export function revealInFileExplorerLabelForOs(os: ExecutionEnvironmentPlatformOs): string {
+  if (os === "darwin") return "Reveal in Finder";
+  if (os === "windows") return "Reveal in File Explorer";
   return "Reveal in Files";
 }

@@ -1022,6 +1022,7 @@ const makeWsRpcLayer = (
           },
           settings,
           shellResumeCompletionMarker: true,
+          shellRevealInFileManager: true,
           threadResumeCompletionMarker: true,
           threadSnapshotPagination: true,
         };

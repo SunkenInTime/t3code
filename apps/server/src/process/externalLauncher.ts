@@ -376,6 +376,16 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
     return yield* new ExternalLauncherUnsupportedEditorError({ editor: input.editor });
   }
 
+  if (input.reveal === true) {
+    const path = yield* Path.Path;
+    return {
+      editor: editorDef.id,
+      target: input.cwd,
+      command: fileManagerCommandForPlatform(platform),
+      args: fileManagerRevealArgs(input.cwd, platform, path),
+    };
+  }
+
   return {
     editor: editorDef.id,
     target: input.cwd,
@@ -383,6 +393,24 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
     args: [input.cwd],
   };
 });
+
+function fileManagerRevealArgs(
+  target: string,
+  platform: NodeJS.Platform,
+  path: Path.Path,
+): ReadonlyArray<string> {
+  switch (platform) {
+    case "darwin":
+      return ["-R", target];
+    case "win32":
+      // explorer.exe expects the switch and path as one comma-joined argument.
+      return [`/select,${target}`];
+    default:
+      // Linux file managers have no portable "select this file" flag, so open
+      // the containing directory instead.
+      return [path.dirname(target)];
+  }
+}
 
 const launchAndUnref = Effect.fn("externalLauncher.launchAndUnref")(function* (
   launch: ProcessLaunch,
