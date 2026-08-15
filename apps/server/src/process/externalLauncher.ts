@@ -377,13 +377,7 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   }
 
   if (input.reveal === true) {
-    const path = yield* Path.Path;
-    return {
-      editor: editorDef.id,
-      target: input.cwd,
-      command: fileManagerCommandForPlatform(platform),
-      args: fileManagerRevealArgs(input.cwd, platform, path),
-    };
+    return yield* resolveFileManagerRevealLaunch(input.cwd, platform);
   }
 
   return {
@@ -394,23 +388,36 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   };
 });
 
-function fileManagerRevealArgs(
+const resolveFileManagerRevealLaunch = Effect.fn("resolveFileManagerRevealLaunch")(function* (
   target: string,
   platform: NodeJS.Platform,
-  path: Path.Path,
-): ReadonlyArray<string> {
-  switch (platform) {
-    case "darwin":
-      return ["-R", target];
-    case "win32":
-      // explorer.exe expects the switch and path as one comma-joined argument.
-      return [`/select,${target}`];
-    default:
-      // Linux file managers have no portable "select this file" flag, so open
-      // the containing directory instead.
-      return [path.dirname(target)];
+): Effect.fn.Return<EditorLaunch, never, Path.Path> {
+  if (platform === "darwin") {
+    return { editor: "file-manager", target, command: "open", args: ["-R", target] };
   }
-}
+
+  if (platform === "win32") {
+    // explorer.exe expects `/select,"<path>"` as one argument with only the
+    // path quoted. Node's default spawn quoting wraps the whole argument when
+    // the path has spaces, which explorer misparses, so go through Windows
+    // PowerShell 5.1 whose Start-Process passes the argument string verbatim.
+    const env = yield* readBrowserLaunchEnv;
+    const encodedCommand = encodeUtf16LeBase64(
+      `$ProgressPreference = 'SilentlyContinue'; Start explorer.exe -ArgumentList ('/select,"' + ${escapePowerShellStringLiteral(target)} + '"')`,
+    );
+    return {
+      editor: "file-manager",
+      target,
+      command: resolvePowerShellPath(env),
+      args: [...POWERSHELL_ARGUMENTS_PREFIX, encodedCommand],
+    };
+  }
+
+  // Linux file managers have no portable "select this file" flag, so open
+  // the containing directory instead.
+  const path = yield* Path.Path;
+  return { editor: "file-manager", target, command: "xdg-open", args: [path.dirname(target)] };
+});
 
 const launchAndUnref = Effect.fn("externalLauncher.launchAndUnref")(function* (
   launch: ProcessLaunch,

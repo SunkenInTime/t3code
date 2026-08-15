@@ -167,12 +167,14 @@ it.effect("reveals a file in Finder with open -R on macOS", () =>
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
-it.effect("reveals a file in File Explorer with /select on Windows", () =>
+it.effect("reveals a file in File Explorer through PowerShell on Windows", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
     const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
-    yield* fileSystem.writeFileString(path.join(binDir, "explorer.EXE"), "");
+    // resolvePowerShellPath builds `${SYSTEMROOT}\System32\...` with Windows
+    // separators, which on the posix test filesystem is one file name.
+    const powerShellPath = `${binDir}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    yield* fileSystem.writeFileString(powerShellPath, "");
 
     let spawned: ChildProcess.StandardCommand | undefined;
     yield* Effect.gen(function* () {
@@ -186,7 +188,7 @@ it.effect("reveals a file in File Explorer with /select on Windows", () =>
       Effect.provide(
         testLayer({
           platform: "win32",
-          env: { PATH: binDir, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
+          env: { PATHEXT: ".COM;.EXE;.BAT;.CMD", SYSTEMROOT: binDir },
           onSpawn: (command) => {
             spawned = command;
           },
@@ -195,9 +197,15 @@ it.effect("reveals a file in File Explorer with /select on Windows", () =>
     );
 
     assert.ok(spawned);
-    assert.equal(spawned.command, "explorer");
-    // explorer.exe expects the switch and path as one comma-joined argument.
-    assert.deepEqual(spawned.args, ["/select,C:\\workspace with spaces\\media\\clip.mp4"]);
+    assert.equal(spawned.command, powerShellPath);
+    const encodedCommand = spawned.args[spawned.args.length - 1] ?? "";
+    const decodedCommand = Buffer.from(encodedCommand, "base64").toString("utf16le");
+    // explorer.exe expects `/select,"<path>"` with only the path quoted;
+    // PowerShell 5.1's Start-Process passes the argument string verbatim.
+    assert.equal(
+      decodedCommand,
+      "$ProgressPreference = 'SilentlyContinue'; Start explorer.exe -ArgumentList ('/select,\"' + 'C:\\workspace with spaces\\media\\clip.mp4' + '\"')",
+    );
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
