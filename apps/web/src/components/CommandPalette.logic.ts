@@ -184,9 +184,14 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   getContentMatch?: (thread: TThread) => CommandPaletteThreadContentMatch | undefined;
   runThread: (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) => Promise<void>;
   limit?: number;
+  /** Keep archived threads (search corpora); the default drops them so the
+      recents list never surfaces archived rows. */
+  includeArchived?: boolean;
 }): CommandPaletteActionItem[] {
   const sortedThreads = sortThreads(
-    input.threads.filter((thread) => thread.archivedAt === null),
+    input.includeArchived === true
+      ? [...input.threads]
+      : input.threads.filter((thread) => thread.archivedAt === null),
     input.sortOrder,
   );
   const visibleThreads =
@@ -204,6 +209,9 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
     }
     if (thread.id === input.activeThreadId) {
       descriptionParts.push("Current thread");
+    }
+    if (thread.archivedAt !== null) {
+      descriptionParts.push("Archived");
     }
 
     const leadingContent = input.renderLeadingContent?.(thread);

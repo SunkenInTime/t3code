@@ -1,6 +1,10 @@
 "use client";
 
 import { scopeProjectRef, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopeThreadShell,
+  type EnvironmentThreadShell,
+} from "@t3tools/client-runtime/state/models";
 import { canCreateProjectInEnvironment } from "@t3tools/client-runtime/operations/projects";
 import { connectionStatusText } from "@t3tools/client-runtime/connection";
 import { threadSearchMatchKey } from "@t3tools/client-runtime/state/thread-search";
@@ -83,6 +87,17 @@ import {
   resolveProjectPathForDispatch,
 } from "../lib/projectPaths";
 import { onOpenCommandPalette } from "../commandPaletteBus";
+import { useArchivedThreadSnapshots } from "../lib/archivedThreadsState";
+import {
+  applyProjectSuggestionToQuery,
+  filterProjectSuggestions,
+  getTrailingProjectOperatorToken,
+  hasThreadSearchOperators,
+  matchesParsedThreadSearch,
+  parseThreadSearchQuery,
+  resolveProjectFilterKeys,
+  segmentThreadSearchQuery,
+} from "./threadSearchQuery.logic";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
 import { selectActiveRightPanel, useRightPanelStore } from "../rightPanelStore";
@@ -104,6 +119,7 @@ import {
   buildThreadActionItems,
   enumerateCommandPaletteItems,
   type CommandPaletteActionItem,
+  type CommandPaletteGroup,
   type CommandPaletteOpenIntent,
   type CommandPaletteSubmenuItem,
   type CommandPaletteView,
@@ -610,8 +626,31 @@ function OpenCommandPaletteDialog(props: {
         .map((environment) => environment.environmentId),
     [environments],
   );
-  const threadSearchQuery = currentView === null && !isActionsOnly ? deferredQuery : "";
+  // Discord-style operators (in:, agent:, before:/after:/on:) apply only to
+  // the root search — submenus and > queries keep their own semantics.
+  // Non-null only when the query actually carries operator criteria.
+  const parsedOperatorQuery = useMemo(() => {
+    if (currentView !== null || isActionsOnly) return null;
+    const parsed = parseThreadSearchQuery(deferredQuery, new Date());
+    return hasThreadSearchOperators(parsed) ? parsed : null;
+  }, [currentView, deferredQuery, isActionsOnly]);
+  // The server content search must see only the residual text — operator
+  // tokens would pollute the message LIKE query.
+  const threadSearchQuery =
+    currentView === null && !isActionsOnly ? (parsedOperatorQuery?.text ?? deferredQuery) : "";
   const threadSearch = useThreadSearch(environmentIds, threadSearchQuery);
+  // Archived threads live in a separate query-style snapshot, not the live
+  // shell stream; search subscribes only while a root query is active so the
+  // palette otherwise never pays for archive data. Archive/unarchive actions
+  // refresh these atoms (useThreadActions), so hits stay current in-session.
+  const archivedSearchEnvironmentIds = useMemo(
+    () =>
+      currentView === null && !isActionsOnly && deferredQuery.trim().length > 0
+        ? environmentIds
+        : [],
+    [currentView, deferredQuery, environmentIds, isActionsOnly],
+  );
+  const archivedThreadSnapshots = useArchivedThreadSnapshots(archivedSearchEnvironmentIds);
   const threadContentMatchByKey = useMemo(
     () =>
       new Map(
@@ -1011,16 +1050,30 @@ function OpenCommandPaletteDialog(props: {
     [contextualProjectRef, handleNewThread, pickerProjects, projectGroupByTargetKey],
   );
 
-  const allThreadItems = useMemo(
-    () =>
+  const buildPaletteThreadItems = useCallback(
+    (
+      threadList: ReadonlyArray<EnvironmentThreadShell>,
+      options?: { readonly includeArchived?: boolean },
+    ) =>
       buildThreadActionItems({
-        threads,
+        threads: threadList,
         ...(activeThreadId ? { activeThreadId } : {}),
+        ...(options?.includeArchived === true ? { includeArchived: true } : {}),
         projectTitleById,
         sortOrder: clientSettings.sidebarThreadSortOrder,
         icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
         renderLeadingContent: (thread) => <ThreadRowLeadingStatus thread={thread} />,
-        renderTrailingContent: (thread) => <ThreadRowTrailingStatus thread={thread} />,
+        renderTrailingContent: (thread) =>
+          // An archived row's marker replaces the live status decorations —
+          // whatever session state the shell froze with is history, not
+          // status.
+          thread.archivedAt !== null ? (
+            <span className="ms-1 shrink-0 rounded border border-border/70 px-1 text-[10px] font-medium text-muted-foreground/80">
+              Archived
+            </span>
+          ) : (
+            <ThreadRowTrailingStatus thread={thread} />
+          ),
         renderDescription: (thread, { projectTitle }) => {
           const modelInstanceId =
             thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
@@ -1076,9 +1129,63 @@ function OpenCommandPaletteDialog(props: {
       providerEntryByEnvironmentAndInstanceId,
       threadContentMatchByKey,
       threadSearchQuery,
-      threads,
     ],
   );
+  const allThreadItems = useMemo(
+    () => buildPaletteThreadItems(threads),
+    [buildPaletteThreadItems, threads],
+  );
+  const archivedSearchThreads = useMemo(() => {
+    if (archivedThreadSnapshots.snapshots.length === 0) return [];
+    // A shell can linger in the live stream with archivedAt freshly set (or
+    // appear in both after an unarchive races the snapshot refresh); the
+    // live stream wins so a thread never renders twice.
+    const liveThreadKeys = new Set(threads.map((thread) => `${thread.environmentId}:${thread.id}`));
+    return archivedThreadSnapshots.snapshots.flatMap((entry) =>
+      entry.snapshot.threads
+        .filter((thread) => !liveThreadKeys.has(`${entry.environmentId}:${thread.id}`))
+        .map((thread) => scopeThreadShell(entry.environmentId, thread)),
+    );
+  }, [archivedThreadSnapshots.snapshots, threads]);
+  const archivedThreadItems = useMemo(
+    () => buildPaletteThreadItems(archivedSearchThreads, { includeArchived: true }),
+    [archivedSearchThreads, buildPaletteThreadItems],
+  );
+  // The search corpus: live threads first, archived history after. With
+  // operator criteria the corpus is narrowed thread-by-thread (project keys
+  // for in:, agent/date via the matcher) BEFORE items are built; residual
+  // text then ranks against titles, project names, and content snippets in
+  // filterCommandPaletteGroups like any other query.
+  const threadSearchItems = useMemo(() => {
+    if (parsedOperatorQuery === null) {
+      return [...allThreadItems, ...archivedThreadItems];
+    }
+    const projectFilterKeys = resolveProjectFilterKeys(
+      projectGroups,
+      parsedOperatorQuery.projectQueries,
+    );
+    const operatorOnlyQuery = { ...parsedOperatorQuery, text: "" };
+    const passesOperators = (thread: EnvironmentThreadShell) =>
+      (projectFilterKeys === null ||
+        projectFilterKeys.has(`${thread.environmentId}:${thread.projectId}`)) &&
+      matchesParsedThreadSearch(thread, operatorOnlyQuery);
+    return [
+      ...buildPaletteThreadItems(
+        threads.filter((thread) => thread.archivedAt === null && passesOperators(thread)),
+      ),
+      ...buildPaletteThreadItems(archivedSearchThreads.filter(passesOperators), {
+        includeArchived: true,
+      }),
+    ];
+  }, [
+    allThreadItems,
+    archivedSearchThreads,
+    archivedThreadItems,
+    buildPaletteThreadItems,
+    parsedOperatorQuery,
+    projectGroups,
+    threads,
+  ]);
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
 
   const pushPaletteView = useCallback(
@@ -1593,13 +1700,78 @@ function OpenCommandPaletteDialog(props: {
         )
       : (currentView?.groups ?? rootGroups);
 
-  const filteredGroups = filterCommandPaletteGroups({
-    activeGroups,
-    query: deferredQuery,
-    isInSubmenu: currentView !== null,
-    projectSearchItems: projectSearchItems,
-    threadSearchItems: allThreadItems,
-  });
+  // With operator criteria the palette becomes a pure thread search: actions
+  // and project rows would degenerate to matching the residual text (or, with
+  // no text, matching everything), so only the operator-narrowed Threads
+  // group renders. Residual text still ranks within it.
+  const operatorFilteredGroups: CommandPaletteGroup[] | null =
+    parsedOperatorQuery === null
+      ? null
+      : parsedOperatorQuery.text.trim().length === 0
+        ? threadSearchItems.length > 0
+          ? [{ value: "threads-search", label: "Threads", items: threadSearchItems }]
+          : []
+        : filterCommandPaletteGroups({
+            activeGroups: [],
+            query: parsedOperatorQuery.text,
+            isInSubmenu: false,
+            projectSearchItems: [],
+            threadSearchItems,
+          });
+
+  const baseFilteredGroups =
+    operatorFilteredGroups ??
+    filterCommandPaletteGroups({
+      activeGroups,
+      query: deferredQuery,
+      isInSubmenu: currentView !== null,
+      projectSearchItems: projectSearchItems,
+      threadSearchItems,
+    });
+
+  // While the caret sits inside an in: token, project completions lead the
+  // list: Enter commits the filter into the query (palette stays open)
+  // instead of navigating.
+  const trailingProjectOperatorToken =
+    currentView === null && !isActionsOnly ? getTrailingProjectOperatorToken(query) : null;
+  const projectFilterSuggestionItems = useMemo((): CommandPaletteActionItem[] => {
+    if (trailingProjectOperatorToken === null) return [];
+    return filterProjectSuggestions(projectGroups, trailingProjectOperatorToken.partialValue)
+      .slice(0, 8)
+      .map((group) => ({
+        kind: "action" as const,
+        value: `filter-project:${group.projectKey}`,
+        searchTerms: [],
+        title: group.displayName,
+        description: group.workspaceRoot,
+        icon: projectFavicon(group),
+        keepOpen: true,
+        run: async () => {
+          handleQueryChange(
+            applyProjectSuggestionToQuery(
+              query,
+              getTrailingProjectOperatorToken(query),
+              group.displayName,
+            ),
+          );
+        },
+      }));
+    // handleQueryChange (a plain function declaration) is intentionally not
+    // a dependency: listing it would churn this memo every render for no
+    // observable difference.
+  }, [projectGroups, query, trailingProjectOperatorToken]);
+
+  const filteredGroups =
+    projectFilterSuggestionItems.length > 0
+      ? [
+          {
+            value: "project-filter-suggestions",
+            label: "Filter by project",
+            items: projectFilterSuggestionItems,
+          },
+          ...baseFilteredGroups,
+        ]
+      : baseFilteredGroups;
 
   const handleAddProjectForEnvironment = useCallback(
     async (input: {
@@ -1986,6 +2158,65 @@ function OpenCommandPaletteDialog(props: {
     remoteProjectInputPlaceholder(addProjectCloneFlow) ??
     getCommandPaletteInputPlaceholder(paletteMode);
   const isSubmenu = paletteMode === "submenu" || paletteMode === "submenu-browse";
+
+  // Discord-style operator pills: the input's own text goes transparent (the
+  // caret stays visible) and a metric-identical backdrop renders the same
+  // string with a pill behind each recognized operator token, translating
+  // with the input's scrollLeft. Root command mode only — browse and
+  // submenu queries have no operators.
+  const showOperatorPills = !isSubmenu && !isBrowsing && addProjectCloneFlow === null;
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const operatorPillHighlightRef = useRef<HTMLDivElement>(null);
+  const syncOperatorPillScroll = useCallback(() => {
+    const highlight = operatorPillHighlightRef.current;
+    const input = searchInputRef.current;
+    if (highlight === null || input === null) return;
+    highlight.style.transform = `translateX(${-input.scrollLeft}px)`;
+  }, []);
+  useLayoutEffect(() => {
+    // Typing at the end of an overflowing query scrolls the input after the
+    // change event; re-sync once the new value has laid out.
+    syncOperatorPillScroll();
+  }, [query, syncOperatorPillScroll]);
+  const operatorQuerySegments = useMemo(
+    () => (showOperatorPills ? segmentThreadSearchQuery(query, new Date()) : []),
+    [query, showOperatorPills],
+  );
+  const operatorPillBackdrop =
+    showOperatorPills && operatorQuerySegments.length > 0 ? (
+      // Mirrors CommandInput's metrics exactly: the outer div reproduces the
+      // shell inset, the row reproduces the lg input's height and start
+      // padding, and the text run carries no padding of its own — the pill
+      // look comes from a layout-neutral shadow halo.
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 px-[var(--command-shell-inset)] py-1.5"
+      >
+        <div className="flex h-9.5 items-center overflow-hidden pe-[calc(--spacing(3)-1px)] ps-9 text-base sm:h-8.5 sm:ps-[calc(var(--command-shell-inset)+1.5rem)] sm:text-sm">
+          <div ref={operatorPillHighlightRef} className="shrink-0 whitespace-pre text-foreground">
+            {(() => {
+              // Segments tile the query, so each one's character offset is a
+              // stable, data-derived key even when texts repeat.
+              let offset = 0;
+              return operatorQuerySegments.map((segment) => {
+                const key = `${offset}:${segment.text}`;
+                offset += segment.text.length;
+                return segment.isOperator ? (
+                  <span
+                    key={key}
+                    className="rounded-xs bg-message-action text-message-action-foreground shadow-[0_0_0_2px] shadow-message-action"
+                  >
+                    {segment.text}
+                  </span>
+                ) : (
+                  <span key={key}>{segment.text}</span>
+                );
+              });
+            })()}
+          </div>
+        </div>
+      </div>
+    ) : null;
   const hasHighlightedBrowseItem = highlightedItemValue?.startsWith("browse:") ?? false;
   const canSubmitBrowsePath =
     isBrowsing &&
@@ -2344,8 +2575,11 @@ function OpenCommandPaletteDialog(props: {
       footerActionLabel={footerActionLabel}
       footerTrailing={footerTrailing}
       inputAccessory={inputAccessory}
+      inputBackdrop={operatorPillBackdrop}
       inputProps={{
-        className:
+        ref: searchInputRef,
+        onScroll: syncOperatorPillScroll,
+        className: cn(
           addProjectCloneFlow?.step === "repository"
             ? "pe-32"
             : isBrowsing
@@ -2353,6 +2587,11 @@ function OpenCommandPaletteDialog(props: {
                 ? "pe-36"
                 : "pe-16"
               : undefined,
+          // Glyphs render in the pill backdrop; the input keeps the caret
+          // and selection. Only while the backdrop is actually mounted.
+          operatorPillBackdrop !== null &&
+            "*:data-[slot=autocomplete-input]:text-transparent! *:data-[slot=autocomplete-input]:caret-foreground",
+        ),
         placeholder: inputPlaceholder,
         wrapperClassName: isSubmenu
           ? "[&_[data-slot=autocomplete-start-addon]]:pointer-events-auto"

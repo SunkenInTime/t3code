@@ -132,7 +132,6 @@ import {
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
-  searchSidebarThreadsByTitle,
   shouldCreateNewThreadInCurrentProject,
   resolveWorkingStartedAt,
   sortLogicalProjectsForSidebar,
@@ -162,8 +161,8 @@ import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../pr
 import { primaryServerProvidersAtom } from "../state/server";
 import { useThreadRunningTerminalIds } from "../state/terminalSessions";
 import { stackedThreadToast, toastManager } from "./ui/toast";
-import { Button } from "./ui/button";
-import { Input } from "./ui/input";
+import { CommandDialogTrigger } from "./ui/command";
+import { Kbd } from "./ui/kbd";
 import { Menu, MenuPopup, MenuRadioGroup, MenuRadioItem, MenuTrigger } from "./ui/menu";
 import { SidebarContent, SidebarGroup, SidebarMenuButton, useSidebar } from "./ui/sidebar";
 import { SidebarChromeFooter, SidebarChromeHeader } from "./sidebar/SidebarChrome";
@@ -1489,109 +1488,6 @@ function latestTurnDiff(
   return null;
 }
 
-const SidebarSearchResultRow = memo(function SidebarSearchResultRow(props: {
-  thread: SidebarThreadSummary;
-  projectCwd: string | null;
-  projectFaviconPath: string | null;
-  projectTitle: string | null;
-  environmentLabel: string | null;
-  providerEntryByInstanceId: ReadonlyMap<string, ProviderInstanceEntry>;
-  isHighlighted: boolean;
-  isRouteActive: boolean;
-  resultId: string;
-  onHighlight: () => void;
-  onSelect: () => void;
-}) {
-  const { thread } = props;
-  // Same details tooltip as the regular rows: a search hit is still a thread,
-  // and the hover card is how you disambiguate identically-titled results.
-  const gitCwd = thread.worktreePath ?? props.projectCwd;
-  const gitStatus = useEnvironmentQuery(
-    (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
-      ? vcsEnvironment.status({
-          environmentId: thread.environmentId,
-          input: { cwd: gitCwd },
-        })
-      : null,
-  );
-  const branchMismatch = resolveLocalCheckoutBranchMismatch({
-    effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
-    activeWorktreePath: thread.worktreePath,
-    activeThreadBranch: thread.branch,
-    currentGitBranch: gitStatus.data?.refName ?? null,
-  });
-  const modelInstanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
-  const providerEntry = props.providerEntryByInstanceId.get(modelInstanceId) ?? null;
-  const driverKind = providerEntry?.driverKind ?? null;
-  const selectedModel = providerEntry?.models.find(
-    (model) => model.slug === thread.modelSelection.model,
-  );
-  const modelLabel = selectedModel
-    ? getTriggerDisplayModelLabel(selectedModel)
-    : thread.modelSelection.model;
-  const runningTerminalIds = useThreadRunningTerminalIds({
-    environmentId: thread.environmentId,
-    threadId: thread.id,
-  });
-  const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);
-  return (
-    <li role="presentation" className="list-none">
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <button
-              id={props.resultId}
-              type="button"
-              role="option"
-              // aria-activedescendant options: focus stays on the search input,
-              // which owns all keyboard interaction for the listbox.
-              tabIndex={-1}
-              aria-selected={props.isHighlighted}
-              aria-current={props.isRouteActive ? "page" : undefined}
-              aria-label={
-                props.projectTitle ? `${thread.title}, ${props.projectTitle}` : thread.title
-              }
-              onMouseMove={props.onHighlight}
-              onClick={props.onSelect}
-              className={cn(
-                "flex h-9 w-full cursor-pointer items-center gap-2.5 rounded-md px-2.5 text-left text-sm outline-none",
-                props.isHighlighted || props.isRouteActive
-                  ? "bg-sidebar-row-active text-sidebar-foreground"
-                  : "text-sidebar-muted-foreground/75 hover:bg-sidebar-row-hover hover:text-sidebar-foreground",
-              )}
-            />
-          }
-        >
-          <ProjectFavicon
-            environmentId={thread.environmentId}
-            cwd={props.projectCwd ?? ""}
-            faviconPath={props.projectFaviconPath}
-            className="size-4 shrink-0"
-            fallbackIcon={MessageSquareIcon}
-          />
-          <span className="min-w-0 flex-1 truncate">{thread.title}</span>
-          <span className="shrink-0 text-xs text-muted-foreground/55 tabular-nums">
-            {threadTimeLabel(thread)}
-          </span>
-        </TooltipTrigger>
-        <SidebarThreadTooltip
-          thread={thread}
-          projectTitle={props.projectTitle}
-          projectCwd={props.projectCwd}
-          projectFaviconPath={props.projectFaviconPath}
-          environmentLabel={props.environmentLabel}
-          driverKind={driverKind}
-          modelInstanceId={modelInstanceId}
-          modelLabel={modelLabel}
-          branchMismatch={branchMismatch}
-          terminalStatus={terminalStatus}
-          terminalProcessCount={runningTerminalIds.length}
-        />
-      </Tooltip>
-    </li>
-  );
-});
-
 export default function Sidebar() {
   const projects = useProjects();
   const projectOrder = useUiStateStore((store) => store.projectOrder);
@@ -2004,33 +1900,6 @@ export default function Sidebar() {
     threads,
   ]);
 
-  const threadSearchInputRef = useRef<HTMLInputElement>(null);
-  const [threadSearchQuery, setThreadSearchQuery] = useState("");
-  const [activeSearchResultIndex, setActiveSearchResultIndex] = useState(0);
-  const isSearchingThreads = threadSearchQuery.trim().length > 0;
-  const searchableThreads = useMemo(
-    () => [...pinnedThreads, ...activeThreads, ...snoozedThreads, ...settledThreads],
-    [activeThreads, pinnedThreads, settledThreads, snoozedThreads],
-  );
-  const threadSearchResults = useMemo(
-    () => searchSidebarThreadsByTitle(searchableThreads, threadSearchQuery),
-    [searchableThreads, threadSearchQuery],
-  );
-  const threadSearchResultOrderKey = threadSearchResults
-    .map((thread) => scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)))
-    .join("\0");
-
-  useEffect(() => {
-    setActiveSearchResultIndex(0);
-  }, [threadSearchResultOrderKey]);
-
-  useEffect(() => {
-    if (!isSearchingThreads) return;
-    document
-      .getElementById(`sidebar-thread-search-result-${activeSearchResultIndex}`)
-      ?.scrollIntoView({ block: "nearest" });
-  }, [activeSearchResultIndex, isSearchingThreads, threadSearchResultOrderKey]);
-
   // Arm a timeout for the earliest upcoming wake so the shelf empties the
   // moment a snooze expires instead of on the next minute tick. Sorted
   // soonest-first, so entry 0 is the boundary.
@@ -2231,56 +2100,6 @@ export default function Sidebar() {
       void router.navigate({ to: "/draft/$draftId", params: { draftId } });
     },
     [clearSelection, isMobile, router, setOpenMobile],
-  );
-
-  const clearThreadSearch = useCallback(() => {
-    setThreadSearchQuery("");
-    setActiveSearchResultIndex(0);
-  }, []);
-  const selectThreadSearchResult = useCallback(
-    (thread: EnvironmentThreadShell) => {
-      clearThreadSearch();
-      navigateToThread(scopeThreadRef(thread.environmentId, thread.id));
-    },
-    [clearThreadSearch, navigateToThread],
-  );
-  const handleThreadSearchKeyDown = useCallback(
-    (event: ReactKeyboardEvent<HTMLInputElement>) => {
-      // IME composition (Japanese/Chinese input) uses the same keys; committing
-      // a candidate must not move the highlight or navigate away mid-compose.
-      if (event.nativeEvent.isComposing || event.keyCode === 229) return;
-      if (event.key === "Escape" && isSearchingThreads) {
-        event.preventDefault();
-        event.stopPropagation();
-        clearThreadSearch();
-        return;
-      }
-      if (threadSearchResults.length === 0) return;
-      if (event.key === "ArrowDown") {
-        event.preventDefault();
-        setActiveSearchResultIndex((index) => (index + 1) % threadSearchResults.length);
-        return;
-      }
-      if (event.key === "ArrowUp") {
-        event.preventDefault();
-        setActiveSearchResultIndex(
-          (index) => (index - 1 + threadSearchResults.length) % threadSearchResults.length,
-        );
-        return;
-      }
-      if (event.key === "Enter") {
-        event.preventDefault();
-        const result = threadSearchResults[activeSearchResultIndex];
-        if (result) selectThreadSearchResult(result);
-      }
-    },
-    [
-      activeSearchResultIndex,
-      clearThreadSearch,
-      isSearchingThreads,
-      selectThreadSearchResult,
-      threadSearchResults,
-    ],
   );
 
   const [renamingThreadKey, setRenamingThreadKey] = useState<string | null>(null);
@@ -3235,6 +3054,7 @@ export default function Sidebar() {
     shortcutLabelForCommand(keybindings, "chat.new") ??
     (projectGroups.length <= 1 ? shortcutLabelForCommand(keybindings, "chat.newLocal") : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+  const commandPaletteShortcutLabel = shortcutLabelForCommand(keybindings, "commandPalette.toggle");
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
@@ -3245,52 +3065,27 @@ export default function Sidebar() {
           // header and would otherwise paint across the search row's outline.
           <SidebarGroup className="relative z-[1] gap-1 p-[var(--sidebar-content-inset)]">
             <div className="flex items-center gap-1">
-              <div className="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground hover:bg-sidebar-row-hover hover:text-sidebar-foreground">
-                <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
-                <Input
-                  ref={threadSearchInputRef}
-                  nativeInput
-                  unstyled
-                  type="search"
-                  value={threadSearchQuery}
-                  onChange={(event) => {
-                    setThreadSearchQuery(event.currentTarget.value);
-                    setActiveSearchResultIndex(0);
-                  }}
-                  onKeyDown={handleThreadSearchKeyDown}
-                  placeholder="Search"
-                  aria-label="Search threads"
-                  role="combobox"
-                  aria-autocomplete="list"
-                  aria-expanded={isSearchingThreads && threadSearchResults.length > 0}
-                  aria-controls={
-                    isSearchingThreads && threadSearchResults.length > 0
-                      ? "sidebar-thread-search-results"
-                      : undefined
-                  }
-                  aria-activedescendant={
-                    isSearchingThreads && threadSearchResults[activeSearchResultIndex]
-                      ? `sidebar-thread-search-result-${activeSearchResultIndex}`
-                      : undefined
-                  }
-                  className="min-w-0 flex-1 [&_[data-slot=input]]:h-auto [&_[data-slot=input]]:p-0 [&_[data-slot=input]]:leading-normal [&_[data-slot=input]]:text-sm [&_[data-slot=input]]:font-medium [&_[data-slot=input]]:text-sidebar-foreground [&_[data-slot=input]]:placeholder:text-sidebar-muted-foreground"
-                />
-                {isSearchingThreads ? (
-                  <Button
+              {/* Search lives in the command palette (operators, content
+                  search, project autocomplete); the sidebar only offers the
+                  doorway, mirroring the legacy sidebar's trigger. */}
+              <CommandDialogTrigger
+                render={
+                  <button
                     type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    className="size-5 shrink-0 rounded-sm text-sidebar-muted-foreground hover:bg-sidebar-control-surface hover:text-sidebar-foreground"
-                    aria-label="Clear thread search"
-                    onClick={() => {
-                      clearThreadSearch();
-                      threadSearchInputRef.current?.focus();
-                    }}
-                  >
-                    <XIcon className="size-3" />
-                  </Button>
+                    data-testid="command-palette-trigger"
+                    aria-label="Search threads"
+                    className="flex h-8 min-w-0 flex-1 cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm font-medium text-sidebar-muted-foreground outline-none hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-1 focus-visible:ring-ring"
+                  />
+                }
+              >
+                <SearchIcon className="size-4 shrink-0 text-sidebar-muted-foreground/80" />
+                <span className="min-w-0 flex-1 truncate text-left">Search</span>
+                {commandPaletteShortcutLabel ? (
+                  <Kbd className="h-4 min-w-0 rounded-sm px-1.5 text-[10px]">
+                    {commandPaletteShortcutLabel}
+                  </Kbd>
                 ) : null}
-              </div>
+              </CommandDialogTrigger>
               <div className="shrink-0">
                 <Tooltip>
                   <TooltipTrigger
@@ -3436,63 +3231,7 @@ export default function Sidebar() {
         }
       >
         <SidebarGroup className="ps-[calc(var(--sidebar-content-inset)+1px)] pe-[var(--sidebar-content-inset)] pb-1 pt-0">
-          {isSearchingThreads ? (
-            threadSearchResults.length > 0 ? (
-              <TooltipProvider
-                key="sidebar-thread-search-tooltips-150"
-                delay={150}
-                closeDelay={0}
-                timeout={400}
-              >
-                <ul
-                  id="sidebar-thread-search-results"
-                  role="listbox"
-                  aria-label="Thread search results"
-                  className="flex flex-col gap-px"
-                >
-                  {threadSearchResults.map((thread, index) => {
-                    const threadKey = scopedThreadKey(
-                      scopeThreadRef(thread.environmentId, thread.id),
-                    );
-                    return (
-                      <SidebarSearchResultRow
-                        key={threadKey}
-                        thread={thread}
-                        projectCwd={
-                          projectCwdByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
-                        }
-                        projectFaviconPath={
-                          projectFaviconPathByKey.get(
-                            `${thread.environmentId}:${thread.projectId}`,
-                          ) ?? null
-                        }
-                        projectTitle={
-                          projectDisplayNameByKey.get(
-                            `${thread.environmentId}:${thread.projectId}`,
-                          ) ?? null
-                        }
-                        environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
-                        providerEntryByInstanceId={providerEntryByInstanceId}
-                        isHighlighted={activeSearchResultIndex === index}
-                        isRouteActive={routeThreadKey === threadKey}
-                        resultId={`sidebar-thread-search-result-${index}`}
-                        onHighlight={() => setActiveSearchResultIndex(index)}
-                        onSelect={() => selectThreadSearchResult(thread)}
-                      />
-                    );
-                  })}
-                </ul>
-              </TooltipProvider>
-            ) : (
-              <p
-                role="status"
-                className="px-2 py-6 text-center text-xs text-sidebar-muted-foreground"
-              >
-                No threads found
-              </p>
-            )
-          ) : null}
-          {!isSearchingThreads ? (
+          {
             <TooltipProvider
               key="sidebar-thread-tooltips-150"
               delay={150}
@@ -3752,9 +3491,8 @@ export default function Sidebar() {
                 ) : null}
               </ul>
             </TooltipProvider>
-          ) : null}
-          {!isSearchingThreads &&
-          visibleDraftSessionCount === 0 &&
+          }
+          {visibleDraftSessionCount === 0 &&
           pinnedThreads.length +
             activeThreads.length +
             snoozedThreads.length +
