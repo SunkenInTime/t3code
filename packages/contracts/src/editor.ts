@@ -69,6 +69,9 @@ export const EDITORS = [
 export const EditorId = Schema.Literals(EDITORS.map((e) => e.id));
 export type EditorId = typeof EditorId.Type;
 
+export const FileManagerRevealKind = Schema.Literals(["finder", "file-explorer", "files"]);
+export type FileManagerRevealKind = typeof FileManagerRevealKind.Type;
+
 export const LaunchEditorInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
   editor: EditorId,

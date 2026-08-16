@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { revealInFileExplorerLabel, revealInFileExplorerLabelForOs } from "./fileExplorerLabel";
+import {
+  revealInFileExplorerLabel,
+  revealInFileExplorerLabelForKind,
+  revealInFileExplorerLabelForOs,
+} from "./fileExplorerLabel";
 
 describe("revealInFileExplorerLabel", () => {
   it.each([
@@ -20,5 +24,15 @@ describe("revealInFileExplorerLabelForOs", () => {
     ["unknown", "Reveal in Files"],
   ] as const)("maps %s to %s", (os, expected) => {
     expect(revealInFileExplorerLabelForOs(os)).toBe(expected);
+  });
+});
+
+describe("revealInFileExplorerLabelForKind", () => {
+  it.each([
+    ["finder", "Reveal in Finder"],
+    ["file-explorer", "Reveal in File Explorer"],
+    ["files", "Reveal in Files"],
+  ] as const)("maps %s to %s", (kind, expected) => {
+    expect(revealInFileExplorerLabelForKind(kind)).toBe(expected);
   });
 });

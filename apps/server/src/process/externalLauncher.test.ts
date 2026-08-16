@@ -167,15 +167,12 @@ it.effect("reveals a file in Finder with open -R on macOS", () =>
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
-it.effect("reveals a file in File Explorer through PowerShell on Windows", () =>
+it.effect("reveals a file in File Explorer directly on Windows", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
-    const systemRoot = path.join(binDir, "system-root");
-    const powerShellPath = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
-    yield* fileSystem.makeDirectory(path.dirname(powerShellPath), { recursive: true });
-    yield* fileSystem.writeFileString(powerShellPath, "");
+    yield* fileSystem.writeFileString(path.join(binDir, "explorer.CMD"), "@echo off\r\n");
 
     let spawned: ChildProcess.StandardCommand | undefined;
     yield* Effect.gen(function* () {
@@ -189,7 +186,7 @@ it.effect("reveals a file in File Explorer through PowerShell on Windows", () =>
       Effect.provide(
         testLayer({
           platform: "win32",
-          env: { PATHEXT: ".COM;.EXE;.BAT;.CMD", SYSTEMROOT: systemRoot },
+          env: { PATH: binDir, PATHEXT: ".COM;.EXE;.BAT;.CMD" },
           onSpawn: (command) => {
             spawned = command;
           },
@@ -198,15 +195,62 @@ it.effect("reveals a file in File Explorer through PowerShell on Windows", () =>
     );
 
     assert.ok(spawned);
-    assert.equal(spawned.command, powerShellPath);
-    const encodedCommand = spawned.args[spawned.args.length - 1] ?? "";
-    const decodedCommand = Buffer.from(encodedCommand, "base64").toString("utf16le");
-    // explorer.exe expects `/select,"<path>"` with only the path quoted;
-    // PowerShell 5.1's Start-Process passes the argument string verbatim.
-    assert.equal(
-      decodedCommand,
-      "$ProgressPreference = 'SilentlyContinue'; Start explorer.exe -ArgumentList ('/select,\"' + 'C:\\workspace with spaces\\media\\author''s clip.mp4' + '\"')",
+    assert.equal(spawned.command, "explorer");
+    assert.deepEqual(spawned.args, [
+      "/select,",
+      "C:\\workspace with spaces\\media\\author's clip.mp4",
+    ]);
+    assert.equal(spawned.options.shell, false);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("reveals a WSL file in Windows File Explorer through its UNC path", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
+    const explorerPath = path.join(binDir, "explorer.exe");
+    const xdgOpenPath = path.join(binDir, "xdg-open");
+    yield* fileSystem.writeFileString(explorerPath, "");
+    yield* fileSystem.writeFileString(xdgOpenPath, "#!/bin/sh\n");
+    yield* fileSystem.chmod(explorerPath, 0o755);
+    yield* fileSystem.chmod(xdgOpenPath, 0o755);
+
+    let spawned: ChildProcess.StandardCommand | undefined;
+    const result = yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      const kind = yield* launcher.resolveFileManagerRevealKind();
+      const editors = yield* launcher.resolveAvailableEditors();
+      yield* launcher.launchEditor({
+        editor: "file-manager",
+        cwd: "/home/t3/workspace/media/clip.mp4",
+        reveal: true,
+      });
+      return { kind, editors };
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          platform: "linux",
+          env: {
+            PATH: binDir,
+            WSL_DISTRO_NAME: "Ubuntu-24.04",
+            WSL_INTEROP: "/run/WSL/1_interop",
+          },
+          onSpawn: (command) => {
+            spawned = command;
+          },
+        }),
+      ),
     );
+
+    assert.equal(result.kind, "file-explorer");
+    assert.equal(result.editors.includes("file-manager"), true);
+    assert.ok(spawned);
+    assert.equal(spawned.command, "explorer.exe");
+    assert.deepEqual(spawned.args, [
+      "/select,",
+      "\\\\wsl.localhost\\Ubuntu-24.04\\home\\t3\\workspace\\media\\clip.mp4",
+    ]);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
@@ -231,7 +275,7 @@ it.effect("reveals by opening the containing directory on Linux", () =>
       Effect.provide(
         testLayer({
           platform: "linux",
-          env: { PATH: binDir },
+          env: { PATH: binDir, DISPLAY: ":0" },
           onSpawn: (command) => {
             spawned = command;
           },
@@ -242,6 +286,42 @@ it.effect("reveals by opening the containing directory on Linux", () =>
     assert.ok(spawned);
     assert.equal(spawned.command, "xdg-open");
     assert.deepEqual(spawned.args, ["/workspace/media"]);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("does not advertise a Linux file manager without a graphical session", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
+    const xdgOpenPath = path.join(binDir, "xdg-open");
+    yield* fileSystem.writeFileString(xdgOpenPath, "#!/bin/sh\n");
+    yield* fileSystem.chmod(xdgOpenPath, 0o755);
+
+    const editors = yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      return yield* launcher.resolveAvailableEditors();
+    }).pipe(Effect.provide(testLayer({ platform: "linux", env: { PATH: binDir } })));
+
+    assert.equal(editors.includes("file-manager"), false);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+it.effect("advertises a Linux file manager when XDG open has a graphical session", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
+    const xdgOpenPath = path.join(binDir, "xdg-open");
+    yield* fileSystem.writeFileString(xdgOpenPath, "#!/bin/sh\n");
+    yield* fileSystem.chmod(xdgOpenPath, 0o755);
+
+    const editors = yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      return yield* launcher.resolveAvailableEditors();
+    }).pipe(Effect.provide(testLayer({ platform: "linux", env: { PATH: binDir, DISPLAY: ":0" } })));
+
+    assert.equal(editors.includes("file-manager"), true);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
