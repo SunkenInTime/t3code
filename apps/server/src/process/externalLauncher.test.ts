@@ -170,10 +170,11 @@ it.effect("reveals a file in Finder with open -R on macOS", () =>
 it.effect("reveals a file in File Explorer through PowerShell on Windows", () =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
     const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
-    // resolvePowerShellPath builds `${SYSTEMROOT}\System32\...` with Windows
-    // separators, which on the posix test filesystem is one file name.
-    const powerShellPath = `${binDir}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    const systemRoot = path.join(binDir, "system-root");
+    const powerShellPath = `${systemRoot}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+    yield* fileSystem.makeDirectory(path.dirname(powerShellPath), { recursive: true });
     yield* fileSystem.writeFileString(powerShellPath, "");
 
     let spawned: ChildProcess.StandardCommand | undefined;
@@ -181,14 +182,14 @@ it.effect("reveals a file in File Explorer through PowerShell on Windows", () =>
       const launcher = yield* ExternalLauncher.ExternalLauncher;
       yield* launcher.launchEditor({
         editor: "file-manager",
-        cwd: "C:\\workspace with spaces\\media\\clip.mp4",
+        cwd: "C:\\workspace with spaces\\media\\author's clip.mp4",
         reveal: true,
       });
     }).pipe(
       Effect.provide(
         testLayer({
           platform: "win32",
-          env: { PATHEXT: ".COM;.EXE;.BAT;.CMD", SYSTEMROOT: binDir },
+          env: { PATHEXT: ".COM;.EXE;.BAT;.CMD", SYSTEMROOT: systemRoot },
           onSpawn: (command) => {
             spawned = command;
           },
@@ -204,7 +205,7 @@ it.effect("reveals a file in File Explorer through PowerShell on Windows", () =>
     // PowerShell 5.1's Start-Process passes the argument string verbatim.
     assert.equal(
       decodedCommand,
-      "$ProgressPreference = 'SilentlyContinue'; Start explorer.exe -ArgumentList ('/select,\"' + 'C:\\workspace with spaces\\media\\clip.mp4' + '\"')",
+      "$ProgressPreference = 'SilentlyContinue'; Start explorer.exe -ArgumentList ('/select,\"' + 'C:\\workspace with spaces\\media\\author''s clip.mp4' + '\"')",
     );
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
