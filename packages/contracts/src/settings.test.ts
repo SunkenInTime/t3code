@@ -33,6 +33,32 @@ describe("ClientSettings word wrap", () => {
   });
 });
 
+describe("ClientSettings diff appearance", () => {
+  it("preserves the existing colors and bar indicators by default", () => {
+    const settings = decodeClientSettings({});
+
+    expect(settings.diffColorScheme).toBe("red-green");
+    expect(settings.diffIndicatorStyle).toBe("bars");
+  });
+
+  it("accepts the alternate colors and classic line markers", () => {
+    expect(
+      decodeClientSettingsPatch({
+        diffColorScheme: "orange-blue",
+        diffIndicatorStyle: "classic",
+      }),
+    ).toMatchObject({
+      diffColorScheme: "orange-blue",
+      diffIndicatorStyle: "classic",
+    });
+  });
+
+  it("rejects unsupported diff appearance values", () => {
+    expect(() => decodeClientSettings({ diffColorScheme: "purple-yellow" })).toThrow();
+    expect(() => decodeClientSettingsPatch({ diffIndicatorStyle: "none" })).toThrow();
+  });
+});
+
 describe("ClientSettings glass opacity", () => {
   it("defaults to a readable translucent surface", () => {
     expect(decodeClientSettings({}).glassOpacity).toBe(80);

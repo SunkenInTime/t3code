@@ -4,11 +4,15 @@ import {
   type CodeViewHandle,
   type CodeViewProps,
   type ControlledCodeViewProps,
+  FileDiff,
+  type FileDiffProps,
   type UncontrolledCodeViewProps,
 } from "@pierre/diffs/react";
 /* oxlint-enable eslint/no-restricted-imports */
 import type { Ref } from "react";
+import type { DiffColorScheme } from "@t3tools/contracts/settings";
 
+import { useClientSettings } from "~/hooks/useSettings";
 import { DIFF_SURFACE_THEME_UNSAFE_CSS } from "~/lib/diffRendering";
 
 const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
@@ -258,9 +262,29 @@ const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
 }
 `;
 
+const DIFF_COLOR_SCHEME_CLASSES: Record<DiffColorScheme, string> = {
+  "red-green":
+    "[--t3-diff-addition-color:var(--success)] [--t3-diff-deletion-color:var(--destructive)]",
+  "orange-blue": "[--t3-diff-addition-color:var(--info)] [--t3-diff-deletion-color:var(--warning)]",
+};
+
+export function getDiffColorSchemeClassName(scheme: DiffColorScheme): string {
+  return DIFF_COLOR_SCHEME_CLASSES[scheme];
+}
+
+function getDiffSurfaceClassName(colorScheme: DiffColorScheme, className?: string): string {
+  return [
+    "diff-render-surface [--code-background:var(--background)] outline-none",
+    getDiffColorSchemeClassName(colorScheme),
+    className,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
 export type StyledDiffCodeViewOptions<LAnnotation> = Omit<
   NonNullable<CodeViewProps<LAnnotation>["options"]>,
-  "unsafeCSS" | "itemMetrics" | "layout"
+  "unsafeCSS" | "itemMetrics" | "layout" | "diffIndicators"
 >;
 
 type StyledDiffCodeViewProps<LAnnotation> = (
@@ -284,19 +308,19 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
   unsafeCSSExtra,
   ...props
 }: StyledDiffCodeViewProps<LAnnotation>) {
+  const diffColorScheme = useClientSettings((settings) => settings.diffColorScheme);
+  const diffIndicatorStyle = useClientSettings((settings) => settings.diffIndicatorStyle);
+
   return (
     <CodeView<LAnnotation>
       {...props}
       {...(viewerRef ? { ref: viewerRef } : {})}
       // The custom element itself is focusable for keyboard scrolling. Its native outline sits
       // outside the panel clipping boundary; actual controls inside retain their own indicators.
-      className={
-        className
-          ? `diff-render-surface [--code-background:var(--background)] outline-none ${className}`
-          : "diff-render-surface [--code-background:var(--background)] outline-none"
-      }
+      className={getDiffSurfaceClassName(diffColorScheme, className)}
       options={{
         ...options,
+        diffIndicators: diffIndicatorStyle,
         unsafeCSS: unsafeCSSExtra
           ? `${DIFF_VIEW_UNSAFE_CSS}\n${unsafeCSSExtra}`
           : DIFF_VIEW_UNSAFE_CSS,
@@ -316,6 +340,37 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
           paddingBottom: 8,
         },
         layout: { paddingTop: 0, paddingBottom: 0, gap: 0 },
+      }}
+    />
+  );
+}
+
+export type StyledFileDiffOptions<LAnnotation> = Omit<
+  NonNullable<FileDiffProps<LAnnotation>["options"]>,
+  "unsafeCSS" | "diffIndicators"
+>;
+
+type StyledFileDiffProps<LAnnotation> = Omit<FileDiffProps<LAnnotation>, "options"> & {
+  readonly options?: StyledFileDiffOptions<LAnnotation>;
+};
+
+/** The non-virtualized counterpart used for compact inline review-comment diffs. */
+export function StyledFileDiff<LAnnotation = undefined>({
+  options,
+  className,
+  ...props
+}: StyledFileDiffProps<LAnnotation>) {
+  const diffColorScheme = useClientSettings((settings) => settings.diffColorScheme);
+  const diffIndicatorStyle = useClientSettings((settings) => settings.diffIndicatorStyle);
+
+  return (
+    <FileDiff<LAnnotation>
+      {...props}
+      className={getDiffSurfaceClassName(diffColorScheme, className)}
+      options={{
+        ...options,
+        diffIndicators: diffIndicatorStyle,
+        unsafeCSS: DIFF_SURFACE_THEME_UNSAFE_CSS,
       }}
     />
   );
