@@ -77,6 +77,7 @@ import {
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
+import { getDiffColorSchemeClassName } from "../../lib/diffRendering";
 import { cn, isMacPlatform } from "../../lib/utils";
 import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from "../../state/server";
 import { useProjects } from "../../state/entities";
@@ -1039,14 +1040,11 @@ function DiffAppearanceChoice<T extends string>({
 }
 
 function DiffColorPreview({ scheme }: { readonly scheme: DiffColorScheme }) {
-  const deletionColor = scheme === "orange-blue" ? "var(--warning)" : "var(--destructive)";
-  const additionColor = scheme === "orange-blue" ? "var(--info)" : "var(--success)";
-
   return (
-    <>
-      <DiffPreviewLine color={deletionColor} label="old" />
-      <DiffPreviewLine color={additionColor} label="new" />
-    </>
+    <span className={getDiffColorSchemeClassName(scheme)}>
+      <DiffPreviewLine color="var(--t3-diff-deletion-color)" label="old" />
+      <DiffPreviewLine color="var(--t3-diff-addition-color)" label="new" />
+    </span>
   );
 }
 
@@ -1057,23 +1055,21 @@ function DiffIndicatorPreview({
   readonly colorScheme: DiffColorScheme;
   readonly style: DiffIndicatorStyle;
 }) {
-  const deletionColor = colorScheme === "orange-blue" ? "var(--warning)" : "var(--destructive)";
-  const additionColor = colorScheme === "orange-blue" ? "var(--info)" : "var(--success)";
   const classic = style === "classic";
 
   return (
-    <>
+    <span className={getDiffColorSchemeClassName(colorScheme)}>
       <DiffPreviewLine
-        color={deletionColor}
+        color="var(--t3-diff-deletion-color)"
         label="old"
         {...(classic ? { marker: "-" as const } : { showBar: true })}
       />
       <DiffPreviewLine
-        color={additionColor}
+        color="var(--t3-diff-addition-color)"
         label="new"
         {...(classic ? { marker: "+" as const } : { showBar: true })}
       />
-    </>
+    </span>
   );
 }
 

@@ -13,7 +13,7 @@ import type { Ref } from "react";
 import type { DiffColorScheme } from "@t3tools/contracts/settings";
 
 import { useClientSettings } from "~/hooks/useSettings";
-import { DIFF_SURFACE_THEME_UNSAFE_CSS } from "~/lib/diffRendering";
+import { DIFF_SURFACE_THEME_UNSAFE_CSS, getDiffColorSchemeClassName } from "~/lib/diffRendering";
 
 const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
 :is(
@@ -261,16 +261,6 @@ const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
   }
 }
 `;
-
-const DIFF_COLOR_SCHEME_CLASSES: Record<DiffColorScheme, string> = {
-  "red-green":
-    "[--t3-diff-addition-color:var(--success)] [--t3-diff-deletion-color:var(--destructive)]",
-  "orange-blue": "[--t3-diff-addition-color:var(--info)] [--t3-diff-deletion-color:var(--warning)]",
-};
-
-export function getDiffColorSchemeClassName(scheme: DiffColorScheme): string {
-  return DIFF_COLOR_SCHEME_CLASSES[scheme];
-}
 
 function getDiffSurfaceClassName(colorScheme: DiffColorScheme, className?: string): string {
   return [

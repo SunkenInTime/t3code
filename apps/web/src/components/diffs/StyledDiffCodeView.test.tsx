@@ -21,11 +21,8 @@ vi.mock("@pierre/diffs/react", () => ({
   },
 }));
 
-import {
-  getDiffColorSchemeClassName,
-  StyledDiffCodeView,
-  StyledFileDiff,
-} from "./StyledDiffCodeView";
+import { StyledDiffCodeView, StyledFileDiff } from "./StyledDiffCodeView";
+import { getDiffColorSchemeClassName } from "~/lib/diffRendering";
 
 describe("StyledDiffCodeView", () => {
   beforeEach(() => {
