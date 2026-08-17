@@ -206,6 +206,8 @@ export const DIFF_SURFACE_THEME_UNSAFE_CSS = `
   --diffs-token-dark-bg: transparent;
   --diffs-addition-color-override: var(--t3-diff-addition-color, var(--success)) !important;
   --diffs-deletion-color-override: var(--t3-diff-deletion-color, var(--destructive)) !important;
+  --diffs-addition-base: var(--diffs-addition-color-override) !important;
+  --diffs-deletion-base: var(--diffs-deletion-color-override) !important;
 
   /* Gutter, context, and row tints all derive from the code surface the diff
      body sits on — mixing from the canvas leaves the gutter looking unthemed

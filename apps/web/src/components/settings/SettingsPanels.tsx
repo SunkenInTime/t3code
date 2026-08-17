@@ -1025,7 +1025,7 @@ function DiffAppearanceChoice<T extends string>({
       aria-label={label}
       aria-pressed={selected}
       className={cn(
-        "w-16 overflow-hidden rounded-lg border-2 bg-background p-1 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
+        "w-16 cursor-pointer overflow-hidden rounded-lg border-2 bg-background p-1 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
         selected
           ? "border-primary ring-1 ring-primary/25"
           : "border-border/70 hover:border-foreground/30",

@@ -106,5 +106,11 @@ describe("StyledDiffCodeView", () => {
     expect(testState.fileDiffOptions?.unsafeCSS).toEqual(
       expect.stringContaining("--diffs-addition-color-override"),
     );
+    expect(testState.fileDiffOptions?.unsafeCSS).toEqual(
+      expect.stringContaining("--diffs-addition-base: var(--diffs-addition-color-override)"),
+    );
+    expect(testState.fileDiffOptions?.unsafeCSS).toEqual(
+      expect.stringContaining("--diffs-deletion-base: var(--diffs-deletion-color-override)"),
+    );
   });
 });
