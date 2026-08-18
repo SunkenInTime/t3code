@@ -36,6 +36,7 @@ import {
   buildFileDiffRenderKey,
   fnv1a32,
   getDiffLineStat,
+  getDiffColorSchemeClassName,
   getRenderablePatch,
   resolveDiffThemeName,
   resolveFileDiffPath,
@@ -1161,7 +1162,12 @@ export function PullRequestCodeTab({
   // The toolbar rides above every branch below, not just the one with a patch in it: a commit
   // whose diff is empty or unreadable still needs the scope dropdown that got the reader there.
   const withReviewBar = (body: ReactNode) => (
-    <div className="flex h-full min-h-0 flex-col">
+    <div
+      className={cn(
+        "flex h-full min-h-0 flex-col",
+        getDiffColorSchemeClassName(settings.diffColorScheme),
+      )}
+    >
       {toolbar}
       {/* The overlay is anchored to this wrapper, not the scroller: absolute positioning
           inside an overflowing element tracks the content's bottom edge, which would carry
@@ -1245,7 +1251,12 @@ export function PullRequestCodeTab({
 
   return (
     <DiffWorkerPoolProvider>
-      <div className="flex h-full min-h-0 flex-col">
+      <div
+        className={cn(
+          "flex h-full min-h-0 flex-col",
+          getDiffColorSchemeClassName(settings.diffColorScheme),
+        )}
+      >
         {toolbar}
         {/* Above the code, closed, and counted: these belong to the change rather than to any
             line of it, and in the stream they read as cards dropped into the patch. */}
