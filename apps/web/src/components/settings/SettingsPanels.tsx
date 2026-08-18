@@ -1016,88 +1016,6 @@ export function AppearanceSettingsPanel() {
         </div>
 
         <SettingsRow
-          {...searchableSetting("diff-colors")}
-          description="Choose the colors marking added and deleted lines in diffs."
-          resetAction={
-            settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme ? (
-              <SettingResetButton
-                label="diff colors"
-                onClick={() =>
-                  updateSettings({ diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.diffColorScheme}
-              onValueChange={(diffColorScheme) => {
-                if (diffColorScheme === "red-green" || diffColorScheme === "orange-blue") {
-                  updateSettings({ diffColorScheme });
-                }
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-40" aria-label="Diff colors">
-                <SelectValue>
-                  {settings.diffColorScheme === "red-green" ? "Red and green" : "Orange and blue"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="red-green">
-                  Red and green
-                </SelectItem>
-                <SelectItem hideIndicator value="orange-blue">
-                  Orange and blue
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        />
-
-        <SettingsRow
-          {...searchableSetting("diff-markers")}
-          description="Show + and − markers on added and deleted diff lines."
-          resetAction={
-            settings.diffIndicatorStyle !== DEFAULT_UNIFIED_SETTINGS.diffIndicatorStyle ? (
-              <SettingResetButton
-                label="diff markers"
-                onClick={() =>
-                  updateSettings({
-                    diffIndicatorStyle: DEFAULT_UNIFIED_SETTINGS.diffIndicatorStyle,
-                  })
-                }
-              />
-            ) : null
-          }
-          control={
-            <Select
-              value={settings.diffIndicatorStyle}
-              onValueChange={(diffIndicatorStyle) => {
-                if (diffIndicatorStyle === "bars" || diffIndicatorStyle === "classic") {
-                  updateSettings({ diffIndicatorStyle });
-                }
-              }}
-            >
-              <SelectTrigger className="w-full sm:w-40" aria-label="Diff markers">
-                <SelectValue>
-                  {settings.diffIndicatorStyle === "bars" ? "Bars" : "Plus and minus"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectPopup align="end" alignItemWithTrigger={false}>
-                <SelectItem hideIndicator value="bars">
-                  Bars
-                </SelectItem>
-                <SelectItem hideIndicator value="classic">
-                  Plus and minus
-                </SelectItem>
-              </SelectPopup>
-            </Select>
-          }
-        >
-          <DiffPreview />
-        </SettingsRow>
-
-        <SettingsRow
           {...searchableSetting("setting-glass-opacity")}
           description="Control how transparent glass surfaces are. Higher values make menus, dialogs, and the composer more solid."
           resetAction={
@@ -1309,7 +1227,7 @@ function CodeFontRow({
         defaultValue: DEFAULT_UNIFIED_SETTINGS.fontSizeCode,
         onChange: (fontSizeCode) => updateSettings({ fontSizeCode }),
       }}
-      preview={preview ?? <DiffPreview />}
+      {...(preview !== undefined ? { preview } : {})}
     />
   );
 }
@@ -1410,12 +1328,104 @@ function WordWrapRow() {
   );
 }
 
+function DiffAppearanceRows({ children }: { children?: ReactNode }) {
+  const settings = usePrimarySettings();
+  const updateSettings = useUpdatePrimarySettings();
+  return (
+    <>
+      <SettingsRow
+        {...searchableSetting("diff-colors")}
+        description="Choose the colors marking added and deleted lines in diffs."
+        resetAction={
+          settings.diffColorScheme !== DEFAULT_UNIFIED_SETTINGS.diffColorScheme ? (
+            <SettingResetButton
+              label="diff colors"
+              onClick={() =>
+                updateSettings({ diffColorScheme: DEFAULT_UNIFIED_SETTINGS.diffColorScheme })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Select
+            value={settings.diffColorScheme}
+            onValueChange={(diffColorScheme) => {
+              if (diffColorScheme === "red-green" || diffColorScheme === "orange-blue") {
+                updateSettings({ diffColorScheme });
+              }
+            }}
+          >
+            <SelectTrigger className="w-full sm:w-40" aria-label="Diff colors">
+              <SelectValue>
+                {settings.diffColorScheme === "red-green" ? "Red and green" : "Orange and blue"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem hideIndicator value="red-green">
+                Red and green
+              </SelectItem>
+              <SelectItem hideIndicator value="orange-blue">
+                Orange and blue
+              </SelectItem>
+            </SelectPopup>
+          </Select>
+        }
+      />
+
+      <SettingsRow
+        {...searchableSetting("diff-markers")}
+        description="Show + and − markers on added and deleted diff lines."
+        resetAction={
+          settings.diffIndicatorStyle !== DEFAULT_UNIFIED_SETTINGS.diffIndicatorStyle ? (
+            <SettingResetButton
+              label="diff markers"
+              onClick={() =>
+                updateSettings({
+                  diffIndicatorStyle: DEFAULT_UNIFIED_SETTINGS.diffIndicatorStyle,
+                })
+              }
+            />
+          ) : null
+        }
+        control={
+          <Select
+            value={settings.diffIndicatorStyle}
+            onValueChange={(diffIndicatorStyle) => {
+              if (diffIndicatorStyle === "bars" || diffIndicatorStyle === "classic") {
+                updateSettings({ diffIndicatorStyle });
+              }
+            }}
+          >
+            <SelectTrigger className="w-full sm:w-40" aria-label="Diff markers">
+              <SelectValue>
+                {settings.diffIndicatorStyle === "bars" ? "Bars" : "Plus and minus"}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectPopup align="end" alignItemWithTrigger={false}>
+              <SelectItem hideIndicator value="bars">
+                Bars
+              </SelectItem>
+              <SelectItem hideIndicator value="classic">
+                Plus and minus
+              </SelectItem>
+            </SelectPopup>
+          </Select>
+        }
+      >
+        <DiffPreview />
+        {children}
+      </SettingsRow>
+    </>
+  );
+}
+
 function FontSettingsGroup() {
   return (
     <>
       <InterfaceFontRow />
       <PromptFontRow />
       <CodeFontRow />
+      <DiffAppearanceRows />
       <TerminalFontRow />
       <FontSmoothingRow />
     </>
@@ -1435,24 +1445,21 @@ function SimpleFontRows() {
       <CodeFontRow
         title="Monospace font"
         description="Code blocks, diffs, file previews, and the terminal."
-        preview={
-          <>
-            <DiffPreview />
-            <TerminalFontPreview
-              family={resolveTerminalFontPreference({
-                advanced: false,
-                code: settings.fontFamilyCode,
-                terminal: settings.fontFamilyTerminal,
-              })}
-              size={resolveTerminalFontSizePreference({
-                advanced: false,
-                code: settings.fontSizeCode,
-                terminal: settings.fontSizeTerminal,
-              })}
-            />
-          </>
-        }
       />
+      <DiffAppearanceRows>
+        <TerminalFontPreview
+          family={resolveTerminalFontPreference({
+            advanced: false,
+            code: settings.fontFamilyCode,
+            terminal: settings.fontFamilyTerminal,
+          })}
+          size={resolveTerminalFontSizePreference({
+            advanced: false,
+            code: settings.fontSizeCode,
+            terminal: settings.fontSizeTerminal,
+          })}
+        />
+      </DiffAppearanceRows>
     </>
   );
 }
