@@ -1080,7 +1080,7 @@ export function AppearanceSettingsPanel() {
                   }
                   pressed={settings.diffColorScheme === scheme}
                   variant="outline"
-                  className="h-auto w-16 overflow-hidden p-1 data-pressed:border-primary data-pressed:bg-background data-pressed:ring-1 data-pressed:ring-primary/25"
+                  className="h-auto w-16 p-1 data-pressed:border-primary"
                   onPressedChange={() => updateSettings({ diffColorScheme: scheme })}
                 >
                   <DiffAppearancePreview colorScheme={scheme} />
@@ -1115,7 +1115,7 @@ export function AppearanceSettingsPanel() {
                   }
                   pressed={settings.diffIndicatorStyle === style}
                   variant="outline"
-                  className="h-auto w-16 overflow-hidden p-1 data-pressed:border-primary data-pressed:bg-background data-pressed:ring-1 data-pressed:ring-primary/25"
+                  className="h-auto w-16 p-1 data-pressed:border-primary"
                   onPressedChange={() => updateSettings({ diffIndicatorStyle: style })}
                 >
                   <DiffAppearancePreview
