@@ -1328,7 +1328,7 @@ function WordWrapRow() {
   );
 }
 
-function DiffAppearanceRows({ children }: { children?: ReactNode }) {
+function DiffAppearanceRows() {
   const settings = usePrimarySettings();
   const updateSettings = useUpdatePrimarySettings();
   return (
@@ -1413,7 +1413,6 @@ function DiffAppearanceRows({ children }: { children?: ReactNode }) {
         }
       >
         <DiffPreview />
-        {children}
       </SettingsRow>
     </>
   );

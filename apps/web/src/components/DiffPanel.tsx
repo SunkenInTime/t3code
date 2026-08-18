@@ -31,7 +31,6 @@ import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelS
 import { useTheme } from "../hooks/useTheme";
 import {
   buildFileDiffRenderKey,
-  getDiffColorSchemeClassName,
   getDiffCollapseIconClassName,
   getDiffLineStat,
   getRenderablePatch,
@@ -716,10 +715,7 @@ export default function DiffPanel({
           <DiffStatLabel
             additions={diffLineStat.additions}
             deletions={diffLineStat.deletions}
-            className={cn(
-              "mr-1 text-[11px]",
-              getDiffColorSchemeClassName(settings.diffColorScheme),
-            )}
+            className="mr-1 text-[11px]"
             layout="inline"
           />
         )}
