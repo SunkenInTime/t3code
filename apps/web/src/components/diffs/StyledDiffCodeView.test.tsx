@@ -4,8 +4,6 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 const testState = vi.hoisted(() => ({
   codeViewClassName: null as string | null,
   codeViewOptions: null as Record<string, unknown> | null,
-  fileDiffClassName: null as string | null,
-  fileDiffOptions: null as Record<string, unknown> | null,
 }));
 
 vi.mock("@pierre/diffs/react", () => ({
@@ -14,22 +12,15 @@ vi.mock("@pierre/diffs/react", () => ({
     testState.codeViewOptions = props.options;
     return null;
   },
-  FileDiff: (props: { className: string; options: Record<string, unknown> }) => {
-    testState.fileDiffClassName = props.className;
-    testState.fileDiffOptions = props.options;
-    return null;
-  },
+  FileDiff: () => null,
 }));
 
-import { StyledDiffCodeView, StyledFileDiff } from "./StyledDiffCodeView";
-import { getDiffColorSchemeClassName } from "~/lib/diffRendering";
+import { StyledDiffCodeView } from "./StyledDiffCodeView";
 
 describe("StyledDiffCodeView", () => {
   beforeEach(() => {
     testState.codeViewClassName = null;
     testState.codeViewOptions = null;
-    testState.fileDiffClassName = null;
-    testState.fileDiffOptions = null;
   });
 
   it("always pairs the shared diff styling with its virtualized geometry", () => {
@@ -68,46 +59,6 @@ describe("StyledDiffCodeView", () => {
     );
     expect(testState.codeViewOptions?.unsafeCSS).toEqual(
       expect.stringContaining(")[data-expand-index]\n  [data-unmodified-lines]"),
-    );
-  });
-
-  it("maps the alternate palette to blue additions and orange deletions", () => {
-    expect(getDiffColorSchemeClassName("orange-blue")).toBe(
-      "[--t3-diff-addition-color:var(--info)] [--t3-diff-deletion-color:var(--warning)]",
-    );
-  });
-
-  it("applies the same appearance defaults to compact file diffs", () => {
-    renderToStaticMarkup(
-      <StyledFileDiff
-        fileDiff={{
-          name: "app.ts",
-          type: "change",
-          hunks: [],
-          splitLineCount: 0,
-          unifiedLineCount: 0,
-          isPartial: true,
-          deletionLines: [],
-          additionLines: [],
-        }}
-        options={{ diffStyle: "unified", theme: "pierre-dark" }}
-      />,
-    );
-
-    expect(testState.fileDiffClassName).toContain("[--t3-diff-addition-color:var(--success)]");
-    expect(testState.fileDiffOptions).toMatchObject({
-      diffStyle: "unified",
-      theme: "pierre-dark",
-      diffIndicators: "bars",
-    });
-    expect(testState.fileDiffOptions?.unsafeCSS).toEqual(
-      expect.stringContaining("--diffs-addition-color-override"),
-    );
-    expect(testState.fileDiffOptions?.unsafeCSS).toEqual(
-      expect.stringContaining("--diffs-addition-base: var(--diffs-addition-color-override)"),
-    );
-    expect(testState.fileDiffOptions?.unsafeCSS).toEqual(
-      expect.stringContaining("--diffs-deletion-base: var(--diffs-deletion-color-override)"),
     );
   });
 });

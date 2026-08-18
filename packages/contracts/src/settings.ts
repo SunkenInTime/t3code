@@ -114,11 +114,9 @@ export const DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE: EnvironmentIdentificationM
 
 export const DiffColorScheme = Schema.Literals(["red-green", "orange-blue"]);
 export type DiffColorScheme = typeof DiffColorScheme.Type;
-export const DEFAULT_DIFF_COLOR_SCHEME: DiffColorScheme = "red-green";
 
 export const DiffIndicatorStyle = Schema.Literals(["bars", "classic"]);
 export type DiffIndicatorStyle = typeof DiffIndicatorStyle.Type;
-export const DEFAULT_DIFF_INDICATOR_STYLE: DiffIndicatorStyle = "bars";
 
 /**
  * A user-chosen font family (a single name or a comma-separated list). Empty
@@ -163,12 +161,8 @@ export const ClientSettingsSchema = Schema.Struct({
   dismissedProviderUpdateNotificationKeys: Schema.Array(TrimmedNonEmptyString).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
-  diffColorScheme: DiffColorScheme.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_DIFF_COLOR_SCHEME)),
-  ),
-  diffIndicatorStyle: DiffIndicatorStyle.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_DIFF_INDICATOR_STYLE)),
-  ),
+  diffColorScheme: DiffColorScheme.pipe(Schema.withDecodingDefault(Effect.succeed("red-green"))),
+  diffIndicatorStyle: DiffIndicatorStyle.pipe(Schema.withDecodingDefault(Effect.succeed("bars"))),
   diffIgnoreWhitespace: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   environmentIdentificationMode: EnvironmentIdentificationMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE)),

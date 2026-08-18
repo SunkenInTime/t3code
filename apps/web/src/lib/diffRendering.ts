@@ -2,14 +2,10 @@ import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import type { FileDiffMetadata } from "@pierre/diffs/types";
 import type { DiffColorScheme } from "@t3tools/contracts/settings";
 
-const DIFF_COLOR_SCHEME_CLASSES: Record<DiffColorScheme, string> = {
-  "red-green":
-    "[--t3-diff-addition-color:var(--success)] [--t3-diff-deletion-color:var(--destructive)]",
-  "orange-blue": "[--t3-diff-addition-color:var(--info)] [--t3-diff-deletion-color:var(--warning)]",
-};
-
 export function getDiffColorSchemeClassName(scheme: DiffColorScheme): string {
-  return DIFF_COLOR_SCHEME_CLASSES[scheme];
+  return scheme === "orange-blue"
+    ? "[--t3-diff-addition-color:var(--info)] [--t3-diff-deletion-color:var(--warning)]"
+    : "[--t3-diff-addition-color:var(--success)] [--t3-diff-deletion-color:var(--destructive)]";
 }
 
 export const DIFF_THEME_NAMES = {

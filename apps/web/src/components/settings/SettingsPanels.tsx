@@ -78,7 +78,7 @@ import {
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
 import { getDiffColorSchemeClassName } from "../../lib/diffRendering";
-import { cn, isMacPlatform } from "../../lib/utils";
+import { isMacPlatform } from "../../lib/utils";
 import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from "../../state/server";
 import { useProjects } from "../../state/entities";
 import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
@@ -96,6 +96,7 @@ import {
 } from "../ui/dialog";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
+import { Toggle } from "../ui/toggle";
 import {
   DEFAULT_CODE_FONT_STACK,
   DEFAULT_SANS_FONT_STACK,
@@ -974,101 +975,38 @@ function BackgroundActivityAdvancedDialog({
   );
 }
 
-function DiffPreviewLine({
-  color,
-  label,
-  marker,
-  showBar,
+const DIFF_PREVIEW_LINES = [
+  { color: "var(--t3-diff-deletion-color)", label: "old", marker: "-" },
+  { color: "var(--t3-diff-addition-color)", label: "new", marker: "+" },
+] as const;
+
+function DiffAppearancePreview({
+  colorScheme,
+  indicatorStyle,
 }: {
-  readonly color: string;
-  readonly label: string;
-  readonly marker?: "+" | "-";
-  readonly showBar?: boolean;
+  readonly colorScheme: DiffColorScheme;
+  readonly indicatorStyle?: DiffIndicatorStyle;
 }) {
   return (
     <span
-      aria-hidden="true"
-      className="relative block h-4 overflow-hidden px-1.5 text-left font-mono text-[10px] leading-4 font-semibold text-foreground"
-      style={
-        {
-          "--diff-preview-color": color,
-          backgroundColor: "color-mix(in srgb, var(--background) 72%, var(--diff-preview-color))",
-        } as CSSProperties
-      }
+      className={`block overflow-hidden rounded-sm ${getDiffColorSchemeClassName(colorScheme)}`}
     >
-      {showBar ? (
+      {DIFF_PREVIEW_LINES.map(({ color, label, marker }) => (
         <span
-          className="absolute inset-y-0 left-0 w-0.5"
-          style={{ backgroundColor: "var(--diff-preview-color)" }}
-        />
-      ) : null}
-      {marker ? `${marker} ` : ""}
-      {label}
-    </span>
-  );
-}
-
-function DiffAppearanceChoice<T extends string>({
-  children,
-  label,
-  onSelect,
-  selected,
-  value,
-}: {
-  readonly children: ReactNode;
-  readonly label: string;
-  readonly onSelect: (value: T) => void;
-  readonly selected: boolean;
-  readonly value: T;
-}) {
-  return (
-    <button
-      aria-label={label}
-      aria-pressed={selected}
-      className={cn(
-        "w-16 cursor-pointer overflow-hidden rounded-lg border-2 bg-background p-1 transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring/50",
-        selected
-          ? "border-primary ring-1 ring-primary/25"
-          : "border-border/70 hover:border-foreground/30",
-      )}
-      onClick={() => onSelect(value)}
-      type="button"
-    >
-      <span className="block overflow-hidden rounded-sm">{children}</span>
-    </button>
-  );
-}
-
-function DiffColorPreview({ scheme }: { readonly scheme: DiffColorScheme }) {
-  return (
-    <span className={getDiffColorSchemeClassName(scheme)}>
-      <DiffPreviewLine color="var(--t3-diff-deletion-color)" label="old" />
-      <DiffPreviewLine color="var(--t3-diff-addition-color)" label="new" />
-    </span>
-  );
-}
-
-function DiffIndicatorPreview({
-  colorScheme,
-  style,
-}: {
-  readonly colorScheme: DiffColorScheme;
-  readonly style: DiffIndicatorStyle;
-}) {
-  const classic = style === "classic";
-
-  return (
-    <span className={getDiffColorSchemeClassName(colorScheme)}>
-      <DiffPreviewLine
-        color="var(--t3-diff-deletion-color)"
-        label="old"
-        {...(classic ? { marker: "-" as const } : { showBar: true })}
-      />
-      <DiffPreviewLine
-        color="var(--t3-diff-addition-color)"
-        label="new"
-        {...(classic ? { marker: "+" as const } : { showBar: true })}
-      />
+          aria-hidden
+          className="relative block h-4 px-1.5 text-left font-mono text-[10px] leading-4 font-semibold text-foreground"
+          key={label}
+          style={{
+            backgroundColor: `color-mix(in srgb, var(--background) 72%, ${color})`,
+          }}
+        >
+          {indicatorStyle === "bars" ? (
+            <span className="absolute inset-y-0 left-0 w-0.5" style={{ backgroundColor: color }} />
+          ) : null}
+          {indicatorStyle === "classic" ? `${marker} ` : ""}
+          {label}
+        </span>
+      ))}
     </span>
   );
 }
@@ -1131,21 +1069,22 @@ export function AppearanceSettingsPanel() {
             ) : null
           }
           control={
-            <div aria-label="Diff colors" className="flex items-center gap-2" role="group">
+            <div aria-label="Diff colors" className="flex gap-2" role="group">
               {(["red-green", "orange-blue"] as const).map((scheme) => (
-                <DiffAppearanceChoice
+                <Toggle
                   key={scheme}
-                  label={
+                  aria-label={
                     scheme === "red-green"
                       ? "Red and green diff colors"
                       : "Orange and blue diff colors"
                   }
-                  onSelect={(diffColorScheme) => updateSettings({ diffColorScheme })}
-                  selected={settings.diffColorScheme === scheme}
-                  value={scheme}
+                  pressed={settings.diffColorScheme === scheme}
+                  variant="outline"
+                  className="h-auto w-16 overflow-hidden p-1 data-pressed:border-primary data-pressed:bg-background data-pressed:ring-1 data-pressed:ring-primary/25"
+                  onPressedChange={() => updateSettings({ diffColorScheme: scheme })}
                 >
-                  <DiffColorPreview scheme={scheme} />
-                </DiffAppearanceChoice>
+                  <DiffAppearancePreview colorScheme={scheme} />
+                </Toggle>
               ))}
             </div>
           }
@@ -1167,17 +1106,23 @@ export function AppearanceSettingsPanel() {
             ) : null
           }
           control={
-            <div aria-label="Diff markers" className="flex items-center gap-2" role="group">
+            <div aria-label="Diff markers" className="flex gap-2" role="group">
               {(["bars", "classic"] as const).map((style) => (
-                <DiffAppearanceChoice
+                <Toggle
                   key={style}
-                  label={style === "bars" ? "Bar diff indicators" : "Plus and minus diff markers"}
-                  onSelect={(diffIndicatorStyle) => updateSettings({ diffIndicatorStyle })}
-                  selected={settings.diffIndicatorStyle === style}
-                  value={style}
+                  aria-label={
+                    style === "bars" ? "Bar diff indicators" : "Plus and minus diff markers"
+                  }
+                  pressed={settings.diffIndicatorStyle === style}
+                  variant="outline"
+                  className="h-auto w-16 overflow-hidden p-1 data-pressed:border-primary data-pressed:bg-background data-pressed:ring-1 data-pressed:ring-primary/25"
+                  onPressedChange={() => updateSettings({ diffIndicatorStyle: style })}
                 >
-                  <DiffIndicatorPreview colorScheme={settings.diffColorScheme} style={style} />
-                </DiffAppearanceChoice>
+                  <DiffAppearancePreview
+                    colorScheme={settings.diffColorScheme}
+                    indicatorStyle={style}
+                  />
+                </Toggle>
               ))}
             </div>
           }

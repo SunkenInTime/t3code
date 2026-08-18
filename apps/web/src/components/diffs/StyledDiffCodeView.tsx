@@ -263,13 +263,7 @@ const DIFF_VIEW_UNSAFE_CSS = `${DIFF_SURFACE_THEME_UNSAFE_CSS}
 `;
 
 function getDiffSurfaceClassName(colorScheme: DiffColorScheme, className?: string): string {
-  return [
-    "diff-render-surface [--code-background:var(--background)] outline-none",
-    getDiffColorSchemeClassName(colorScheme),
-    className,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  return `diff-render-surface [--code-background:var(--background)] outline-none ${getDiffColorSchemeClassName(colorScheme)}${className ? ` ${className}` : ""}`;
 }
 
 export type StyledDiffCodeViewOptions<LAnnotation> = Omit<
@@ -298,8 +292,7 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
   unsafeCSSExtra,
   ...props
 }: StyledDiffCodeViewProps<LAnnotation>) {
-  const diffColorScheme = useClientSettings((settings) => settings.diffColorScheme);
-  const diffIndicatorStyle = useClientSettings((settings) => settings.diffIndicatorStyle);
+  const { diffColorScheme, diffIndicatorStyle } = useClientSettings();
 
   return (
     <CodeView<LAnnotation>
@@ -335,23 +328,19 @@ export function StyledDiffCodeView<LAnnotation = undefined>({
   );
 }
 
-export type StyledFileDiffOptions<LAnnotation> = Omit<
-  NonNullable<FileDiffProps<LAnnotation>["options"]>,
-  "unsafeCSS" | "diffIndicators"
->;
-
 type StyledFileDiffProps<LAnnotation> = Omit<FileDiffProps<LAnnotation>, "options"> & {
-  readonly options?: StyledFileDiffOptions<LAnnotation>;
+  readonly options?: Omit<
+    NonNullable<FileDiffProps<LAnnotation>["options"]>,
+    "unsafeCSS" | "diffIndicators"
+  >;
 };
 
-/** The non-virtualized counterpart used for compact inline review-comment diffs. */
 export function StyledFileDiff<LAnnotation = undefined>({
   options,
   className,
   ...props
 }: StyledFileDiffProps<LAnnotation>) {
-  const diffColorScheme = useClientSettings((settings) => settings.diffColorScheme);
-  const diffIndicatorStyle = useClientSettings((settings) => settings.diffIndicatorStyle);
+  const { diffColorScheme, diffIndicatorStyle } = useClientSettings();
 
   return (
     <FileDiff<LAnnotation>

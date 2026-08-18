@@ -84,14 +84,6 @@ describe("searchSettings", () => {
       id: "word-wrap",
       to: "/settings/appearance",
     });
-    expect(searchSettings("diff colors")[0]).toMatchObject({
-      id: "diff-colors",
-      to: "/settings/appearance",
-    });
-    expect(searchSettings("diff markers")[0]).toMatchObject({
-      id: "diff-markers",
-      to: "/settings/appearance",
-    });
     expect(searchSettings("environment identification")[0]).toMatchObject({
       id: "environment-identification",
       to: "/settings/appearance",

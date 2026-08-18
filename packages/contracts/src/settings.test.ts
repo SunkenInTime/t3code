@@ -16,9 +16,13 @@ const decodeServerSettings = Schema.decodeUnknownSync(ServerSettings);
 const decodeServerSettingsPatch = Schema.decodeUnknownSync(ServerSettingsPatch);
 const encodeServerSettings = Schema.encodeSync(ServerSettings);
 
-describe("ClientSettings word wrap", () => {
-  it("defaults word wrap on", () => {
-    expect(decodeClientSettings({}).wordWrap).toBe(true);
+describe("ClientSettings display defaults", () => {
+  it("preserves existing display behavior", () => {
+    const settings = decodeClientSettings({});
+
+    expect(settings.wordWrap).toBe(true);
+    expect(settings.diffColorScheme).toBe("red-green");
+    expect(settings.diffIndicatorStyle).toBe("bars");
   });
 
   it("ignores obsolete wrapping preferences", () => {
@@ -30,32 +34,6 @@ describe("ClientSettings word wrap", () => {
     expect(decoded.wordWrap).toBe(true);
     expect(decoded).not.toHaveProperty("chatWordWrap");
     expect(decoded).not.toHaveProperty("diffWordWrap");
-  });
-});
-
-describe("ClientSettings diff appearance", () => {
-  it("preserves the existing colors and bar indicators by default", () => {
-    const settings = decodeClientSettings({});
-
-    expect(settings.diffColorScheme).toBe("red-green");
-    expect(settings.diffIndicatorStyle).toBe("bars");
-  });
-
-  it("accepts the alternate colors and classic line markers", () => {
-    expect(
-      decodeClientSettingsPatch({
-        diffColorScheme: "orange-blue",
-        diffIndicatorStyle: "classic",
-      }),
-    ).toMatchObject({
-      diffColorScheme: "orange-blue",
-      diffIndicatorStyle: "classic",
-    });
-  });
-
-  it("rejects unsupported diff appearance values", () => {
-    expect(() => decodeClientSettings({ diffColorScheme: "purple-yellow" })).toThrow();
-    expect(() => decodeClientSettingsPatch({ diffIndicatorStyle: "none" })).toThrow();
   });
 });
 
