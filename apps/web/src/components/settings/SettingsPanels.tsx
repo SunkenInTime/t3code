@@ -1037,7 +1037,7 @@ export function AppearanceSettingsPanel() {
                 }
               }}
             >
-              <SelectTrigger className="w-40" aria-label="Diff colors">
+              <SelectTrigger className="w-full sm:w-40" aria-label="Diff colors">
                 <SelectValue>
                   {settings.diffColorScheme === "red-green" ? "Red and green" : "Orange and blue"}
                 </SelectValue>
@@ -1078,7 +1078,7 @@ export function AppearanceSettingsPanel() {
                 }
               }}
             >
-              <SelectTrigger className="w-40" aria-label="Diff markers">
+              <SelectTrigger className="w-full sm:w-40" aria-label="Diff markers">
                 <SelectValue>
                   {settings.diffIndicatorStyle === "bars" ? "Bars" : "Plus and minus"}
                 </SelectValue>
@@ -1093,11 +1093,9 @@ export function AppearanceSettingsPanel() {
               </SelectPopup>
             </Select>
           }
-        />
-
-        <div className="px-3 sm:px-4">
+        >
           <DiffPreview />
-        </div>
+        </SettingsRow>
 
         <SettingsRow
           {...searchableSetting("setting-glass-opacity")}
