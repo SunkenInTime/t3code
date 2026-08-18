@@ -15,6 +15,8 @@ import {
   FolderClosedIcon,
 } from "lucide-react";
 import { cn } from "~/lib/utils";
+import { useClientSettings } from "~/hooks/useSettings";
+import { getDiffColorSchemeClassName } from "~/lib/diffRendering";
 import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
 import { PierreEntryIcon } from "./PierreEntryIcon";
 import { Button } from "../ui/button";
@@ -53,10 +55,14 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
   const scopeSummary = useMemo(() => summarizeChangedFileScopes(files), [files]);
   const previewFiles = useMemo(() => selectChangedFilePreview(files), [files]);
   const compactPreviewVisible = showCompactPreview && !expanded;
+  const { diffColorScheme } = useClientSettings();
 
   return (
     <div
-      className="@container/changed-files mt-4 rounded-2xl border border-border/70 bg-secondary p-2 dark:border-transparent dark:bg-input/32"
+      className={cn(
+        "@container/changed-files mt-4 rounded-2xl border border-border/70 bg-secondary p-2 dark:border-transparent dark:bg-input/32",
+        getDiffColorSchemeClassName(diffColorScheme),
+      )}
       data-changed-files-state={
         expanded ? "expanded" : compactPreviewVisible ? "preview" : "collapsed"
       }
