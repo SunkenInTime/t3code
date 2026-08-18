@@ -19,8 +19,6 @@ import {
 import {
   DEFAULT_ENVIRONMENT_IDENTIFICATION_MODE,
   DEFAULT_UNIFIED_SETTINGS,
-  type DiffColorScheme,
-  type DiffIndicatorStyle,
   type EnvironmentIdentificationMode,
   MAX_CODE_FONT_SIZE,
   MAX_GLASS_OPACITY,
@@ -77,7 +75,6 @@ import {
   sortProviderInstanceEntries,
 } from "../../providerInstances";
 import { ensureLocalApi, readLocalApi } from "../../localApi";
-import { getDiffColorSchemeClassName } from "../../lib/diffRendering";
 import { isMacPlatform } from "../../lib/utils";
 import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from "../../state/server";
 import { useProjects } from "../../state/entities";
@@ -96,7 +93,6 @@ import {
 } from "../ui/dialog";
 import { DraftInput } from "../ui/draft-input";
 import { Input } from "../ui/input";
-import { Toggle } from "../ui/toggle";
 import {
   DEFAULT_CODE_FONT_STACK,
   DEFAULT_SANS_FONT_STACK,
@@ -107,7 +103,7 @@ import {
   resolveTerminalFontSizePreference,
   TYPOGRAPHY_ADVANCED_STORAGE_KEY,
 } from "../../appearanceFonts";
-import { CodeFontPreview, PromptFontPreview, TerminalFontPreview } from "./SettingsFontPreviews";
+import { DiffPreview, PromptFontPreview, TerminalFontPreview } from "./SettingsFontPreviews";
 import { discoverInstalledFonts, FontFamilyPicker, useFontEnumeration } from "./FontFamilyPicker";
 import {
   NumberField,
@@ -975,42 +971,6 @@ function BackgroundActivityAdvancedDialog({
   );
 }
 
-const DIFF_PREVIEW_LINES = [
-  { color: "var(--t3-diff-deletion-color)", label: "old", marker: "-" },
-  { color: "var(--t3-diff-addition-color)", label: "new", marker: "+" },
-] as const;
-
-function DiffAppearancePreview({
-  colorScheme,
-  indicatorStyle,
-}: {
-  readonly colorScheme: DiffColorScheme;
-  readonly indicatorStyle?: DiffIndicatorStyle;
-}) {
-  return (
-    <span
-      className={`block overflow-hidden rounded-sm ${getDiffColorSchemeClassName(colorScheme)}`}
-    >
-      {DIFF_PREVIEW_LINES.map(({ color, label, marker }) => (
-        <span
-          aria-hidden
-          className="relative block h-4 px-1.5 text-left font-mono text-[10px] leading-4 font-semibold text-foreground"
-          key={label}
-          style={{
-            backgroundColor: `color-mix(in srgb, var(--background) 72%, ${color})`,
-          }}
-        >
-          {indicatorStyle === "bars" ? (
-            <span className="absolute inset-y-0 left-0 w-0.5" style={{ backgroundColor: color }} />
-          ) : null}
-          {indicatorStyle === "classic" ? `${marker} ` : ""}
-          {label}
-        </span>
-      ))}
-    </span>
-  );
-}
-
 export function AppearanceSettingsPanel() {
   const {
     appearanceMode,
@@ -1069,24 +1029,28 @@ export function AppearanceSettingsPanel() {
             ) : null
           }
           control={
-            <div aria-label="Diff colors" className="flex gap-2" role="group">
-              {(["red-green", "orange-blue"] as const).map((scheme) => (
-                <Toggle
-                  key={scheme}
-                  aria-label={
-                    scheme === "red-green"
-                      ? "Red and green diff colors"
-                      : "Orange and blue diff colors"
-                  }
-                  pressed={settings.diffColorScheme === scheme}
-                  variant="outline"
-                  className="h-auto w-16 p-1 data-pressed:border-primary"
-                  onPressedChange={() => updateSettings({ diffColorScheme: scheme })}
-                >
-                  <DiffAppearancePreview colorScheme={scheme} />
-                </Toggle>
-              ))}
-            </div>
+            <Select
+              value={settings.diffColorScheme}
+              onValueChange={(diffColorScheme) => {
+                if (diffColorScheme === "red-green" || diffColorScheme === "orange-blue") {
+                  updateSettings({ diffColorScheme });
+                }
+              }}
+            >
+              <SelectTrigger className="w-40" aria-label="Diff colors">
+                <SelectValue>
+                  {settings.diffColorScheme === "red-green" ? "Red and green" : "Orange and blue"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="red-green">
+                  Red and green
+                </SelectItem>
+                <SelectItem hideIndicator value="orange-blue">
+                  Orange and blue
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
 
@@ -1106,27 +1070,34 @@ export function AppearanceSettingsPanel() {
             ) : null
           }
           control={
-            <div aria-label="Diff markers" className="flex gap-2" role="group">
-              {(["bars", "classic"] as const).map((style) => (
-                <Toggle
-                  key={style}
-                  aria-label={
-                    style === "bars" ? "Bar diff indicators" : "Plus and minus diff markers"
-                  }
-                  pressed={settings.diffIndicatorStyle === style}
-                  variant="outline"
-                  className="h-auto w-16 p-1 data-pressed:border-primary"
-                  onPressedChange={() => updateSettings({ diffIndicatorStyle: style })}
-                >
-                  <DiffAppearancePreview
-                    colorScheme={settings.diffColorScheme}
-                    indicatorStyle={style}
-                  />
-                </Toggle>
-              ))}
-            </div>
+            <Select
+              value={settings.diffIndicatorStyle}
+              onValueChange={(diffIndicatorStyle) => {
+                if (diffIndicatorStyle === "bars" || diffIndicatorStyle === "classic") {
+                  updateSettings({ diffIndicatorStyle });
+                }
+              }}
+            >
+              <SelectTrigger className="w-40" aria-label="Diff markers">
+                <SelectValue>
+                  {settings.diffIndicatorStyle === "bars" ? "Bars" : "Plus and minus"}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="bars">
+                  Bars
+                </SelectItem>
+                <SelectItem hideIndicator value="classic">
+                  Plus and minus
+                </SelectItem>
+              </SelectPopup>
+            </Select>
           }
         />
+
+        <div className="px-3 sm:px-4">
+          <DiffPreview />
+        </div>
 
         <SettingsRow
           {...searchableSetting("setting-glass-opacity")}
@@ -1340,7 +1311,7 @@ function CodeFontRow({
         defaultValue: DEFAULT_UNIFIED_SETTINGS.fontSizeCode,
         onChange: (fontSizeCode) => updateSettings({ fontSizeCode }),
       }}
-      preview={preview ?? <CodeFontPreview />}
+      preview={preview ?? <DiffPreview />}
     />
   );
 }
@@ -1468,7 +1439,7 @@ function SimpleFontRows() {
         description="Code blocks, diffs, file previews, and the terminal."
         preview={
           <>
-            <CodeFontPreview />
+            <DiffPreview />
             <TerminalFontPreview
               family={resolveTerminalFontPreference({
                 advanced: false,
