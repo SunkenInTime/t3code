@@ -1445,21 +1445,22 @@ function SimpleFontRows() {
       <CodeFontRow
         title="Monospace font"
         description="Code blocks, diffs, file previews, and the terminal."
+        preview={
+          <TerminalFontPreview
+            family={resolveTerminalFontPreference({
+              advanced: false,
+              code: settings.fontFamilyCode,
+              terminal: settings.fontFamilyTerminal,
+            })}
+            size={resolveTerminalFontSizePreference({
+              advanced: false,
+              code: settings.fontSizeCode,
+              terminal: settings.fontSizeTerminal,
+            })}
+          />
+        }
       />
-      <DiffAppearanceRows>
-        <TerminalFontPreview
-          family={resolveTerminalFontPreference({
-            advanced: false,
-            code: settings.fontFamilyCode,
-            terminal: settings.fontFamilyTerminal,
-          })}
-          size={resolveTerminalFontSizePreference({
-            advanced: false,
-            code: settings.fontSizeCode,
-            terminal: settings.fontSizeTerminal,
-          })}
-        />
-      </DiffAppearanceRows>
+      <DiffAppearanceRows />
     </>
   );
 }
