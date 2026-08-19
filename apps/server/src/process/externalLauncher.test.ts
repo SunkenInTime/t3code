@@ -412,6 +412,58 @@ it.effect("does not advertise reveal from WSL when interop PowerShell is missing
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
+// Interop can exist without `explorer.exe` on PATH (appendWindowsPath=false)
+// while WSLg still provides a working Linux file manager; the host must keep
+// the Linux open/reveal path instead of losing the editor entirely.
+it.effect("falls back to the Linux file manager when WSL lacks the Explorer bridge", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
+    for (const name of ["xdg-open", "xdg-mime"]) {
+      const filePath = path.join(binDir, name);
+      yield* fileSystem.writeFileString(filePath, "#!/bin/sh\n");
+      yield* fileSystem.chmod(filePath, 0o755);
+    }
+
+    const spawnedCommands: ChildProcess.StandardCommand[] = [];
+    const result = yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      const editors = yield* launcher.resolveAvailableEditors();
+      const kind = yield* launcher.resolveFileManagerRevealKind();
+      yield* launcher.launchEditor({
+        editor: "file-manager",
+        cwd: "/home/t3/workspace/media/clip.mp4",
+        reveal: true,
+      });
+      return { editors, kind };
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          platform: "linux",
+          env: {
+            PATH: binDir,
+            WSL_DISTRO_NAME: "Ubuntu-24.04",
+            WSL_INTEROP: "/run/WSL/1_interop",
+            DISPLAY: ":0",
+          },
+          onSpawn: (command) => {
+            spawnedCommands.push(command);
+          },
+          spawnResult: (command) =>
+            command.command === "xdg-mime" ? { stdout: "org.gnome.Nautilus.desktop\n" } : undefined,
+        }),
+      ),
+    );
+
+    assert.equal(result.editors.includes("file-manager"), true);
+    assert.equal(result.kind, "files");
+    const launch = spawnedCommands.find((command) => command.command === "xdg-open");
+    assert.ok(launch);
+    assert.deepEqual(launch.args, ["/home/t3/workspace/media"]);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 it.effect(
   "falls back to opening the containing directory for WSL paths Explorer cannot select",
   () =>
@@ -462,11 +514,13 @@ it.effect("reveals by opening the containing directory on Linux", () =>
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
-    const xdgOpenPath = path.join(binDir, "xdg-open");
-    yield* fileSystem.writeFileString(xdgOpenPath, "#!/bin/sh\n");
-    yield* fileSystem.chmod(xdgOpenPath, 0o755);
+    for (const name of ["xdg-open", "xdg-mime"]) {
+      const filePath = path.join(binDir, name);
+      yield* fileSystem.writeFileString(filePath, "#!/bin/sh\n");
+      yield* fileSystem.chmod(filePath, 0o755);
+    }
 
-    let spawned: ChildProcess.StandardCommand | undefined;
+    const spawnedCommands: ChildProcess.StandardCommand[] = [];
     yield* Effect.gen(function* () {
       const launcher = yield* ExternalLauncher.ExternalLauncher;
       yield* launcher.launchEditor({
@@ -480,14 +534,16 @@ it.effect("reveals by opening the containing directory on Linux", () =>
           platform: "linux",
           env: { PATH: binDir, DISPLAY: ":0" },
           onSpawn: (command) => {
-            spawned = command;
+            spawnedCommands.push(command);
           },
+          spawnResult: (command) =>
+            command.command === "xdg-mime" ? { stdout: "org.gnome.Nautilus.desktop\n" } : undefined,
         }),
       ),
     );
 
+    const spawned = spawnedCommands.find((command) => command.command === "xdg-open");
     assert.ok(spawned);
-    assert.equal(spawned.command, "xdg-open");
     assert.deepEqual(spawned.args, ["/workspace/media"]);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

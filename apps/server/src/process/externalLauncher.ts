@@ -239,32 +239,6 @@ function hasGraphicalLinuxSession(env: NodeJS.ProcessEnv): boolean {
   );
 }
 
-// Reveal on Windows and WSL runs through PowerShell (see
-// resolveFileManagerRevealLaunch), not the `explorer` command that gates the
-// file-manager editor itself, so the capability must probe the executable the
-// reveal actually spawns. Callers gate on file-manager availability first;
-// the Linux "files" kind relies on that gate for the directory-handler probe.
-const fileManagerRevealKindForPlatform = Effect.fn(
-  "externalLauncher.fileManagerRevealKindForPlatform",
-)(function* (
-  platform: NodeJS.Platform,
-  env: NodeJS.ProcessEnv,
-): Effect.fn.Return<FileManagerRevealKind | undefined, never, FileSystem.FileSystem | Path.Path> {
-  if (platform === "darwin") return "finder";
-  if (platform === "win32") {
-    return (yield* isCommandAvailable(resolvePowerShellPath(env), { env }))
-      ? "file-explorer"
-      : undefined;
-  }
-  if (shouldUseWindowsHostFromWsl(platform, env)) {
-    return env.WSL_DISTRO_NAME?.trim() &&
-      (yield* isCommandAvailable(WSL_POWERSHELL_COMMAND, { env }))
-      ? "file-explorer"
-      : undefined;
-  }
-  return hasGraphicalLinuxSession(env) ? "files" : undefined;
-});
-
 function fileManagerCommandForPlatform(
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
@@ -321,6 +295,89 @@ const hasUsableLinuxDirectoryHandler = Effect.fn("externalLauncher.hasUsableLinu
   },
 );
 
+const isUsableFileManagerCommand = Effect.fn("externalLauncher.isUsableFileManagerCommand")(
+  function* (
+    command: string,
+    env: NodeJS.ProcessEnv,
+  ): Effect.fn.Return<
+    boolean,
+    never,
+    FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+  > {
+    if (!(yield* isCommandAvailable(command, { env }))) {
+      return false;
+    }
+    return command !== "xdg-open" || (yield* hasUsableLinuxDirectoryHandler(env));
+  },
+);
+
+// The file-manager command a launch can actually run, not just the platform
+// preference. WSL hosts prefer the Windows Explorer bridge, but interop can
+// exist without `explorer.exe` on PATH (appendWindowsPath=false) or without a
+// distro name while WSLg still provides a working Linux file manager, so they
+// keep the `xdg-open` fallback instead of losing the editor entirely.
+const resolveUsableFileManagerCommand = Effect.fn(
+  "externalLauncher.resolveUsableFileManagerCommand",
+)(function* (
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+): Effect.fn.Return<
+  string | undefined,
+  never,
+  FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+> {
+  const command = fileManagerCommandForPlatform(platform, env);
+  if (command !== undefined && (yield* isUsableFileManagerCommand(command, env))) {
+    return command;
+  }
+  if (
+    shouldUseWindowsHostFromWsl(platform, env) &&
+    hasGraphicalLinuxSession(env) &&
+    (yield* isUsableFileManagerCommand("xdg-open", env))
+  ) {
+    return "xdg-open";
+  }
+  return undefined;
+});
+
+// Reveal on Windows and WSL runs through PowerShell (see
+// resolveFileManagerRevealLaunch), not the `explorer` command that gates the
+// file-manager editor itself, so the capability must probe the executables the
+// reveal actually spawns. Callers gate on file-manager availability first;
+// the Linux "files" kind relies on that gate for the directory-handler probe,
+// while the WSL fallback re-probes because its availability may have come
+// from the Explorer bridge instead.
+const fileManagerRevealKindForPlatform = Effect.fn(
+  "externalLauncher.fileManagerRevealKindForPlatform",
+)(function* (
+  platform: NodeJS.Platform,
+  env: NodeJS.ProcessEnv,
+): Effect.fn.Return<
+  FileManagerRevealKind | undefined,
+  never,
+  FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+> {
+  if (platform === "darwin") return "finder";
+  if (platform === "win32") {
+    return (yield* isCommandAvailable(resolvePowerShellPath(env), { env }))
+      ? "file-explorer"
+      : undefined;
+  }
+  if (shouldUseWindowsHostFromWsl(platform, env)) {
+    if (
+      env.WSL_DISTRO_NAME?.trim() &&
+      (yield* isCommandAvailable("explorer.exe", { env })) &&
+      (yield* isCommandAvailable(WSL_POWERSHELL_COMMAND, { env }))
+    ) {
+      return "file-explorer";
+    }
+    return hasGraphicalLinuxSession(env) && (yield* isUsableFileManagerCommand("xdg-open", env))
+      ? "files"
+      : undefined;
+  }
+  return hasGraphicalLinuxSession(env) ? "files" : undefined;
+});
+
 function resolveWslFileManagerPath(target: string, distroName: string): string {
   const relativePath = target.replace(/^\/+/, "").replaceAll("/", "\\");
   return `\\\\wsl.localhost\\${distroName}${relativePath.length > 0 ? `\\${relativePath}` : ""}`;
@@ -366,12 +423,7 @@ const buildAvailableEditors = Effect.fn("externalLauncher.buildAvailableEditors"
 
   for (const editor of EDITORS) {
     if (editor.commands === null) {
-      const command = fileManagerCommandForPlatform(platform, env);
-      if (
-        command !== undefined &&
-        (yield* isCommandAvailable(command, { env })) &&
-        (command !== "xdg-open" || (yield* hasUsableLinuxDirectoryHandler(env)))
-      ) {
+      if ((yield* resolveUsableFileManagerCommand(platform, env)) !== undefined) {
         available.push(editor.id);
       }
       continue;
@@ -462,7 +514,11 @@ export class ExternalLauncher extends Context.Service<
 
 const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   input: LaunchEditorInput,
-): Effect.fn.Return<EditorLaunch, ExternalLauncherError, FileSystem.FileSystem | Path.Path> {
+): Effect.fn.Return<
+  EditorLaunch,
+  ExternalLauncherError,
+  FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+> {
   const platform = yield* HostProcessPlatform;
   const env = { ...(yield* readBrowserLaunchEnv), ...(yield* readCommandLookupEnv) };
   yield* Effect.annotateCurrentSpan({
@@ -492,13 +548,13 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
     return yield* new ExternalLauncherUnsupportedEditorError({ editor: input.editor });
   }
 
-  const command = fileManagerCommandForPlatform(platform, env);
+  const command = yield* resolveUsableFileManagerCommand(platform, env);
   if (command === undefined) {
     return yield* new ExternalLauncherUnsupportedEditorError({ editor: input.editor });
   }
 
   if (input.reveal === true) {
-    return yield* resolveFileManagerRevealLaunch(input.cwd, platform, env);
+    return yield* resolveFileManagerRevealLaunch(input.cwd, platform, env, command);
   }
 
   return {
@@ -550,7 +606,10 @@ const resolveFileManagerRevealLaunch = Effect.fn("resolveFileManagerRevealLaunch
   target: string,
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
-): Effect.fn.Return<EditorLaunch, never, Path.Path> {
+  // The command resolveUsableFileManagerCommand picked; a WSL host that fell
+  // back to the Linux file manager must reveal through it as well.
+  command: string,
+): Effect.fn.Return<EditorLaunch, never, FileSystem.FileSystem | Path.Path> {
   if (platform === "darwin") {
     return { editor: "file-manager", target, command: "open", args: ["-R", target] };
   }
@@ -559,12 +618,21 @@ const resolveFileManagerRevealLaunch = Effect.fn("resolveFileManagerRevealLaunch
     return fileExplorerRevealLaunch(target, target, resolvePowerShellPath(env));
   }
 
-  if (shouldUseWindowsHostFromWsl(platform, env) && env.WSL_DISTRO_NAME !== undefined) {
+  if (
+    command === "explorer.exe" &&
+    shouldUseWindowsHostFromWsl(platform, env) &&
+    env.WSL_DISTRO_NAME !== undefined
+  ) {
     const explorerTarget = resolveWslFileManagerPath(target, env.WSL_DISTRO_NAME);
     // Explorer's raw switch cannot express a double quote, and unlike Windows
     // paths a WSL path may legally contain one: fall back to opening the
-    // containing directory the same way the non-reveal launch does.
-    if (explorerTarget.includes('"')) {
+    // containing directory the same way the non-reveal launch does. The same
+    // fallback covers a missing interop PowerShell, so the launch never
+    // depends on an executable the capability did not advertise.
+    if (
+      explorerTarget.includes('"') ||
+      !(yield* isCommandAvailable(WSL_POWERSHELL_COMMAND, { env }))
+    ) {
       const path = yield* Path.Path;
       return {
         editor: "file-manager",
@@ -579,7 +647,7 @@ const resolveFileManagerRevealLaunch = Effect.fn("resolveFileManagerRevealLaunch
   // Linux file managers have no portable "select this file" flag, so open
   // the containing directory instead.
   const path = yield* Path.Path;
-  return { editor: "file-manager", target, command: "xdg-open", args: [path.dirname(target)] };
+  return { editor: "file-manager", target, command, args: [path.dirname(target)] };
 });
 
 const launchAndUnref = Effect.fn("externalLauncher.launchAndUnref")(function* (
@@ -690,19 +758,17 @@ export const make = Effect.gen(function* () {
   return ExternalLauncher.of({
     resolveAvailableEditors: () => cachedAvailableEditors,
     resolveFileManagerRevealKind: () =>
-      provideCommandResolutionServices(resolveFileManagerRevealKind()),
+      provideCommandResolutionServices(resolveFileManagerRevealKind()).pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      ),
     launchBrowser: (target) =>
       launchBrowser(target).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       ),
     launchEditor: (input) =>
       provideCommandResolutionServices(
-        Effect.flatMap(resolveEditorLaunch(input), (launch) =>
-          launchEditorProcess(launch).pipe(
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          ),
-        ),
-      ),
+        Effect.flatMap(resolveEditorLaunch(input), launchEditorProcess),
+      ).pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner)),
   });
 });
 
