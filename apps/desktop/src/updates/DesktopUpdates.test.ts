@@ -400,13 +400,50 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
-  it.effect("admits only one of a concurrent refresh check and install", () =>
+  it.effect(
+    "rejects install while a refresh check is in progress and releases the reservation",
+    () =>
+      Effect.gen(function* () {
+        const checkStarted = yield* Deferred.make<void>();
+        const releaseCheck = yield* Deferred.make<void>();
+        const harness = makeHarness({
+          checkForUpdates: Deferred.succeed(checkStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseCheck)),
+          ),
+        });
+
+        yield* Effect.scoped(
+          Effect.gen(function* () {
+            const updates = yield* DesktopUpdates.DesktopUpdates;
+            yield* updates.configure;
+            harness.emit("update-downloaded", { version: "1.2.4" });
+            yield* flushCallbacks;
+
+            const checkFiber = yield* updates.check("manual").pipe(Effect.forkScoped);
+            yield* Deferred.await(checkStarted);
+
+            const installResult = yield* updates.install;
+            assert.isFalse(installResult.accepted);
+
+            yield* Deferred.succeed(releaseCheck, undefined);
+            const checkResult = yield* Fiber.join(checkFiber);
+            assert.isTrue(checkResult.checked);
+
+            const followUpCheck = yield* updates.check("manual");
+            assert.isTrue(followUpCheck.checked);
+            assert.equal(harness.checkCount(), 2);
+          }),
+        ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+      }),
+  );
+
+  it.effect("rejects refresh checks while install is in progress", () =>
     Effect.gen(function* () {
-      const checkStarted = yield* Deferred.make<void>();
-      const releaseCheck = yield* Deferred.make<void>();
+      const installStarted = yield* Deferred.make<void>();
+      const releaseInstall = yield* Deferred.make<void>();
       const harness = makeHarness({
-        checkForUpdates: Deferred.succeed(checkStarted, undefined).pipe(
-          Effect.andThen(Deferred.await(releaseCheck)),
+        stopBackend: Deferred.succeed(installStarted, undefined).pipe(
+          Effect.andThen(Deferred.await(releaseInstall)),
         ),
       });
 
@@ -417,25 +454,16 @@ describe("DesktopUpdates", () => {
           harness.emit("update-downloaded", { version: "1.2.4" });
           yield* flushCallbacks;
 
-          const [checkFiber, installFiber] = yield* Effect.all(
-            [
-              updates.check("manual").pipe(Effect.forkScoped),
-              updates.install.pipe(Effect.forkScoped),
-            ],
-            { concurrency: "unbounded" },
-          );
+          const installFiber = yield* updates.install.pipe(Effect.forkScoped);
+          yield* Deferred.await(installStarted);
 
-          yield* Effect.race(
-            Deferred.await(checkStarted),
-            Fiber.join(installFiber).pipe(Effect.asVoid),
-          );
-          yield* Deferred.succeed(releaseCheck, undefined);
+          const checkResult = yield* updates.check("manual");
+          assert.isFalse(checkResult.checked);
+          assert.equal(harness.checkCount(), 0);
 
-          const [checkResult, installResult] = yield* Effect.all([
-            Fiber.join(checkFiber),
-            Fiber.join(installFiber),
-          ]);
-          assert.equal(Number(checkResult.checked) + Number(installResult.accepted), 1);
+          yield* Deferred.succeed(releaseInstall, undefined);
+          const installResult = yield* Fiber.join(installFiber);
+          assert.isTrue(installResult.accepted);
         }),
       ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
     }),
@@ -764,6 +792,10 @@ describe("DesktopUpdates", () => {
         assert.strictEqual(error.cause.cause, diskFailure);
         assert.equal(error.message, "Failed to persist the nightly desktop update channel.");
         assert.notInclude(error.message, diskFailure.message);
+
+        const checkResult = yield* updates.check("manual");
+        assert.isTrue(checkResult.checked);
+        assert.equal(harness.checkCount(), 1);
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

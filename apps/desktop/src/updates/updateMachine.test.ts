@@ -102,7 +102,7 @@ describe("updateMachine", () => {
 
     expect(state.status).toBe("downloaded");
     expect(state.downloadedVersion).toBe("1.1.0");
-    expect(state.releaseNotes).toBe(releaseNotes);
+    expect(state.releaseNotes).toEqual(releaseNotes);
     expect(state.downloadPercent).toBe(100);
   });
 
