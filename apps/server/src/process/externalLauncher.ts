@@ -30,6 +30,7 @@ import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
+import * as Stream from "effect/Stream";
 import * as ChildProcess from "effect/unstable/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 
@@ -196,6 +197,12 @@ function resolveWslPowerShellPath(): string {
   return "/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe";
 }
 
+// File reveals from WSL resolve PowerShell through the interop PATH rather
+// than the fixed /mnt/c mount: the automount root is configurable, and a
+// PATH-resolved command keeps the advertised capability aligned with the
+// availability check `launchEditor` performs before spawning.
+const WSL_POWERSHELL_COMMAND = "powershell.exe";
+
 function shouldUseWindowsHostFromWsl(
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv = {},
@@ -232,17 +239,31 @@ function hasGraphicalLinuxSession(env: NodeJS.ProcessEnv): boolean {
   );
 }
 
-function fileManagerRevealKindForPlatform(
+// Reveal on Windows and WSL runs through PowerShell (see
+// resolveFileManagerRevealLaunch), not the `explorer` command that gates the
+// file-manager editor itself, so the capability must probe the executable the
+// reveal actually spawns. Callers gate on file-manager availability first;
+// the Linux "files" kind relies on that gate for the directory-handler probe.
+const fileManagerRevealKindForPlatform = Effect.fn(
+  "externalLauncher.fileManagerRevealKindForPlatform",
+)(function* (
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
-): FileManagerRevealKind | undefined {
+): Effect.fn.Return<FileManagerRevealKind | undefined, never, FileSystem.FileSystem | Path.Path> {
   if (platform === "darwin") return "finder";
-  if (platform === "win32") return "file-explorer";
+  if (platform === "win32") {
+    return (yield* isCommandAvailable(resolvePowerShellPath(env), { env }))
+      ? "file-explorer"
+      : undefined;
+  }
   if (shouldUseWindowsHostFromWsl(platform, env)) {
-    return env.WSL_DISTRO_NAME?.trim() ? "file-explorer" : undefined;
+    return env.WSL_DISTRO_NAME?.trim() &&
+      (yield* isCommandAvailable(WSL_POWERSHELL_COMMAND, { env }))
+      ? "file-explorer"
+      : undefined;
   }
   return hasGraphicalLinuxSession(env) ? "files" : undefined;
-}
+});
 
 function fileManagerCommandForPlatform(
   platform: NodeJS.Platform,
@@ -260,6 +281,45 @@ function fileManagerCommandForPlatform(
       return hasGraphicalLinuxSession(env) ? "xdg-open" : undefined;
   }
 }
+
+// A graphical session variable plus an executable `xdg-open` does not prove
+// that opening a directory does anything: without an `inode/directory` MIME
+// handler, `xdg-open` exits nonzero after the launcher has already detached,
+// so the client would see a silent no-op. Require the handler before
+// advertising the file manager on Linux. Callers bound the runtime: discovery
+// runs under the same timeout `server.getConfig` applies to editor scans.
+const hasUsableLinuxDirectoryHandler = Effect.fn("externalLauncher.hasUsableLinuxDirectoryHandler")(
+  function* (
+    env: NodeJS.ProcessEnv,
+  ): Effect.fn.Return<
+    boolean,
+    never,
+    FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+  > {
+    if (!(yield* isCommandAvailable("xdg-mime", { env }))) {
+      return false;
+    }
+
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    return yield* spawner
+      .spawn(
+        ChildProcess.make("xdg-mime", ["query", "default", "inode/directory"], {
+          stdin: "ignore",
+          stderr: "ignore",
+        }),
+      )
+      .pipe(
+        Effect.flatMap((handle) =>
+          Effect.all([handle.stdout.pipe(Stream.decodeText(), Stream.mkString), handle.exitCode], {
+            concurrency: "unbounded",
+          }),
+        ),
+        Effect.map(([stdout, exitCode]) => exitCode === 0 && stdout.trim().length > 0),
+        Effect.scoped,
+        Effect.orElseSucceed(() => false),
+      );
+  },
+);
 
 function resolveWslFileManagerPath(target: string, distroName: string): string {
   const relativePath = target.replace(/^\/+/, "").replaceAll("/", "\\");
@@ -297,13 +357,21 @@ function buildBrowserLaunch(
 const buildAvailableEditors = Effect.fn("externalLauncher.buildAvailableEditors")(function* (
   platform: NodeJS.Platform,
   env: NodeJS.ProcessEnv,
-): Effect.fn.Return<ReadonlyArray<EditorId>, never, FileSystem.FileSystem | Path.Path> {
+): Effect.fn.Return<
+  ReadonlyArray<EditorId>,
+  never,
+  FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+> {
   const available: EditorId[] = [];
 
   for (const editor of EDITORS) {
     if (editor.commands === null) {
       const command = fileManagerCommandForPlatform(platform, env);
-      if (command !== undefined && (yield* isCommandAvailable(command, { env }))) {
+      if (
+        command !== undefined &&
+        (yield* isCommandAvailable(command, { env })) &&
+        (command !== "xdg-open" || (yield* hasUsableLinuxDirectoryHandler(env)))
+      ) {
         available.push(editor.id);
       }
       continue;
@@ -335,8 +403,8 @@ const resolveAvailableEditors = Effect.fn("externalLauncher.resolveAvailableEdit
 const resolveFileManagerRevealKind = Effect.fn("externalLauncher.resolveFileManagerRevealKind")(
   function* () {
     const platform = yield* HostProcessPlatform;
-    const env = yield* readBrowserLaunchEnv;
-    return fileManagerRevealKindForPlatform(platform, env);
+    const env = { ...(yield* readBrowserLaunchEnv), ...(yield* readCommandLookupEnv) };
+    return yield* fileManagerRevealKindForPlatform(platform, env);
   },
 );
 
@@ -369,6 +437,13 @@ export class ExternalLauncher extends Context.Service<
   ExternalLauncher,
   {
     readonly resolveAvailableEditors: () => Effect.Effect<ReadonlyArray<EditorId>>;
+    /**
+     * Reveal kind for the host, or undefined when the executable a reveal
+     * actually spawns is unavailable. Only meaningful when
+     * `resolveAvailableEditors` includes "file-manager": on Linux that
+     * availability check also carries the directory-handler probe this
+     * capability relies on.
+     */
     readonly resolveFileManagerRevealKind: () => Effect.Effect<FileManagerRevealKind | undefined>;
     /** Launch a URL target in the default browser. */
     readonly launchBrowser: (target: string) => Effect.Effect<void, ExternalLauncherError>;
@@ -437,6 +512,40 @@ const resolveEditorLaunch = Effect.fn("resolveEditorLaunch")(function* (
   };
 });
 
+/**
+ * PowerShell source that launches File Explorer with its raw selection
+ * switch. Explorer's contract is the single argument `/select,"<path>"` with
+ * only the path quoted; Node's default spawn quoting wraps the whole argument
+ * when the path has spaces and Explorer misparses it, silently opening a
+ * fallback folder. A single `-ArgumentList` string in Windows PowerShell 5.1
+ * reaches the child's command line verbatim, preserving the raw switch.
+ *
+ * Exported so the Windows smoke test can drive the identical source through a
+ * real PowerShell against a recording stub instead of Explorer.
+ */
+export function buildFileExplorerRevealPowerShellSource(
+  explorerCommand: string,
+  target: string,
+): string {
+  return `$ProgressPreference = 'SilentlyContinue'; Start-Process ${escapePowerShellStringLiteral(explorerCommand)} -ArgumentList ('/select,"' + ${escapePowerShellStringLiteral(target)} + '"')`;
+}
+
+function fileExplorerRevealLaunch(
+  target: string,
+  explorerTarget: string,
+  powershellCommand: string,
+): EditorLaunch {
+  return {
+    editor: "file-manager",
+    target,
+    command: powershellCommand,
+    args: [
+      ...POWERSHELL_ARGUMENTS_PREFIX,
+      encodeUtf16LeBase64(buildFileExplorerRevealPowerShellSource("explorer.exe", explorerTarget)),
+    ],
+  };
+}
+
 const resolveFileManagerRevealLaunch = Effect.fn("resolveFileManagerRevealLaunch")(function* (
   target: string,
   platform: NodeJS.Platform,
@@ -447,21 +556,24 @@ const resolveFileManagerRevealLaunch = Effect.fn("resolveFileManagerRevealLaunch
   }
 
   if (platform === "win32") {
-    return {
-      editor: "file-manager",
-      target,
-      command: "explorer",
-      args: ["/select,", target],
-    };
+    return fileExplorerRevealLaunch(target, target, resolvePowerShellPath(env));
   }
 
   if (shouldUseWindowsHostFromWsl(platform, env) && env.WSL_DISTRO_NAME !== undefined) {
-    return {
-      editor: "file-manager",
-      target,
-      command: "explorer.exe",
-      args: ["/select,", resolveWslFileManagerPath(target, env.WSL_DISTRO_NAME)],
-    };
+    const explorerTarget = resolveWslFileManagerPath(target, env.WSL_DISTRO_NAME);
+    // Explorer's raw switch cannot express a double quote, and unlike Windows
+    // paths a WSL path may legally contain one: fall back to opening the
+    // containing directory the same way the non-reveal launch does.
+    if (explorerTarget.includes('"')) {
+      const path = yield* Path.Path;
+      return {
+        editor: "file-manager",
+        target,
+        command: "explorer.exe",
+        args: [resolveWslFileManagerPath(path.dirname(target), env.WSL_DISTRO_NAME)],
+      };
+    }
+    return fileExplorerRevealLaunch(target, explorerTarget, WSL_POWERSHELL_COMMAND);
   }
 
   // Linux file managers have no portable "select this file" flag, so open
@@ -562,7 +674,9 @@ export const make = Effect.gen(function* () {
     if (Option.isSome(entry) && entry.value.expiresAtNanos > nowNanos) {
       return entry.value.editors;
     }
-    const editors = yield* provideCommandResolutionServices(resolveAvailableEditors());
+    const editors = yield* provideCommandResolutionServices(resolveAvailableEditors()).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    );
     yield* Ref.set(
       editorDiscoveryCache,
       Option.some({
@@ -575,7 +689,8 @@ export const make = Effect.gen(function* () {
 
   return ExternalLauncher.of({
     resolveAvailableEditors: () => cachedAvailableEditors,
-    resolveFileManagerRevealKind,
+    resolveFileManagerRevealKind: () =>
+      provideCommandResolutionServices(resolveFileManagerRevealKind()),
     launchBrowser: (target) =>
       launchBrowser(target).pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
