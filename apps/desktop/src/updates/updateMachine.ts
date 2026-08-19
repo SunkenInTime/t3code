@@ -111,6 +111,19 @@ export function reduceDesktopUpdateStateOnNoUpdate(
   state: DesktopUpdateState,
   checkedAt: string,
 ): DesktopUpdateState {
+  if (state.downloadedVersion !== null) {
+    return {
+      ...state,
+      status: "downloaded",
+      availableVersion: state.downloadedVersion,
+      downloadPercent: 100,
+      checkedAt,
+      message: null,
+      errorContext: null,
+      canRetry: true,
+    };
+  }
+
   return {
     ...state,
     status: "up-to-date",

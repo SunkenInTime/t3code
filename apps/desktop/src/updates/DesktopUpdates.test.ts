@@ -400,6 +400,66 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });
 
+  it.effect("preserves a queued installer when the feed has no update", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        harness.emit("update-available", {
+          version: "1.2.4",
+          releaseNotes: "## What's changed\n- fix: queued update",
+        });
+        yield* flushCallbacks;
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        yield* updates.check("poll");
+        harness.emit("update-not-available");
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.equal(state.status, "downloaded");
+        assert.equal(state.availableVersion, "1.2.4");
+        assert.equal(state.downloadedVersion, "1.2.4");
+        assert.deepEqual(state.releaseNotes, [{ version: "1.2.4", items: ["fix: queued update"] }]);
+        assert.equal(state.downloadPercent, 100);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("preserves a queued installer when the feed offers another channel", () => {
+    const harness = makeHarness();
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        harness.emit("update-available", {
+          version: "1.2.4",
+          releaseNotes: "## What's changed\n- fix: queued update",
+        });
+        yield* flushCallbacks;
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        yield* updates.check("poll");
+        harness.emit("update-available", { version: "1.2.5-nightly.20260710.1" });
+        yield* flushCallbacks;
+
+        const state = yield* updates.getState;
+        assert.equal(state.status, "downloaded");
+        assert.equal(state.availableVersion, "1.2.4");
+        assert.equal(state.downloadedVersion, "1.2.4");
+        assert.deepEqual(state.releaseNotes, [{ version: "1.2.4", items: ["fix: queued update"] }]);
+        assert.equal(state.downloadPercent, 100);
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
   it.effect(
     "rejects install while a refresh check is in progress and releases the reservation",
     () =>
