@@ -23,12 +23,16 @@ import * as ExternalLauncher from "./externalLauncher.ts";
 interface MockSpawnResult {
   readonly exitCode?: number;
   readonly stdout?: string;
+  /** Never deliver an exit code, like a child wedged on a broken desktop session. */
+  readonly stall?: boolean;
 }
 
 function makeMockDetachedHandle(input: MockSpawnResult & { readonly onUnref?: () => void } = {}) {
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(1),
-    exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(input.exitCode ?? 0)),
+    exitCode: input.stall
+      ? Effect.never
+      : Effect.succeed(ChildProcessSpawner.ExitCode(input.exitCode ?? 0)),
     isRunning: Effect.succeed(true),
     kill: () => Effect.void,
     unref: Effect.sync(() => {
@@ -412,6 +416,57 @@ it.effect("does not advertise reveal from WSL when interop PowerShell is missing
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );
 
+// When interop PowerShell is missing the capability advertises the Linux
+// "files" kind (or nothing), so the reveal must open the Linux file manager
+// the label promised even though plain open still prefers File Explorer.
+it.effect("reveals through the Linux file manager when WSL lacks interop PowerShell", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
+    for (const name of ["explorer.exe", "xdg-open", "xdg-mime"]) {
+      const filePath = path.join(binDir, name);
+      yield* fileSystem.writeFileString(filePath, "#!/bin/sh\n");
+      yield* fileSystem.chmod(filePath, 0o755);
+    }
+
+    const spawnedCommands: ChildProcess.StandardCommand[] = [];
+    const kind = yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      const revealKind = yield* launcher.resolveFileManagerRevealKind();
+      yield* launcher.launchEditor({
+        editor: "file-manager",
+        cwd: "/home/t3/workspace/media/clip.mp4",
+        reveal: true,
+      });
+      return revealKind;
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          platform: "linux",
+          env: {
+            PATH: binDir,
+            WSL_DISTRO_NAME: "Ubuntu-24.04",
+            WSL_INTEROP: "/run/WSL/1_interop",
+            DISPLAY: ":0",
+          },
+          onSpawn: (command) => {
+            spawnedCommands.push(command);
+          },
+          spawnResult: (command) =>
+            command.command === "xdg-mime" ? { stdout: "org.gnome.Nautilus.desktop\n" } : undefined,
+        }),
+      ),
+    );
+
+    assert.equal(kind, "files");
+    const launch = spawnedCommands.find((command) => command.command === "xdg-open");
+    assert.ok(launch);
+    assert.deepEqual(launch.args, ["/home/t3/workspace/media"]);
+    assert.isUndefined(spawnedCommands.find((command) => command.command === "explorer.exe"));
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
 // Interop can exist without `explorer.exe` on PATH (appendWindowsPath=false)
 // while WSLg still provides a working Linux file manager; the host must keep
 // the Linux open/reveal path instead of losing the editor entirely.
@@ -660,6 +715,39 @@ it.effect("does not advertise a Linux file manager when the handler query fails"
       ),
     );
 
+    assert.equal(editors.includes("file-manager"), false);
+  }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+);
+
+// The handler probe carries its own timeout because the editor scan's outer
+// timeout in server.getConfig degrades to an EMPTY editor list: a wedged
+// xdg-mime must cost only the file manager, never the other editors. Runs on
+// the live clock so the probe's real timeout fires.
+it.live("a stalled handler probe drops only the file manager", () =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const binDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-editors-" });
+    for (const name of ["xdg-open", "xdg-mime", "code"]) {
+      const filePath = path.join(binDir, name);
+      yield* fileSystem.writeFileString(filePath, "#!/bin/sh\n");
+      yield* fileSystem.chmod(filePath, 0o755);
+    }
+
+    const editors = yield* Effect.gen(function* () {
+      const launcher = yield* ExternalLauncher.ExternalLauncher;
+      return yield* launcher.resolveAvailableEditors();
+    }).pipe(
+      Effect.provide(
+        testLayer({
+          platform: "linux",
+          env: { PATH: binDir, DISPLAY: ":0" },
+          spawnResult: (command) => (command.command === "xdg-mime" ? { stall: true } : undefined),
+        }),
+      ),
+    );
+
+    assert.equal(editors.includes("vscode"), true);
     assert.equal(editors.includes("file-manager"), false);
   }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
 );

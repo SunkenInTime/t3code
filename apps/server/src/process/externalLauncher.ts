@@ -260,8 +260,14 @@ function fileManagerCommandForPlatform(
 // that opening a directory does anything: without an `inode/directory` MIME
 // handler, `xdg-open` exits nonzero after the launcher has already detached,
 // so the client would see a silent no-op. Require the handler before
-// advertising the file manager on Linux. Callers bound the runtime: discovery
-// runs under the same timeout `server.getConfig` applies to editor scans.
+// advertising the file manager on Linux.
+//
+// The probe carries its own timeout well inside the scan timeout
+// `server.getConfig` applies to editor discovery: that outer timeout degrades
+// to an empty editor list, so a hung `xdg-mime` (broken D-Bus or desktop
+// session) must cost only the file manager, not every discovered editor.
+const LINUX_DIRECTORY_HANDLER_PROBE_TIMEOUT = "2 seconds";
+
 const hasUsableLinuxDirectoryHandler = Effect.fn("externalLauncher.hasUsableLinuxDirectoryHandler")(
   function* (
     env: NodeJS.ProcessEnv,
@@ -290,6 +296,7 @@ const hasUsableLinuxDirectoryHandler = Effect.fn("externalLauncher.hasUsableLinu
         ),
         Effect.map(([stdout, exitCode]) => exitCode === 0 && stdout.trim().length > 0),
         Effect.scoped,
+        Effect.timeout(LINUX_DIRECTORY_HANDLER_PROBE_TIMEOUT),
         Effect.orElseSucceed(() => false),
       );
   },
@@ -609,7 +616,11 @@ const resolveFileManagerRevealLaunch = Effect.fn("resolveFileManagerRevealLaunch
   // The command resolveUsableFileManagerCommand picked; a WSL host that fell
   // back to the Linux file manager must reveal through it as well.
   command: string,
-): Effect.fn.Return<EditorLaunch, never, FileSystem.FileSystem | Path.Path> {
+): Effect.fn.Return<
+  EditorLaunch,
+  never,
+  FileSystem.FileSystem | Path.Path | ChildProcessSpawner.ChildProcessSpawner
+> {
   if (platform === "darwin") {
     return { editor: "file-manager", target, command: "open", args: ["-R", target] };
   }
@@ -624,24 +635,38 @@ const resolveFileManagerRevealLaunch = Effect.fn("resolveFileManagerRevealLaunch
     env.WSL_DISTRO_NAME !== undefined
   ) {
     const explorerTarget = resolveWslFileManagerPath(target, env.WSL_DISTRO_NAME);
-    // Explorer's raw switch cannot express a double quote, and unlike Windows
-    // paths a WSL path may legally contain one: fall back to opening the
-    // containing directory the same way the non-reveal launch does. The same
-    // fallback covers a missing interop PowerShell, so the launch never
-    // depends on an executable the capability did not advertise.
-    if (
-      explorerTarget.includes('"') ||
-      !(yield* isCommandAvailable(WSL_POWERSHELL_COMMAND, { env }))
-    ) {
-      const path = yield* Path.Path;
-      return {
-        editor: "file-manager",
-        target,
-        command: "explorer.exe",
-        args: [resolveWslFileManagerPath(path.dirname(target), env.WSL_DISTRO_NAME)],
-      };
+    if (yield* isCommandAvailable(WSL_POWERSHELL_COMMAND, { env })) {
+      // Explorer's raw switch cannot express a double quote, and unlike
+      // Windows paths a WSL path may legally contain one: open the containing
+      // directory in File Explorer instead, matching the advertised
+      // "file-explorer" kind.
+      if (explorerTarget.includes('"')) {
+        const path = yield* Path.Path;
+        return {
+          editor: "file-manager",
+          target,
+          command: "explorer.exe",
+          args: [resolveWslFileManagerPath(path.dirname(target), env.WSL_DISTRO_NAME)],
+        };
+      }
+      return fileExplorerRevealLaunch(target, explorerTarget, WSL_POWERSHELL_COMMAND);
     }
-    return fileExplorerRevealLaunch(target, explorerTarget, WSL_POWERSHELL_COMMAND);
+    // Without interop PowerShell the capability advertised the Linux "files"
+    // kind when it advertised anything at all, so the reveal must open the
+    // Linux file manager the label promised, not File Explorer.
+    if (hasGraphicalLinuxSession(env) && (yield* isUsableFileManagerCommand("xdg-open", env))) {
+      const path = yield* Path.Path;
+      return { editor: "file-manager", target, command: "xdg-open", args: [path.dirname(target)] };
+    }
+    // Nothing was advertised here; open the parent in File Explorer as the
+    // best remaining effort for a stale client.
+    const path = yield* Path.Path;
+    return {
+      editor: "file-manager",
+      target,
+      command: "explorer.exe",
+      args: [resolveWslFileManagerPath(path.dirname(target), env.WSL_DISTRO_NAME)],
+    };
   }
 
   // Linux file managers have no portable "select this file" flag, so open
