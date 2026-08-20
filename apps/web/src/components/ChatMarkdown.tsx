@@ -983,8 +983,10 @@ const MarkdownLinkFavicon = memo(function MarkdownLinkFavicon({ host }: { host: 
   );
 });
 
+// block! outranks the unlayered `.chat-markdown img { display: inline-block }`
+// rule, keeping the loaded image on the same block layout as its placeholder.
 const CHAT_MARKDOWN_IMAGE_CLASS_NAME =
-  "my-1 block max-h-96 max-w-full rounded-lg border border-border/40 object-contain";
+  "my-1 block! max-h-96 max-w-full rounded-lg border border-border/40 object-contain";
 
 /** A remote src the browser can fetch on its own — no workspace resolution needed. */
 const DIRECTLY_LOADABLE_IMAGE_SRC_PATTERN = /^(?:https?:|data:|blob:|\/\/)/i;
@@ -1017,6 +1019,7 @@ const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(prop
   if (assetUrl._tag !== "Success") {
     return (
       <span
+        role="status"
         aria-label="Loading image"
         className="my-1 block aspect-video w-full max-w-md rounded-lg bg-muted/60"
       />
