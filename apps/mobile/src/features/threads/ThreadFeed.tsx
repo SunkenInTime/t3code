@@ -938,6 +938,7 @@ function renderFeedEntry(
     readonly onPressImage: (uri: string, headers?: Record<string, string>) => void;
     readonly onMarkdownLinkPress: (href: string) => void;
     readonly renderMarkdownImage: MarkdownImageRenderer;
+    readonly renderViewedWorkImage: (path: string) => ReactNode;
     readonly iconSubtleColor: string | import("react-native").ColorValue;
     readonly userBubbleColor: string | import("react-native").ColorValue;
     readonly markdownStyles: MarkdownStyleSets;
@@ -1138,6 +1139,7 @@ function renderFeedEntry(
       iconSubtleColor={iconSubtleColor}
       onCopyRow={props.onCopyWorkRow}
       onToggleRow={props.onToggleWorkRow}
+      renderViewedImage={props.renderViewedWorkImage}
     />
   );
 }
@@ -1573,6 +1575,18 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     },
     [props.environmentId, props.threadId, props.workspaceRoot],
   );
+  const renderViewedWorkImage = useCallback(
+    (path: string) => (
+      <ThreadMarkdownImage
+        environmentId={props.environmentId}
+        threadId={props.threadId}
+        path={path}
+        alt={null}
+        onPressImage={(uri) => setExpandedImage({ uri })}
+      />
+    ),
+    [props.environmentId, props.threadId],
+  );
   const markdownStyles = useMarkdownStyles(onMarkdownLinkPress, renderMarkdownImage);
   const reviewCommentColors = useReviewCommentColors();
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
@@ -1965,6 +1979,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         onPressImage,
         onMarkdownLinkPress,
         renderMarkdownImage,
+        renderViewedWorkImage,
         iconSubtleColor,
         userBubbleColor,
         markdownStyles,
@@ -1993,6 +2008,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       props.environmentId,
       props.skills,
       renderMarkdownImage,
+      renderViewedWorkImage,
     ],
   );
 
