@@ -4,6 +4,7 @@ import { ComposerPromptEditor, type ComposerPromptEditorHandle } from "../Compos
 import { terminalThemeFromApp } from "../ThreadTerminalDrawer";
 import { useTheme } from "../../hooks/useTheme";
 import { useClientSettings } from "../../hooks/useSettings";
+import { DISCONNECTED_COMPOSER_PLACEHOLDER } from "../../composerPlaceholder";
 import {
   DIFF_SURFACE_THEME_UNSAFE_CSS,
   getDiffColorSchemeClassName,
@@ -50,7 +51,7 @@ export function PromptFontPreview() {
         terminalContexts={EMPTY_TERMINAL_CONTEXTS}
         skills={EMPTY_SKILLS}
         disabled={false}
-        placeholder="Ask for follow-up changes or attach images"
+        placeholder={DISCONNECTED_COMPOSER_PLACEHOLDER}
         className="max-h-40 min-h-12"
         onRemoveTerminalContext={noop}
         onChange={onChange}
