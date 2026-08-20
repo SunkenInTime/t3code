@@ -117,6 +117,7 @@ import {
 import { SkillInlineText } from "./SkillInlineText";
 import { formatWorkspaceRelativePath } from "../../filePathDisplay";
 import { useAssetUrlState } from "../../assets/assetUrls";
+import { Skeleton } from "../ui/skeleton";
 import {
   buildReviewCommentRenderablePatch,
   formatReviewCommentFence,
@@ -2469,14 +2470,14 @@ const ToolCallExpandedImage = memo(function ToolCallExpandedImage(props: {
   }
   if (assetUrl._tag !== "Success") {
     return (
-      <span aria-label="Loading image" className="mb-1.5 block h-24 w-40 rounded-md bg-muted/60" />
+      <Skeleton role="status" aria-label="Loading image" className="mb-1.5 h-24 w-40 rounded-md" />
     );
   }
   const name = props.path.split(/[\\/]/).pop() ?? props.path;
   return (
     <button
       type="button"
-      className="mb-1.5 block cursor-zoom-in"
+      className="mb-1.5 block cursor-zoom-in rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70"
       aria-label={`Preview ${name}`}
       onClick={() => onImageExpand({ images: [{ src: assetUrl.url, name }], index: 0 })}
     >
@@ -2755,6 +2756,10 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
+          // Keys pressed on the expanded body (e.g. Enter on the image
+          // preview button) must not reach the row's toggle handler — its
+          // preventDefault would also cancel the button's click activation.
+          onKeyDown={stopRowToggle}
         >
           {viewedImagePath && threadRef ? (
             <ToolCallExpandedImage threadRef={threadRef} path={viewedImagePath} />
