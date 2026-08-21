@@ -85,8 +85,9 @@ function parseFileUrlHref(
     const parsed = new URL(href);
     if (parsed.protocol.toLowerCase() !== "file:") return null;
 
-    const rawPath = parsed.hostname
-      ? `\\\\${parsed.hostname}${parsed.pathname.replaceAll("/", "\\")}`
+    const uncHostname = parsed.hostname.toLowerCase() === "localhost" ? "" : parsed.hostname;
+    const rawPath = uncHostname
+      ? `\\\\${uncHostname}${parsed.pathname.replaceAll("/", "\\")}`
       : parsed.pathname;
     if (rawPath.length === 0) return null;
 

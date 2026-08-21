@@ -20,6 +20,10 @@ function normalizeSource(value: string): string {
   return trimmed.startsWith("<") && trimmed.endsWith(">") ? trimmed.slice(1, -1) : trimmed;
 }
 
+function normalizeWindowsDrivePath(value: string): string {
+  return /^\/[A-Za-z]:[\\/]/.test(value) ? value.slice(1) : value;
+}
+
 function parseFileUrl(value: string): string | null {
   try {
     const parsed = new URL(value);
@@ -32,7 +36,7 @@ function parseFileUrl(value: string): string | null {
 
     const pathname = safeDecode(parsed.pathname);
     if (pathname.length === 0) return null;
-    return /^\/[A-Za-z]:[\\/]/.test(pathname) ? pathname.slice(1) : pathname;
+    return normalizeWindowsDrivePath(pathname);
   } catch {
     return null;
   }
@@ -80,7 +84,7 @@ export function classifyMarkdownImageSource(
     return path === null ? { _tag: "Blocked" } : { _tag: "WorkspaceFile", path };
   }
 
-  const path = safeDecode(stripSearchAndHash(source));
+  const path = normalizeWindowsDrivePath(safeDecode(stripSearchAndHash(source)));
   if (path.length === 0) return { _tag: "Blocked" };
   if (path.startsWith("/") || WINDOWS_DRIVE_PATH_PATTERN.test(path) || path.startsWith("\\\\")) {
     return { _tag: "WorkspaceFile", path };

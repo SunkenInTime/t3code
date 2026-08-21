@@ -30,6 +30,7 @@ describe("classifyMarkdownImageSource", () => {
       "C:\\Users\\dara\\project\\images\\result.png",
     ],
     ["/workspace/project/image.png", null, "/workspace/project/image.png"],
+    ["/C:/Users/dara/project/image.png", null, "C:/Users/dara/project/image.png"],
     ["C:/Users/dara/project/image.png", null, "C:/Users/dara/project/image.png"],
     ["\\\\server\\share\\image.png", null, "\\\\server\\share\\image.png"],
     ["file:///workspace/project/image%20one.png", null, "/workspace/project/image one.png"],
