@@ -2,6 +2,7 @@ import * as Haptics from "expo-haptics";
 import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
 import { type LegendListRef } from "@legendapp/list/react-native";
 import type { EnvironmentId, MessageId, ThreadId, TurnId } from "@t3tools/contracts";
+import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
 import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
 import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
 import { SymbolView } from "../../components/AppSymbol";
@@ -103,7 +104,7 @@ import {
 } from "./thread-work-log";
 import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 import { useAssetUrl, useAssetUrlState } from "../../state/assets";
-import { resolveWorkspaceFilePath, resolveWorkspaceRelativeFilePath } from "../files/filePath";
+import { resolveWorkspaceRelativeFilePath } from "../files/filePath";
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
   includeOrderedLists: Platform.OS === "android",
@@ -194,58 +195,6 @@ function MessageAttachmentImage(props: {
   );
 }
 
-const REMOTE_IMAGE_SRC_PATTERN = /^https?:\/\//i;
-const NON_FILE_SCHEME_PATTERN = /^[A-Za-z][A-Za-z0-9+.-]*:/;
-
-/**
- * Absolute filesystem path for a markdown image src, or null when the src is
- * not a workspace file (remote URL, other scheme, or a relative path with no
- * workspace root to resolve against).
- */
-function markdownImageWorkspacePath(href: string, workspaceRoot: string | null): string | null {
-  const isFileUri = /^file:\/\//i.test(href);
-  let path = isFileUri ? href.slice("file://".length) : href;
-  try {
-    path = decodeURIComponent(path);
-  } catch {
-    // Keep the raw path when it is not valid percent-encoding.
-  }
-  if (path.length === 0) {
-    return null;
-  }
-  if (isFileUri) {
-    // file://localhost/... is the historical spelling of file:///... (WHATWG
-    // parsers normalize the localhost authority away), not a UNC host.
-    if (/^localhost\//i.test(path)) {
-      path = path.slice("localhost".length);
-    }
-    if (!path.startsWith("/")) {
-      // file://host/share/... — the authority is a UNC host on the
-      // environment machine, not a path segment under the workspace root.
-      return `\\\\${path.replaceAll("/", "\\")}`;
-    }
-    // URL parsers encode Windows drive paths as /C:/... — drop the slash.
-    if (/^\/[A-Za-z]:[\\/]/.test(path)) {
-      path = path.slice(1);
-    }
-  } else if (path.startsWith("//")) {
-    // Protocol-relative URL (//cdn.example.com/x.png), not a filesystem path.
-    return null;
-  }
-  const isAbsolute =
-    path.startsWith("/") || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith("\\\\");
-  if (!isAbsolute && NON_FILE_SCHEME_PATTERN.test(path)) {
-    return null;
-  }
-  if (isAbsolute) {
-    return path;
-  }
-  if (workspaceRoot === null) {
-    return null;
-  }
-  return resolveWorkspaceFilePath(workspaceRoot, path);
-}
-
 /** Markdown image whose src is a workspace file — loads through a signed asset URL. */
 function ThreadMarkdownImage(props: {
   readonly environmentId: EnvironmentId;
@@ -304,6 +253,31 @@ function ThreadMarkdownImage(props: {
           />
         </TouchableOpacity>
       )}
+      {props.alt ? (
+        <Text selectable className="text-xs text-foreground-muted">
+          {props.alt}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+function ThreadMarkdownImageUnavailable(props: { readonly alt: string | null }) {
+  const codeBackground = useThemeColor("--color-md-code-bg");
+  return (
+    <View style={{ gap: 6 }}>
+      <View
+        style={{
+          width: "100%",
+          aspectRatio: 16 / 9,
+          borderRadius: 10,
+          backgroundColor: codeBackground,
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <Text className="text-xs text-foreground-muted">Image unavailable</Text>
+      </View>
       {props.alt ? (
         <Text selectable className="text-xs text-foreground-muted">
           {props.alt}
@@ -1553,19 +1527,18 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   );
   const renderMarkdownImage = useCallback<MarkdownImageRenderer>(
     (image) => {
-      // Remote URIs load fine in a plain RN Image — keep the module fallback.
-      if (REMOTE_IMAGE_SRC_PATTERN.test(image.href)) {
+      const imageSource = classifyMarkdownImageSource(image.href, props.workspaceRoot ?? null);
+      if (imageSource._tag === "Direct") {
         return null;
       }
-      const path = markdownImageWorkspacePath(image.href, props.workspaceRoot ?? null);
-      if (path === null) {
-        return null;
+      if (imageSource._tag === "Blocked") {
+        return <ThreadMarkdownImageUnavailable alt={image.alt} />;
       }
       return (
         <ThreadMarkdownImage
           environmentId={props.environmentId}
           threadId={props.threadId}
-          path={path}
+          path={imageSource.path}
           alt={image.alt}
           onPressImage={(uri) => setExpandedImage({ uri })}
         />

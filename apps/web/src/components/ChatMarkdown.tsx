@@ -19,6 +19,7 @@ import {
   squashAtomCommandFailure,
   type AtomCommandResult,
 } from "@t3tools/client-runtime/state/runtime";
+import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 import React, {
@@ -988,9 +989,6 @@ const MarkdownLinkFavicon = memo(function MarkdownLinkFavicon({ host }: { host: 
 const CHAT_MARKDOWN_IMAGE_CLASS_NAME =
   "my-1 block! max-h-96 max-w-full rounded-lg border border-border/40 object-contain";
 
-/** A remote src the browser can fetch on its own — no workspace resolution needed. */
-const DIRECTLY_LOADABLE_IMAGE_SRC_PATTERN = /^(?:https?:|data:|blob:|\/\/)/i;
-
 function ChatMarkdownImageFallback(props: { readonly alt: string }) {
   return (
     <span className="my-1 inline-flex items-center gap-1.5 rounded-md border border-border/40 bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
@@ -1816,25 +1814,20 @@ function ChatMarkdown({
       img({ node: _node, title: _title, src, alt, ...props }) {
         const srcString = typeof src === "string" ? normalizeMarkdownLinkDestination(src) : "";
         const altText = alt ?? "";
-        if (srcString.length === 0) {
-          return <ChatMarkdownImageFallback alt={altText} />;
+        const imageSource = classifyMarkdownImageSource(srcString, cwd);
+        if (imageSource._tag === "Direct") {
+          return <img {...props} src={imageSource.uri} alt={altText} loading="lazy" />;
         }
-        if (!DIRECTLY_LOADABLE_IMAGE_SRC_PATTERN.test(srcString)) {
-          // Agents reference screenshots they saved into the workspace by path
-          // (relative, absolute, or file://); those bytes only exist on the
-          // environment host, so they load through a signed asset URL.
-          const fileMeta = resolveMarkdownFileLinkMeta(srcString, cwd);
-          if (fileMeta && threadRef) {
-            return (
-              <ChatMarkdownWorkspaceImage
-                threadRef={threadRef}
-                path={fileMeta.filePath}
-                alt={altText}
-              />
-            );
-          }
+        if (imageSource._tag === "WorkspaceFile" && threadRef) {
+          return (
+            <ChatMarkdownWorkspaceImage
+              threadRef={threadRef}
+              path={imageSource.path}
+              alt={altText}
+            />
+          );
         }
-        return <img {...props} src={srcString} alt={altText} loading="lazy" />;
+        return <ChatMarkdownImageFallback alt={altText} />;
       },
       table({ node: _node, ...props }) {
         return <MarkdownTable {...props} />;
