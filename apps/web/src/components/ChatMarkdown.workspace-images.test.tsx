@@ -26,7 +26,10 @@ vi.mock("../state/session", async (importOriginal) => ({
 vi.mock("../state/entities", () => ({
   useActiveEnvironmentId: () => EnvironmentId.make("env-windows"),
 }));
-vi.mock("../editorPreferences", () => ({ useOpenInPreferredEditor: () => vi.fn() }));
+vi.mock("../editorPreferences", () => ({
+  useOpenInPreferredEditor: () => vi.fn(),
+  usePreferredEditor: () => [null, vi.fn()],
+}));
 vi.mock("~/lib/openPullRequestLink", () => ({ useOpenChangeRequestLink: () => vi.fn() }));
 
 import ChatMarkdown from "./ChatMarkdown";
