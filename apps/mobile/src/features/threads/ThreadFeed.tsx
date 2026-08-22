@@ -270,23 +270,12 @@ function ThreadMarkdownImageView(props: {
               overflow: "hidden",
             }}
           >
-            <Image
+            <ThreadMarkdownImageRequest
               key={props.uri}
-              source={{ uri: props.uri }}
-              resizeMode="contain"
-              accessible={false}
-              onLoad={(event) => {
-                const { width, height } = event.nativeEvent.source;
-                setSourceSize({ width, height });
-              }}
+              uri={props.uri}
+              onLoad={setSourceSize}
               onError={() => setFailedUri(props.uri)}
-              style={{
-                width: "100%",
-                height: "100%",
-                opacity: displaySize === null ? 0 : 1,
-              }}
             />
-            {displaySize === null ? <ActivityIndicator style={StyleSheet.absoluteFill} /> : null}
           </View>
         </TouchableOpacity>
       )}
@@ -296,6 +285,31 @@ function ThreadMarkdownImageView(props: {
         </Text>
       ) : null}
     </View>
+  );
+}
+
+function ThreadMarkdownImageRequest(props: {
+  readonly uri: string;
+  readonly onLoad: (sourceSize: { width: number; height: number }) => void;
+  readonly onError: () => void;
+}) {
+  const [loaded, setLoaded] = useState(false);
+
+  return (
+    <>
+      <Image
+        source={{ uri: props.uri }}
+        resizeMode="contain"
+        accessible={false}
+        onLoad={(event) => {
+          setLoaded(true);
+          props.onLoad(event.nativeEvent.source);
+        }}
+        onError={props.onError}
+        style={{ width: "100%", height: "100%", opacity: loaded ? 1 : 0 }}
+      />
+      {loaded ? null : <ActivityIndicator style={StyleSheet.absoluteFill} />}
+    </>
   );
 }
 
