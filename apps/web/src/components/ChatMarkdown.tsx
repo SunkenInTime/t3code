@@ -66,7 +66,9 @@ import { recordVisitForThread } from "../browserHistoryStore";
 import {
   PreferredEditorEnvironmentRequiredError,
   useOpenInPreferredEditor,
+  usePreferredEditor,
 } from "../editorPreferences";
+import { openInEditorMenuLabel } from "../editorLabels";
 import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
@@ -830,6 +832,7 @@ interface MarkdownFileLinkProps {
   threadRef?: ScopedThreadRef | undefined;
   onOpen: (targetPath: string) => Promise<AtomCommandResult<unknown, unknown>>;
   onOpenInPanel: (workspaceRelativePath: string, line: number | undefined) => void;
+  openInEditorMenuLabel: string;
   onOpenInBrowser?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   onReveal?: (() => Promise<AtomCommandResult<unknown, unknown>>) | undefined;
   /** Platform-specific menu label ("Reveal in Finder", ...); required for the
@@ -1140,6 +1143,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   threadRef,
   onOpen,
   onOpenInPanel,
+  openInEditorMenuLabel,
   onOpenInBrowser,
   onReveal,
   revealLabel,
@@ -1314,7 +1318,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       try {
         const clicked = await api.contextMenu.show(
           [
-            { id: "open", label: "Open in editor" },
+            { id: "open", label: openInEditorMenuLabel },
             ...(onOpenInBrowser
               ? ([{ id: "open-in-browser", label: "Open in integrated browser" }] as const)
               : []),
@@ -1359,6 +1363,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
       handleRevealInFileManager,
       onOpenInBrowser,
       onReveal,
+      openInEditorMenuLabel,
       revealLabel,
       targetPath,
     ],
@@ -1416,6 +1421,7 @@ function areMarkdownFileLinkPropsEqual(
     previous.threadRef === next.threadRef &&
     previous.onOpen === next.onOpen &&
     previous.onOpenInPanel === next.onOpenInPanel &&
+    previous.openInEditorMenuLabel === next.openInEditorMenuLabel &&
     previous.onOpenInBrowser === next.onOpenInBrowser &&
     previous.onReveal === next.onReveal &&
     previous.revealLabel === next.revealLabel &&
@@ -1448,10 +1454,10 @@ function ChatMarkdown({
   const environmentId = threadRef?.environmentId ?? explicitEnvironmentId ?? null;
   const preparedConnection = usePreparedConnection(environmentId);
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
-  const openInPreferredEditor = useOpenInPreferredEditor(
-    environmentId,
-    serverConfig?.availableEditors ?? [],
-  );
+  const availableEditors = serverConfig?.availableEditors ?? [];
+  const [preferredEditor] = usePreferredEditor(availableEditors);
+  const preferredEditorMenuLabel = openInEditorMenuLabel(preferredEditor, navigator.platform);
+  const openInPreferredEditor = useOpenInPreferredEditor(environmentId, availableEditors);
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, {
     reportFailure: false,
   });
@@ -1639,6 +1645,7 @@ function ChatMarkdown({
           threadRef={threadRef}
           onOpen={openInPreferredEditor}
           onOpenInPanel={openFileInPanel}
+          openInEditorMenuLabel={preferredEditorMenuLabel}
           onReveal={
             revealInFileManagerLabel !== undefined
               ? () => revealFileInFileManager(fileLinkMeta.filePath)
@@ -1880,6 +1887,7 @@ function ChatMarkdown({
     openInPreferredEditor,
     openExternalLinkInPreview,
     openMarkdownFileInPreview,
+    preferredEditorMenuLabel,
     resolvedTheme,
     revealFileInFileManager,
     revealInFileManagerLabel,
