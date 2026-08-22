@@ -984,10 +984,15 @@ const MarkdownLinkFavicon = memo(function MarkdownLinkFavicon({ host }: { host: 
   );
 });
 
+const CHAT_MARKDOWN_IMAGE_SIZE_CLASS_NAME =
+  "h-auto w-auto max-h-[30rem] max-w-[min(100%,30rem)] object-contain";
+
 // block! outranks the unlayered `.chat-markdown img { display: inline-block }`
-// rule, keeping the loaded image on the same block layout as its placeholder.
-const CHAT_MARKDOWN_IMAGE_CLASS_NAME =
-  "my-1 block! max-h-96 max-w-full rounded-lg border border-border/40 object-contain";
+// rule, keeping workspace images on the same block layout as their placeholder.
+const CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME = cn(
+  CHAT_MARKDOWN_IMAGE_SIZE_CLASS_NAME,
+  "my-1 block! rounded-lg border border-border/40",
+);
 
 function ChatMarkdownImageFallback(props: { readonly alt: string }) {
   return (
@@ -1019,7 +1024,7 @@ const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(prop
       <span
         role="status"
         aria-label="Loading image"
-        className="my-1 block aspect-video w-full max-w-md rounded-lg bg-muted/60"
+        className="my-1 block aspect-video w-full max-w-[30rem] rounded-lg bg-muted/60"
       />
     );
   }
@@ -1029,7 +1034,7 @@ const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(prop
       alt={props.alt}
       loading="lazy"
       draggable={false}
-      className={CHAT_MARKDOWN_IMAGE_CLASS_NAME}
+      className={CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME}
       onError={() => setFailedUrl(assetUrl.url)}
     />
   );
@@ -1816,7 +1821,15 @@ function ChatMarkdown({
         const altText = alt ?? "";
         const imageSource = classifyMarkdownImageSource(srcString, cwd);
         if (imageSource._tag === "Direct") {
-          return <img {...props} src={imageSource.uri} alt={altText} loading="lazy" />;
+          return (
+            <img
+              {...props}
+              src={imageSource.uri}
+              alt={altText}
+              loading="lazy"
+              className={cn(props.className, CHAT_MARKDOWN_IMAGE_SIZE_CLASS_NAME)}
+            />
+          );
         }
         if (imageSource._tag === "WorkspaceFile" && threadRef) {
           return (
