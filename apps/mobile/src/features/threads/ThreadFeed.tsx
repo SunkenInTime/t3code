@@ -209,8 +209,6 @@ function ThreadMarkdownImageView(props: {
   const [availableWidth, setAvailableWidth] = useState(0);
   const [sourceSize, setSourceSize] = useState<{ width: number; height: number } | null>(null);
   const [failedUri, setFailedUri] = useState<string | null>(null);
-  const activeUriRef = useRef(props.uri);
-  activeUriRef.current = props.uri;
 
   useEffect(() => {
     setSourceSize(null);
@@ -273,11 +271,11 @@ function ThreadMarkdownImageView(props: {
             }}
           >
             <Image
+              key={props.uri}
               source={{ uri: props.uri }}
               resizeMode="contain"
               accessible={false}
               onLoad={(event) => {
-                if (activeUriRef.current !== props.uri) return;
                 const { width, height } = event.nativeEvent.source;
                 setSourceSize({ width, height });
               }}
