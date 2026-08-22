@@ -105,6 +105,7 @@ import {
 import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
 import { useAssetUrl, useAssetUrlState } from "../../state/assets";
 import { resolveWorkspaceRelativeFilePath } from "../files/filePath";
+import { MARKDOWN_IMAGE_MAX_WIDTH, resolveMarkdownImageDisplaySize } from "./markdownImageSize";
 
 const WIDE_MARKDOWN_BLOCK_OPTIONS = {
   includeOrderedLists: Platform.OS === "android",
@@ -196,30 +197,43 @@ function MessageAttachmentImage(props: {
   );
 }
 
-/** Markdown image whose src is a workspace file — loads through a signed asset URL. */
-function ThreadMarkdownImage(props: {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly path: string;
+function ThreadMarkdownImageView(props: {
+  readonly uri: string | null;
+  readonly unavailable: boolean;
   readonly alt: string | null;
   readonly onPressImage: (uri: string) => void;
 }) {
   const codeBackground = useThemeColor("--color-md-code-bg");
+  const [availableWidth, setAvailableWidth] = useState(0);
+  const [sourceSize, setSourceSize] = useState<{ width: number; height: number } | null>(null);
   const [failedUri, setFailedUri] = useState<string | null>(null);
-  const assetUrl = useAssetUrlState(props.environmentId, {
-    _tag: "workspace-file",
-    threadId: props.threadId,
-    path: props.path,
-  });
-  const uri = assetUrl._tag === "Success" ? assetUrl.url : null;
-  const failed = assetUrl._tag === "Failure" || (uri !== null && failedUri === uri);
+
+  useEffect(() => {
+    setSourceSize(null);
+    setFailedUri(null);
+  }, [props.uri]);
+
+  const displaySize =
+    sourceSize === null
+      ? null
+      : resolveMarkdownImageDisplaySize({
+          sourceWidth: sourceSize.width,
+          sourceHeight: sourceSize.height,
+          availableWidth,
+        });
+  const failed = props.unavailable || (props.uri !== null && failedUri === props.uri);
+  const placeholderWidth =
+    availableWidth > 0 ? Math.min(availableWidth, MARKDOWN_IMAGE_MAX_WIDTH) : "100%";
 
   return (
-    <View style={{ gap: 6 }}>
-      {uri === null || failed ? (
+    <View
+      onLayout={(event) => setAvailableWidth(event.nativeEvent.layout.width)}
+      style={{ alignSelf: "stretch", gap: 6 }}
+    >
+      {props.uri === null || failed ? (
         <View
           style={{
-            width: "100%",
+            width: placeholderWidth,
             aspectRatio: 16 / 9,
             borderRadius: 10,
             backgroundColor: codeBackground,
@@ -238,20 +252,36 @@ function ThreadMarkdownImage(props: {
           accessibilityRole="imagebutton"
           accessibilityLabel={props.alt ?? "Markdown image"}
           activeOpacity={0.7}
-          onPress={() => props.onPressImage(uri)}
+          onPress={() => props.onPressImage(props.uri!)}
+          style={{ alignSelf: "flex-start" }}
         >
-          <Image
-            source={{ uri }}
-            resizeMode="contain"
-            accessible={false}
-            onError={() => setFailedUri(uri)}
+          <View
             style={{
-              width: "100%",
-              aspectRatio: 16 / 9,
+              ...(displaySize ?? { width: placeholderWidth, aspectRatio: 16 / 9 }),
               borderRadius: 10,
               backgroundColor: codeBackground,
+              alignItems: "center",
+              justifyContent: "center",
+              overflow: "hidden",
             }}
-          />
+          >
+            <Image
+              source={{ uri: props.uri }}
+              resizeMode="contain"
+              accessible={false}
+              onLoad={(event) => {
+                const { width, height } = event.nativeEvent.source;
+                setSourceSize({ width, height });
+              }}
+              onError={() => setFailedUri(props.uri)}
+              style={{
+                width: "100%",
+                height: "100%",
+                opacity: displaySize === null ? 0 : 1,
+              }}
+            />
+            {displaySize === null ? <ActivityIndicator style={StyleSheet.absoluteFill} /> : null}
+          </View>
         </TouchableOpacity>
       )}
       {props.alt ? (
@@ -263,28 +293,38 @@ function ThreadMarkdownImage(props: {
   );
 }
 
-function ThreadMarkdownImageUnavailable(props: { readonly alt: string | null }) {
-  const codeBackground = useThemeColor("--color-md-code-bg");
+/** Markdown image whose src is a workspace file — loads through a signed asset URL. */
+function ThreadMarkdownImage(props: {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly path: string;
+  readonly alt: string | null;
+  readonly onPressImage: (uri: string) => void;
+}) {
+  const assetUrl = useAssetUrlState(props.environmentId, {
+    _tag: "workspace-file",
+    threadId: props.threadId,
+    path: props.path,
+  });
+
   return (
-    <View style={{ gap: 6 }}>
-      <View
-        style={{
-          width: "100%",
-          aspectRatio: 16 / 9,
-          borderRadius: 10,
-          backgroundColor: codeBackground,
-          alignItems: "center",
-          justifyContent: "center",
-        }}
-      >
-        <Text className="text-xs text-foreground-muted">Image unavailable</Text>
-      </View>
-      {props.alt ? (
-        <Text selectable className="text-xs text-foreground-muted">
-          {props.alt}
-        </Text>
-      ) : null}
-    </View>
+    <ThreadMarkdownImageView
+      uri={assetUrl._tag === "Success" ? assetUrl.url : null}
+      unavailable={assetUrl._tag === "Failure"}
+      alt={props.alt}
+      onPressImage={props.onPressImage}
+    />
+  );
+}
+
+function ThreadMarkdownImageUnavailable(props: { readonly alt: string | null }) {
+  return (
+    <ThreadMarkdownImageView
+      uri={null}
+      unavailable
+      alt={props.alt}
+      onPressImage={() => undefined}
+    />
   );
 }
 
@@ -1530,7 +1570,14 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
     (image) => {
       const imageSource = classifyMarkdownImageSource(image.href, props.workspaceRoot ?? null);
       if (imageSource._tag === "Direct") {
-        return null;
+        return (
+          <ThreadMarkdownImageView
+            uri={imageSource.uri}
+            unavailable={false}
+            alt={image.alt}
+            onPressImage={(uri) => setExpandedImage({ uri })}
+          />
+        );
       }
       if (imageSource._tag === "Blocked") {
         return <ThreadMarkdownImageUnavailable alt={image.alt} />;
