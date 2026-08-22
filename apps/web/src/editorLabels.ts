@@ -1,9 +1,4 @@
-import {
-  EDITORS,
-  type EditorId,
-  type ExecutionEnvironmentPlatformOs,
-  type FileManagerRevealKind,
-} from "@t3tools/contracts";
+import { EDITORS, type EditorId } from "@t3tools/contracts";
 
 import { isMacPlatform, isWindowsPlatform } from "~/lib/utils";
 
@@ -19,29 +14,8 @@ export function editorLabelForPlatform(editorId: EditorId, platform: string): st
   return editorLabels.get(editorId) ?? "Editor";
 }
 
-type EditorEnvironmentLabelContext = {
-  readonly os: ExecutionEnvironmentPlatformOs;
-  readonly fileManagerKind: FileManagerRevealKind | undefined;
-};
-
-function editorLabelForEnvironment(
-  editorId: EditorId,
-  environment: EditorEnvironmentLabelContext,
-): string {
-  if (editorId !== "file-manager") return editorLabels.get(editorId) ?? "Editor";
-  if (environment.fileManagerKind === "finder") return "Finder";
-  if (environment.fileManagerKind === "file-explorer") return "Explorer";
-  if (environment.fileManagerKind === "files") return "Files";
-  if (environment.os === "darwin") return "Finder";
-  if (environment.os === "windows") return "Explorer";
-  return "Files";
-}
-
-export function openInEditorMenuLabel(
-  editorId: EditorId | null,
-  environment: EditorEnvironmentLabelContext | null,
-): string {
-  return editorId === null || environment === null
+export function openInEditorMenuLabel(editorId: EditorId | null): string {
+  return editorId === null || editorId === "file-manager"
     ? "Open in editor"
-    : `Open in ${editorLabelForEnvironment(editorId, environment)}`;
+    : `Open in ${editorLabels.get(editorId) ?? "Editor"}`;
 }
