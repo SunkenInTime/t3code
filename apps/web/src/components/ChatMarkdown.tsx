@@ -1456,7 +1456,15 @@ function ChatMarkdown({
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const availableEditors = serverConfig?.availableEditors ?? [];
   const [preferredEditor] = usePreferredEditor(availableEditors);
-  const preferredEditorMenuLabel = openInEditorMenuLabel(preferredEditor, navigator.platform);
+  const preferredEditorMenuLabel = openInEditorMenuLabel(
+    preferredEditor,
+    serverConfig
+      ? {
+          os: serverConfig.environment.platform.os,
+          fileManagerKind: serverConfig.shellRevealInFileManagerKind,
+        }
+      : null,
+  );
   const openInPreferredEditor = useOpenInPreferredEditor(environmentId, availableEditors);
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, {
     reportFailure: false,

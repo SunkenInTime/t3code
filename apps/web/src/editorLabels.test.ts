@@ -19,10 +19,28 @@ describe("editorLabelForPlatform", () => {
 
 describe("openInEditorMenuLabel", () => {
   it("names the preferred editor", () => {
-    expect(openInEditorMenuLabel("zed", "MacIntel")).toBe("Open in Zed");
+    expect(openInEditorMenuLabel("zed", { os: "linux", fileManagerKind: undefined })).toBe(
+      "Open in Zed",
+    );
   });
 
-  it("keeps the generic fallback when no editor is available", () => {
-    expect(openInEditorMenuLabel(null, "MacIntel")).toBe("Open in editor");
+  it("uses the environment OS for its file manager", () => {
+    expect(openInEditorMenuLabel("file-manager", { os: "linux", fileManagerKind: undefined })).toBe(
+      "Open in Files",
+    );
+  });
+
+  it("uses the server-selected file manager kind for WSL", () => {
+    expect(
+      openInEditorMenuLabel("file-manager", {
+        os: "linux",
+        fileManagerKind: "file-explorer",
+      }),
+    ).toBe("Open in Explorer");
+  });
+
+  it("keeps the generic fallback when no environment config is available", () => {
+    expect(openInEditorMenuLabel("file-manager", null)).toBe("Open in editor");
+    expect(openInEditorMenuLabel(null, null)).toBe("Open in editor");
   });
 });
