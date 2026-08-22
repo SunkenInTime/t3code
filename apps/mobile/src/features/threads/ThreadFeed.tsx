@@ -199,6 +199,7 @@ function MessageAttachmentImage(props: {
 
 function ThreadMarkdownImageView(props: {
   readonly uri: string | null;
+  readonly sourceKey: string;
   readonly unavailable: boolean;
   readonly alt: string | null;
   readonly onPressImage: (uri: string) => void;
@@ -210,6 +211,9 @@ function ThreadMarkdownImageView(props: {
 
   useEffect(() => {
     setSourceSize(null);
+  }, [props.sourceKey]);
+
+  useEffect(() => {
     setFailedUri(null);
   }, [props.uri]);
 
@@ -310,6 +314,7 @@ function ThreadMarkdownImage(props: {
   return (
     <ThreadMarkdownImageView
       uri={assetUrl._tag === "Success" ? assetUrl.url : null}
+      sourceKey={props.path}
       unavailable={assetUrl._tag === "Failure"}
       alt={props.alt}
       onPressImage={props.onPressImage}
@@ -321,6 +326,7 @@ function ThreadMarkdownImageUnavailable(props: { readonly alt: string | null }) 
   return (
     <ThreadMarkdownImageView
       uri={null}
+      sourceKey="unavailable"
       unavailable
       alt={props.alt}
       onPressImage={() => undefined}
@@ -1573,6 +1579,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         return (
           <ThreadMarkdownImageView
             uri={imageSource.uri}
+            sourceKey={imageSource.uri}
             unavailable={false}
             alt={image.alt}
             onPressImage={(uri) => setExpandedImage({ uri })}
