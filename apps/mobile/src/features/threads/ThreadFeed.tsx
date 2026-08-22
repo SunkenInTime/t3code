@@ -40,6 +40,7 @@ import {
   type ColorValue,
   useWindowDimensions,
   View,
+  type ViewStyle,
 } from "react-native";
 import { TouchableOpacity } from "react-native-gesture-handler";
 import ImageViewing from "react-native-image-viewing";
@@ -208,6 +209,8 @@ function ThreadMarkdownImageView(props: {
   const [availableWidth, setAvailableWidth] = useState(0);
   const [sourceSize, setSourceSize] = useState<{ width: number; height: number } | null>(null);
   const [failedUri, setFailedUri] = useState<string | null>(null);
+  const activeUriRef = useRef(props.uri);
+  activeUriRef.current = props.uri;
 
   useEffect(() => {
     setSourceSize(null);
@@ -226,8 +229,9 @@ function ThreadMarkdownImageView(props: {
           availableWidth,
         });
   const failed = props.unavailable || (props.uri !== null && failedUri === props.uri);
-  const placeholderWidth =
+  const placeholderWidth: ViewStyle["width"] =
     availableWidth > 0 ? Math.min(availableWidth, MARKDOWN_IMAGE_MAX_WIDTH) : "100%";
+  const frameStyle: ViewStyle = displaySize ?? { width: placeholderWidth, aspectRatio: 16 / 9 };
 
   return (
     <View
@@ -237,8 +241,7 @@ function ThreadMarkdownImageView(props: {
       {props.uri === null || failed ? (
         <View
           style={{
-            width: placeholderWidth,
-            aspectRatio: 16 / 9,
+            ...frameStyle,
             borderRadius: 10,
             backgroundColor: codeBackground,
             alignItems: "center",
@@ -261,7 +264,7 @@ function ThreadMarkdownImageView(props: {
         >
           <View
             style={{
-              ...(displaySize ?? { width: placeholderWidth, aspectRatio: 16 / 9 }),
+              ...frameStyle,
               borderRadius: 10,
               backgroundColor: codeBackground,
               alignItems: "center",
@@ -274,6 +277,7 @@ function ThreadMarkdownImageView(props: {
               resizeMode="contain"
               accessible={false}
               onLoad={(event) => {
+                if (activeUriRef.current !== props.uri) return;
                 const { width, height } = event.nativeEvent.source;
                 setSourceSize({ width, height });
               }}
