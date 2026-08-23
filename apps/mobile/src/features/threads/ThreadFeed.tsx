@@ -308,7 +308,14 @@ function ThreadMarkdownImageRequest(props: {
         onError={props.onError}
         style={{ width: "100%", height: "100%", opacity: loaded ? 1 : 0 }}
       />
-      {loaded ? null : <View pointerEvents="none" style={StyleSheet.absoluteFill} />}
+      {loaded ? null : (
+        <View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, { alignItems: "center", justifyContent: "center" }]}
+        >
+          <Text className="text-xs text-foreground-muted">Loading image…</Text>
+        </View>
+      )}
     </>
   );
 }
