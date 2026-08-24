@@ -42,6 +42,10 @@ function render(markdown: string): string {
   );
 }
 
+function renderWithoutThread(markdown: string): string {
+  return renderToStaticMarkup(<ChatMarkdown cwd={"C:\\Users\\shawn\\project"} text={markdown} />);
+}
+
 describe("ChatMarkdown workspace images", () => {
   beforeEach(() => {
     testState.resources = [];
@@ -74,6 +78,8 @@ describe("ChatMarkdown workspace images", () => {
       },
     ]);
     expect(html.match(/https:\/\/signed\.test\/workspace-image\.svg/g)).toHaveLength(4);
+    expect(html.match(/max-w-\[min\(100%,30rem\)\]/g)).toHaveLength(4);
+    expect(html.match(/max-h-\[30rem\]/g)).toHaveLength(4);
     expect(html).not.toContain("Image unavailable");
   });
 
@@ -97,5 +103,33 @@ describe("ChatMarkdown workspace images", () => {
 
     expect(html).toContain('aria-label="Loading image"');
     expect(html).not.toContain("animate-pulse");
+  });
+
+  it("never passes a workspace source to a raw image when thread context is unavailable", () => {
+    const html = renderWithoutThread(
+      "![file URL](file:///C:/Users/shawn/project/workspace-image.svg)",
+    );
+
+    expect(testState.resources).toEqual([]);
+    expect(html).toContain("Image unavailable");
+    expect(html).not.toContain("file://");
+  });
+
+  it("blocks unsupported image schemes instead of passing them to a raw image", () => {
+    const html = render("![unsupported](content://media/image/1)");
+
+    expect(testState.resources).toEqual([]);
+    expect(html).toContain("Image unavailable");
+    expect(html).not.toContain("content://");
+  });
+
+  it("keeps remote images directly loadable", () => {
+    const html = render("![remote](https://example.com/image.png)");
+
+    expect(testState.resources).toEqual([]);
+    expect(html).toContain('src="https://example.com/image.png"');
+    expect(html).toContain("max-w-[min(100%,30rem)]");
+    expect(html).toContain("max-h-[30rem]");
+    expect(html).not.toContain("Image unavailable");
   });
 });
