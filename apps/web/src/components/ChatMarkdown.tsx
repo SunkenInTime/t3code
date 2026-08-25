@@ -95,7 +95,7 @@ import {
 import { readLocalApi } from "../localApi";
 import { useAssetUrlState } from "../assets/assetUrls";
 import { cn } from "../lib/utils";
-import { useRemoteOpenState, type RemoteOpenMode } from "../remoteOpen";
+import { useRemoteOpenResolution, type RemoteOpenMode } from "../remoteOpen";
 import { useRightPanelStore } from "../rightPanelStore";
 import { serverEnvironment } from "../state/server";
 import { shellEnvironment } from "../state/shell";
@@ -141,8 +141,9 @@ interface ChatMarkdownProps {
 export function canUseMarkdownFileShellActions(
   environmentId: EnvironmentId | null,
   remoteOpenMode: RemoteOpenMode,
+  isRemoteOpenResolved: boolean,
 ): boolean {
-  return environmentId !== null && remoteOpenMode === "local-exec";
+  return environmentId !== null && isRemoteOpenResolved && remoteOpenMode === "local-exec";
 }
 
 export function hasMarkdownFilePrimaryAction(input: {
@@ -1586,8 +1587,12 @@ function ChatMarkdown({
     reportFailure: false,
   });
   const environmentId = threadRef?.environmentId ?? explicitEnvironmentId ?? null;
-  const remoteOpenState = useRemoteOpenState(environmentId);
-  const canUseShellActions = canUseMarkdownFileShellActions(environmentId, remoteOpenState.mode);
+  const remoteOpen = useRemoteOpenResolution(environmentId);
+  const canUseShellActions = canUseMarkdownFileShellActions(
+    environmentId,
+    remoteOpen.state.mode,
+    remoteOpen.isResolved,
+  );
   const preparedConnection = usePreparedConnection(environmentId);
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const availableEditors = serverConfig?.availableEditors ?? [];
