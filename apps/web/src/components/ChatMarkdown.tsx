@@ -167,6 +167,19 @@ export function hasMarkdownFilePrimaryAction(input: {
   return input.canOpenInEditor || input.canOpenInBrowser || input.canOpenInPanel;
 }
 
+export function shouldUseMarkdownFileBrowserPrimaryAction(input: {
+  iconPath: string;
+  canOpenInEditor: boolean;
+  canOpenInBrowser: boolean;
+  canOpenInPanel: boolean;
+}): boolean {
+  return (
+    input.canOpenInBrowser &&
+    (shouldOpenMarkdownFileLinkInBrowserByDefault(input.iconPath) ||
+      (!input.canOpenInEditor && !input.canOpenInPanel))
+  );
+}
+
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -1508,10 +1521,19 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     [showFileContextMenu],
   );
 
+  const canOpenInEditor = onOpen !== undefined;
+  const canOpenInBrowser = onOpenInBrowser !== undefined;
+  const canOpenInPanel = threadRef !== undefined && Boolean(workspaceRelativePath);
   const hasPrimaryAction = hasMarkdownFilePrimaryAction({
-    canOpenInEditor: onOpen !== undefined,
-    canOpenInBrowser: onOpenInBrowser !== undefined,
-    canOpenInPanel: threadRef !== undefined && Boolean(workspaceRelativePath),
+    canOpenInEditor,
+    canOpenInBrowser,
+    canOpenInPanel,
+  });
+  const useBrowserPrimaryAction = shouldUseMarkdownFileBrowserPrimaryAction({
+    iconPath,
+    canOpenInEditor,
+    canOpenInBrowser,
+    canOpenInPanel,
   });
 
   return (
@@ -1534,7 +1556,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
                   handleOpenInEditor();
                   return;
                 }
-                if (onOpenInBrowser && shouldOpenMarkdownFileLinkInBrowserByDefault(iconPath)) {
+                if (useBrowserPrimaryAction) {
                   handleOpenInBrowser();
                   return;
                 }

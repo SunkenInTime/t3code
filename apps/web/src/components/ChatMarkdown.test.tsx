@@ -32,6 +32,7 @@ import ChatMarkdown, {
   canUseMarkdownFileShellActions,
   hasMarkdownFilePrimaryAction,
   orderedListGutterStyle,
+  shouldUseMarkdownFileBrowserPrimaryAction,
 } from "./ChatMarkdown";
 
 describe("canUseMarkdownFileShellActions", () => {
@@ -88,6 +89,49 @@ describe("hasMarkdownFilePrimaryAction", () => {
         canOpenInPanel: false,
       }),
     ).toBe(false);
+  });
+});
+
+describe("shouldUseMarkdownFileBrowserPrimaryAction", () => {
+  it("uses the browser when it is the only available primary action", () => {
+    expect(
+      shouldUseMarkdownFileBrowserPrimaryAction({
+        iconPath: "/tmp/report.html",
+        canOpenInEditor: false,
+        canOpenInBrowser: true,
+        canOpenInPanel: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("preserves the normal editor and panel defaults for HTML files", () => {
+    expect(
+      shouldUseMarkdownFileBrowserPrimaryAction({
+        iconPath: "/tmp/report.html",
+        canOpenInEditor: true,
+        canOpenInBrowser: true,
+        canOpenInPanel: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldUseMarkdownFileBrowserPrimaryAction({
+        iconPath: "/tmp/report.html",
+        canOpenInEditor: false,
+        canOpenInBrowser: true,
+        canOpenInPanel: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("continues to open PDF files in the browser by default", () => {
+    expect(
+      shouldUseMarkdownFileBrowserPrimaryAction({
+        iconPath: "/tmp/report.pdf",
+        canOpenInEditor: true,
+        canOpenInBrowser: true,
+        canOpenInPanel: true,
+      }),
+    ).toBe(true);
   });
 });
 
