@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import { EnvironmentId } from "@t3tools/contracts";
 
-import { canUseMarkdownFileShellActions, orderedListGutterStyle } from "./ChatMarkdown";
+import {
+  canUseMarkdownFileShellActions,
+  hasMarkdownFilePrimaryAction,
+  orderedListGutterStyle,
+} from "./ChatMarkdown";
 
 describe("canUseMarkdownFileShellActions", () => {
   const environmentId = EnvironmentId.make("environment-1");
@@ -17,6 +21,42 @@ describe("canUseMarkdownFileShellActions", () => {
 
   it("hides shell actions when no environment owns the markdown", () => {
     expect(canUseMarkdownFileShellActions(null, "local-exec")).toBe(false);
+  });
+});
+
+describe("hasMarkdownFilePrimaryAction", () => {
+  it("keeps the chip interactive when an editor, browser, or panel can open it", () => {
+    expect(
+      hasMarkdownFilePrimaryAction({
+        canOpenInEditor: true,
+        canOpenInBrowser: false,
+        canOpenInPanel: false,
+      }),
+    ).toBe(true);
+    expect(
+      hasMarkdownFilePrimaryAction({
+        canOpenInEditor: false,
+        canOpenInBrowser: true,
+        canOpenInPanel: false,
+      }),
+    ).toBe(true);
+    expect(
+      hasMarkdownFilePrimaryAction({
+        canOpenInEditor: false,
+        canOpenInBrowser: false,
+        canOpenInPanel: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("removes the link affordance when no primary action can open the file", () => {
+    expect(
+      hasMarkdownFilePrimaryAction({
+        canOpenInEditor: false,
+        canOpenInBrowser: false,
+        canOpenInPanel: false,
+      }),
+    ).toBe(false);
   });
 });
 

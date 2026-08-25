@@ -145,6 +145,14 @@ export function canUseMarkdownFileShellActions(
   return environmentId !== null && remoteOpenMode === "local-exec";
 }
 
+export function hasMarkdownFilePrimaryAction(input: {
+  canOpenInEditor: boolean;
+  canOpenInBrowser: boolean;
+  canOpenInPanel: boolean;
+}): boolean {
+  return input.canOpenInEditor || input.canOpenInBrowser || input.canOpenInPanel;
+}
+
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
 
 const CODE_FENCE_LANGUAGE_REGEX = /(?:^|\s)language-([^\s]+)/;
@@ -888,8 +896,8 @@ interface MarkdownFileLinkProps {
   className?: string | undefined;
 }
 
-const MARKDOWN_FILE_LINK_CLASS_NAME =
-  "chat-markdown-file-link cursor-pointer transition-colors hover:bg-accent/70";
+const MARKDOWN_FILE_CHIP_CLASS_NAME = "chat-markdown-file-link";
+const MARKDOWN_FILE_LINK_CLASS_NAME = `${MARKDOWN_FILE_CHIP_CLASS_NAME} cursor-pointer transition-colors hover:bg-accent/70`;
 
 function pathParentSegments(path: string): string[] {
   const normalized = path.replaceAll("\\", "/");
@@ -1403,7 +1411,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   );
 
   const handleContextMenu = useCallback(
-    async (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    async (event: ReactMouseEvent<HTMLElement>) => {
       event.preventDefault();
       event.stopPropagation();
 
@@ -1465,31 +1473,55 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     ],
   );
 
+  const hasPrimaryAction = hasMarkdownFilePrimaryAction({
+    canOpenInEditor: onOpen !== undefined,
+    canOpenInBrowser: onOpenInBrowser !== undefined,
+    canOpenInPanel: threadRef !== undefined && workspaceRelativePath !== null,
+  });
+
   return (
     <Tooltip>
       <TooltipTrigger
         render={
-          <a
-            href={href}
-            className={cn(CHAT_FILE_TAG_CHIP_CLASS_NAME, MARKDOWN_FILE_LINK_CLASS_NAME, className)}
-            data-markdown-copy={copyMarkdown}
-            onClick={(event) => {
-              event.preventDefault();
-              event.stopPropagation();
-              if (onOpen && shouldOpenMarkdownFileLinkInEditor(event)) {
-                handleOpenInEditor();
-                return;
-              }
-              if (onOpenInBrowser) {
-                handleOpenInBrowser();
-                return;
-              }
-              handleOpenInFilePreview();
-            }}
-            onContextMenu={handleContextMenu}
-          >
-            <FileTagChipContent path={iconPath} label={label} theme={theme} selectable />
-          </a>
+          hasPrimaryAction ? (
+            <a
+              href={href}
+              className={cn(
+                CHAT_FILE_TAG_CHIP_CLASS_NAME,
+                MARKDOWN_FILE_LINK_CLASS_NAME,
+                className,
+              )}
+              data-markdown-copy={copyMarkdown}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (onOpen && shouldOpenMarkdownFileLinkInEditor(event)) {
+                  handleOpenInEditor();
+                  return;
+                }
+                if (onOpenInBrowser) {
+                  handleOpenInBrowser();
+                  return;
+                }
+                handleOpenInFilePreview();
+              }}
+              onContextMenu={handleContextMenu}
+            >
+              <FileTagChipContent path={iconPath} label={label} theme={theme} selectable />
+            </a>
+          ) : (
+            <span
+              className={cn(
+                CHAT_FILE_TAG_CHIP_CLASS_NAME,
+                MARKDOWN_FILE_CHIP_CLASS_NAME,
+                className,
+              )}
+              data-markdown-copy={copyMarkdown}
+              onContextMenu={handleContextMenu}
+            >
+              <FileTagChipContent path={iconPath} label={label} theme={theme} selectable />
+            </span>
+          )
         }
       />
       <TooltipPopup
