@@ -24,7 +24,8 @@ vi.mock("../state/session", async (importOriginal) => ({
   usePreparedConnection: () => ({ _tag: "Loading" }),
 }));
 vi.mock("../state/entities", () => ({
-  useActiveEnvironmentId: () => EnvironmentId.make("env-windows"),
+  readThreadShell: () => null,
+  useProjects: () => [],
 }));
 vi.mock("../remoteOpen", () => ({
   useRemoteOpenResolution: () => ({ state: { mode: "local-exec" }, isResolved: true }),
@@ -33,7 +34,12 @@ vi.mock("../editorPreferences", () => ({
   useOpenInPreferredEditor: () => vi.fn(),
   usePreferredEditor: () => [null, vi.fn()],
 }));
-vi.mock("~/lib/openPullRequestLink", () => ({ useOpenChangeRequestLink: () => vi.fn() }));
+vi.mock("~/lib/openPullRequestLink", () => ({
+  findProjectForChangeRequest: () => undefined,
+  matchesLinkedPullRequestUrl: () => false,
+  parseChangeRequestUrl: () => null,
+  useOpenChangeRequestLink: () => vi.fn(),
+}));
 
 import ChatMarkdown from "./ChatMarkdown";
 
