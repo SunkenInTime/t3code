@@ -898,7 +898,7 @@ interface MarkdownFileLinkProps {
 }
 
 const MARKDOWN_FILE_CHIP_CLASS_NAME = "chat-markdown-file-link";
-const MARKDOWN_FILE_LINK_CLASS_NAME = `${MARKDOWN_FILE_CHIP_CLASS_NAME} cursor-pointer transition-colors hover:bg-accent/70`;
+const MARKDOWN_FILE_LINK_CLASS_NAME = `${MARKDOWN_FILE_CHIP_CLASS_NAME} cursor-pointer transition-colors hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70`;
 
 function pathParentSegments(path: string): string[] {
   const normalized = path.replaceAll("\\", "/");
@@ -1411,11 +1411,8 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     [targetPath],
   );
 
-  const handleContextMenu = useCallback(
-    async (event: ReactMouseEvent<HTMLElement>) => {
-      event.preventDefault();
-      event.stopPropagation();
-
+  const showFileContextMenu = useCallback(
+    async (position: { x: number; y: number }) => {
       const api = readLocalApi();
       if (!api) return;
 
@@ -1430,7 +1427,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
             { id: "copy-relative", label: "Copy relative path" },
             { id: "copy-full", label: "Copy full path" },
           ] as const,
-          { x: event.clientX, y: event.clientY },
+          position,
         );
 
         if (clicked === "open") {
@@ -1474,6 +1471,22 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
     ],
   );
 
+  const handleContextMenu = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const position =
+        event.clientX === 0 && event.clientY === 0
+          ? (() => {
+              const bounds = event.currentTarget.getBoundingClientRect();
+              return { x: bounds.left, y: bounds.bottom };
+            })()
+          : { x: event.clientX, y: event.clientY };
+      void showFileContextMenu(position);
+    },
+    [showFileContextMenu],
+  );
+
   const hasPrimaryAction = hasMarkdownFilePrimaryAction({
     canOpenInEditor: onOpen !== undefined,
     canOpenInBrowser: onOpenInBrowser !== undefined,
@@ -1511,17 +1524,21 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
               <FileTagChipContent path={iconPath} label={label} theme={theme} selectable />
             </a>
           ) : (
-            <span
+            <button
+              type="button"
+              aria-label={`File options for ${label}`}
+              aria-haspopup="menu"
               className={cn(
                 CHAT_FILE_TAG_CHIP_CLASS_NAME,
-                MARKDOWN_FILE_CHIP_CLASS_NAME,
+                MARKDOWN_FILE_LINK_CLASS_NAME,
                 className,
               )}
               data-markdown-copy={copyMarkdown}
+              onClick={handleContextMenu}
               onContextMenu={handleContextMenu}
             >
               <FileTagChipContent path={iconPath} label={label} theme={theme} selectable />
-            </span>
+            </button>
           )
         }
       />
