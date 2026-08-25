@@ -92,6 +92,18 @@ describe("hasMarkdownFilePrimaryAction", () => {
   });
 });
 
+describe("ChatMarkdown file option chips", () => {
+  it("keeps the fallback button text selectable", () => {
+    const html = renderToStaticMarkup(
+      <ChatMarkdown cwd="/tmp/project" text="[Source](/tmp/project/src/main.ts)" />,
+    );
+
+    expect(html).toContain("<button");
+    expect(html).toContain('aria-haspopup="menu"');
+    expect(html).toContain("select-text");
+  });
+});
+
 describe("shouldUseMarkdownFileBrowserPrimaryAction", () => {
   it("uses the browser when it is the only available primary action", () => {
     expect(

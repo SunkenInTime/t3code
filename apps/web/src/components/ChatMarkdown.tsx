@@ -1574,6 +1574,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
               className={cn(
                 CHAT_FILE_TAG_CHIP_CLASS_NAME,
                 MARKDOWN_FILE_LINK_CLASS_NAME,
+                "select-text",
                 className,
               )}
               data-markdown-copy={copyMarkdown}
