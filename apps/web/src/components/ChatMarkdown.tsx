@@ -1477,7 +1477,7 @@ const MarkdownFileLink = memo(function MarkdownFileLink({
   const hasPrimaryAction = hasMarkdownFilePrimaryAction({
     canOpenInEditor: onOpen !== undefined,
     canOpenInBrowser: onOpenInBrowser !== undefined,
-    canOpenInPanel: threadRef !== undefined && workspaceRelativePath !== null,
+    canOpenInPanel: threadRef !== undefined && Boolean(workspaceRelativePath),
   });
 
   return (
