@@ -95,6 +95,7 @@ import {
 import { readLocalApi } from "../localApi";
 import { useAssetUrlState } from "../assets/assetUrls";
 import { cn } from "../lib/utils";
+import { useRemoteOpenState, type RemoteOpenMode } from "../remoteOpen";
 import { useRightPanelStore } from "../rightPanelStore";
 import { serverEnvironment } from "../state/server";
 import { shellEnvironment } from "../state/shell";
@@ -135,6 +136,13 @@ interface ChatMarkdownProps {
   lineBreaks?: boolean;
   /** Parse sanitized raw HTML instead of displaying its source text. */
   parseRawHtml?: boolean;
+}
+
+export function canUseMarkdownFileShellActions(
+  environmentId: EnvironmentId | null,
+  remoteOpenMode: RemoteOpenMode,
+): boolean {
+  return environmentId !== null && remoteOpenMode === "local-exec";
 }
 
 const EMPTY_MARKDOWN_SKILLS: ReadonlyArray<Pick<ServerProviderSkill, "name" | "displayName">> = [];
@@ -1546,6 +1554,8 @@ function ChatMarkdown({
     reportFailure: false,
   });
   const environmentId = threadRef?.environmentId ?? explicitEnvironmentId ?? null;
+  const remoteOpenState = useRemoteOpenState(environmentId);
+  const canUseShellActions = canUseMarkdownFileShellActions(environmentId, remoteOpenState.mode);
   const preparedConnection = usePreparedConnection(environmentId);
   const serverConfig = useAtomValue(serverEnvironment.configValueAtom(environmentId));
   const availableEditors = serverConfig?.availableEditors ?? [];
@@ -1756,11 +1766,11 @@ function ChatMarkdown({
           copyMarkdown={copyMarkdown}
           theme={resolvedTheme}
           threadRef={threadRef}
-          {...(environmentId === null ? {} : { onOpen: openInPreferredEditor })}
+          {...(canUseShellActions ? { onOpen: openInPreferredEditor } : {})}
           onOpenInPanel={openFileInPanel}
           openInEditorMenuLabel={preferredEditorMenuLabel}
           onReveal={
-            revealInFileManagerLabel !== undefined
+            canUseShellActions && revealInFileManagerLabel !== undefined
               ? () => revealMarkdownFileInFileManager(fileLinkMeta)
               : undefined
           }
@@ -2015,6 +2025,7 @@ function ChatMarkdown({
       },
     };
   }, [
+    canUseShellActions,
     cwd,
     diffThemeName,
     fileLinkParentSuffixByPath,

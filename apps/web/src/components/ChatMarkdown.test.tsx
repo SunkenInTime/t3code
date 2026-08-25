@@ -1,6 +1,24 @@
 import { describe, expect, it } from "vite-plus/test";
+import { EnvironmentId } from "@t3tools/contracts";
 
-import { orderedListGutterStyle } from "./ChatMarkdown";
+import { canUseMarkdownFileShellActions, orderedListGutterStyle } from "./ChatMarkdown";
+
+describe("canUseMarkdownFileShellActions", () => {
+  const environmentId = EnvironmentId.make("environment-1");
+
+  it("allows editor and file manager actions for local environments", () => {
+    expect(canUseMarkdownFileShellActions(environmentId, "local-exec")).toBe(true);
+  });
+
+  it("hides editor and file manager actions for remote environments", () => {
+    expect(canUseMarkdownFileShellActions(environmentId, "remote-links")).toBe(false);
+    expect(canUseMarkdownFileShellActions(environmentId, "remote-unavailable")).toBe(false);
+  });
+
+  it("hides shell actions when no environment owns the markdown", () => {
+    expect(canUseMarkdownFileShellActions(null, "local-exec")).toBe(false);
+  });
+});
 
 describe("orderedListGutterStyle", () => {
   it("leaves the default gutter alone for single-digit lists", () => {

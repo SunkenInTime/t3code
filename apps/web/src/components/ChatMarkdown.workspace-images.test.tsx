@@ -26,6 +26,9 @@ vi.mock("../state/session", async (importOriginal) => ({
 vi.mock("../state/entities", () => ({
   useActiveEnvironmentId: () => EnvironmentId.make("env-windows"),
 }));
+vi.mock("../remoteOpen", () => ({
+  useRemoteOpenState: () => ({ mode: "local-exec" }),
+}));
 vi.mock("../editorPreferences", () => ({
   useOpenInPreferredEditor: () => vi.fn(),
   usePreferredEditor: () => [null, vi.fn()],
