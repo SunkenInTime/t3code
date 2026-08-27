@@ -2712,6 +2712,7 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
         "aria-expanded": expanded,
         onClick: () => setExpanded((v) => !v),
         onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => {
+          if (e.target !== e.currentTarget) return;
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault();
             setExpanded((v) => !v);
@@ -2769,10 +2770,6 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           className="mt-1 ms-7 cursor-default border-s border-border/45 ps-3 pt-0.5"
           onClick={stopRowToggle}
           onPointerDown={stopRowToggle}
-          // Keys pressed on the expanded body (e.g. Enter on the image
-          // preview button) must not reach the row's toggle handler — its
-          // preventDefault would also cancel the button's click activation.
-          onKeyDown={stopRowToggle}
         >
           {viewedImagePath && threadRef ? (
             <ToolCallExpandedImage threadRef={threadRef} path={viewedImagePath} />

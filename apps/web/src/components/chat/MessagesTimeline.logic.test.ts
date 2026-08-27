@@ -37,6 +37,16 @@ describe("workEntryViewedImagePath", () => {
     expect(workEntryViewedImagePath(entry)).toBe("assets/logo.webp");
   });
 
+  it("returns the path for Cursor dynamic reads with sentence-case titles", () => {
+    const entry = readEntry({
+      itemType: "dynamic_tool_call",
+      toolTitle: "Read file",
+      detail: "artifacts/cursor-preview.png",
+    });
+
+    expect(workEntryViewedImagePath(entry)).toBe("artifacts/cursor-preview.png");
+  });
+
   it("ignores non-image details", () => {
     expect(workEntryViewedImagePath(readEntry({ detail: "src/index.ts" }))).toBeNull();
   });

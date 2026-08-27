@@ -445,6 +445,37 @@ describe("buildThreadFeed", () => {
     expect(group.activities[0]?.getFullDetail()).toContain("repository.search");
   });
 
+  it("marks Cursor image reads with sentence-case titles for expanded previews", () => {
+    const thread = makeThread({
+      id: ThreadId.make("thread-cursor-image-read"),
+      projectId: ProjectId.make("project-1"),
+      title: "Cursor image read",
+      activities: [
+        makeActivity({
+          id: EventId.make("cursor-image-read"),
+          kind: "tool.completed",
+          tone: "tool",
+          summary: "Read file",
+          createdAt: "2026-04-01T00:00:02.000Z",
+          payload: {
+            title: "Read file",
+            itemType: "dynamic_tool_call",
+            detail: "artifacts/cursor-preview.png",
+            status: "completed",
+          },
+        }),
+      ],
+    });
+
+    const group = buildThreadFeed(thread)[0];
+    expect(group).toMatchObject({ type: "activity-group" });
+    if (!group || group.type !== "activity-group") {
+      return;
+    }
+
+    expect(group.activities[0]?.viewedImagePath).toBe("artifacts/cursor-preview.png");
+  });
+
   it("defers large tool output expansion until a work row is opened or copied", () => {
     let serializedToolOutputs = 0;
     const activities = Array.from({ length: 5_000 }, (_, index) =>
