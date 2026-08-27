@@ -1,4 +1,5 @@
 import * as Equal from "effect/Equal";
+import { workEntryIsRead } from "@t3tools/client-runtime/work-log-images";
 import {
   formatDuration,
   workEntryDisplayIndicatesToolFailure,
@@ -285,14 +286,7 @@ export function workLogEntryIsLocalCodeSearch(entry: WorkLogEntry): boolean {
 }
 
 export function toolGroupAction(entry: WorkLogEntry): ToolGroupAction {
-  if (
-    entry.requestKind === "file-read" ||
-    entry.itemType === "image_view" ||
-    (entry.itemType === "dynamic_tool_call" &&
-      entry.toolTitle?.trim().toLowerCase() === "read file")
-  ) {
-    return "read";
-  }
+  if (workEntryIsRead(entry)) return "read";
   if (
     entry.requestKind === "file-change" ||
     entry.itemType === "file_change" ||

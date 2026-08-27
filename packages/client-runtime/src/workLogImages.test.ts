@@ -1,6 +1,19 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { type ViewedImageWorkEntry, workEntryViewedImagePath } from "./workLogImages.js";
+import {
+  type ViewedImageWorkEntry,
+  workEntryIsRead,
+  workEntryViewedImagePath,
+} from "./workLogImages.js";
+
+describe("workEntryIsRead", () => {
+  it("uses one predicate for file reads, image views, and dynamic read tools", () => {
+    expect(workEntryIsRead({ requestKind: "file-read" })).toBe(true);
+    expect(workEntryIsRead({ itemType: "image_view" })).toBe(true);
+    expect(workEntryIsRead({ itemType: "dynamic_tool_call", toolTitle: " Read File " })).toBe(true);
+    expect(workEntryIsRead({ itemType: "command_execution" })).toBe(false);
+  });
+});
 
 describe("workEntryViewedImagePath", () => {
   const readEntry = (overrides: ViewedImageWorkEntry): ViewedImageWorkEntry => ({
@@ -36,6 +49,7 @@ describe("workEntryViewedImagePath", () => {
 
   it("ignores multi-line details", () => {
     expect(workEntryViewedImagePath(readEntry({ detail: "a.png\nb.png" }))).toBeNull();
+    expect(workEntryViewedImagePath(readEntry({ detail: "a.png\rb.png" }))).toBeNull();
   });
 
   it("ignores entries that are not reads", () => {
