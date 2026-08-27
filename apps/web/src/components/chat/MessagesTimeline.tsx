@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import type { AgentPanelModel } from "@t3tools/client-runtime/state/subagentRuntime";
+import { workEntryViewedImagePath } from "@t3tools/client-runtime/work-log-images";
 import {
   emptyAgentPanelModel,
   formatSubagentTokenCount,
@@ -86,7 +87,6 @@ import {
   shouldPreserveAssistantLineBreaks,
   toolGroupAction,
   workEntryIsVisibleInGroup,
-  workEntryViewedImagePath,
   type StableMessagesTimelineRowsState,
   type MessagesTimelineRow,
   TIMELINE_MINIMAP_MIN_ITEMS,

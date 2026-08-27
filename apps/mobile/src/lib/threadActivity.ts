@@ -12,7 +12,7 @@ import type {
   TurnId,
   UserInputQuestion,
 } from "@t3tools/contracts";
-import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
+import { workEntryViewedImagePath } from "@t3tools/client-runtime/work-log-images";
 import { formatDuration } from "@t3tools/shared/orchestrationTiming";
 
 import * as Arr from "effect/Array";
@@ -681,22 +681,6 @@ function buildWorkEntryExpandedBody(entry: WorkLogEntry): string | null {
   }
 
   return blocks.length > 0 ? blocks.join("\n\n") : null;
-}
-
-/**
- * Workspace path of the image a read/view tool entry looked at. Non-null only
- * when the entry's detail is a single image path the asset route can serve.
- */
-function workEntryViewedImagePath(entry: WorkLogEntry): string | null {
-  const isReadEntry =
-    entry.requestKind === "file-read" ||
-    entry.itemType === "image_view" ||
-    (entry.itemType === "dynamic_tool_call" &&
-      entry.toolTitle?.trim().toLowerCase() === "read file");
-  if (!isReadEntry) return null;
-  const detail = entry.detail?.trim();
-  if (!detail || detail.includes("\n") || !isWorkspaceImagePreviewPath(detail)) return null;
-  return detail;
 }
 
 function workEntryHasExpandedBody(entry: WorkLogEntry): boolean {
