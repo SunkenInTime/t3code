@@ -60,6 +60,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -125,6 +126,7 @@ import { buildThreadActionMenuItems } from "./threadActionMenu.logic";
 import {
   animatePinnedLayoutChanges,
   buildBulkTitleRegenerationContextMenuItem,
+  filterSidebarProjectScopeItems,
   formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
@@ -132,6 +134,7 @@ import {
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   planPinnedReorder,
+  reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
   resolveSidebarThreadStatus,
@@ -1812,7 +1815,6 @@ export default function Sidebar() {
       );
     },
   });
-  const [projectScopeMenuOpen, setProjectScopeMenuOpen] = useState(false);
   const newThreadContext = useHandleNewThread();
   const openAddProjectCommandPalette = useCallback(
     () => openCommandPalette({ open: "add-project" }),
@@ -1950,8 +1952,8 @@ export default function Sidebar() {
   // Project scope: one menu above the list. Scoping filters the list without
   // making the header width depend on the number or length of project names.
   const [projectScopeKey, setProjectScopeKey] = useState<string | null>(null);
-  // {value, label} items let Base UI drive the whole combobox contract: the
-  // input displays the selection's label and typing filters against it.
+  // {value, label} items let Base UI drive the combobox selection contract
+  // while the popup search filters the same collection.
   const projectScopeItems = useMemo(
     () => [
       { value: "all", label: "All projects" },
@@ -1972,7 +1974,10 @@ export default function Sidebar() {
       projectScopeItems[0]!,
     [projectScopeItems, projectScopeKey],
   );
-  const [projectScopeQuery, setProjectScopeQuery] = useState("");
+  const [projectScopeMenuState, dispatchProjectScopeMenu] = useReducer(
+    reduceSidebarProjectScopeMenuState,
+    { open: false, query: "" },
+  );
   const projectScopeFilter = useComboboxFilter();
   // Filtering derives from the same React state that controls the input, so
   // the visible query and the visible list can never desync — the peer wiring
@@ -1981,16 +1986,17 @@ export default function Sidebar() {
   // active (there is something to reset) and the query is empty, so it can't
   // outrank a project match under autoHighlight and no-hit queries reach the
   // empty state.
-  const filteredProjectScopeItems = useMemo(() => {
-    const query = projectScopeQuery.trim();
-    const projectItems = projectScopeItems.filter((item) => item.value !== "all");
-    if (query.length > 0) {
-      return projectItems.filter((item) =>
-        projectScopeFilter.contains(item, query, (candidate) => candidate.label),
-      );
-    }
-    return projectScopeKey === null ? projectItems : projectScopeItems;
-  }, [projectScopeFilter, projectScopeItems, projectScopeKey, projectScopeQuery]);
+  const filteredProjectScopeItems = useMemo(
+    () =>
+      filterSidebarProjectScopeItems({
+        items: projectScopeItems,
+        activeScopeKey: projectScopeKey,
+        query: projectScopeMenuState.query,
+        matches: (item, query) =>
+          projectScopeFilter.contains(item, query, (candidate) => candidate.label),
+      }),
+    [projectScopeFilter, projectScopeItems, projectScopeKey, projectScopeMenuState.query],
+  );
   const scopedProjectGroup = useMemo(
     () =>
       projectScopeKey === null
@@ -2050,10 +2056,7 @@ export default function Sidebar() {
     (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
       event.preventDefault();
       event.stopPropagation();
-      // Programmatic close skips onOpenChange, so drop the query here too —
-      // a stale query must not survive into the next open.
-      setProjectScopeMenuOpen(false);
-      setProjectScopeQuery("");
+      dispatchProjectScopeMenu({ type: "project-settings-opened" });
       if (isMobile) {
         setOpenMobile(false);
       }
@@ -3549,10 +3552,9 @@ export default function Sidebar() {
                   autoHighlight
                   itemToStringLabel={(item) => item.label}
                   isItemEqualToValue={(a, b) => a.value === b.value}
-                  open={projectScopeMenuOpen}
+                  open={projectScopeMenuState.open}
                   onOpenChange={(open) => {
-                    setProjectScopeMenuOpen(open);
-                    setProjectScopeQuery("");
+                    dispatchProjectScopeMenu({ type: "open-changed", open });
                   }}
                   value={selectedProjectScopeItem}
                   onValueChange={(item) => {
@@ -3598,8 +3600,13 @@ export default function Sidebar() {
                           showTrigger={false}
                           size="sm"
                           unstyled
-                          value={projectScopeQuery}
-                          onChange={(event) => setProjectScopeQuery(event.target.value)}
+                          value={projectScopeMenuState.query}
+                          onChange={(event) =>
+                            dispatchProjectScopeMenu({
+                              type: "query-changed",
+                              query: event.target.value,
+                            })
+                          }
                         />
                       </div>
                     </div>
