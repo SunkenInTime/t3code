@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import { Image, Linking, type TextStyle, useColorScheme } from "react-native";
+import { Image, Linking, Platform, type TextStyle, useColorScheme } from "react-native";
 
 import { MarkdownTextPrimitive } from "./MarkdownTextPrimitive";
 import { markdownFileIconSource } from "./markdownFileIcons";
@@ -23,6 +23,11 @@ const EXTERNAL_LINK_PREFIX = "◉ ";
 const INLINE_ATTACHMENT_PREFIX = "\uFFFC\u00A0";
 const SKILL_ICON_PLACEHOLDER = "\uFFFC";
 const PARAGRAPH_STYLE_ENCODING_OFFSET = 1000;
+const MONO_FONT_FAMILY = Platform.select({
+  ios: "ui-monospace",
+  android: "monospace",
+  default: "monospace",
+});
 
 function runKeySignature(run: NativeMarkdownTextRun): string {
   return [
@@ -102,7 +107,7 @@ function runStyle(run: NativeMarkdownTextRun, textStyle: NativeMarkdownTextStyle
       isFile || isSkill
         ? textStyle.boldFontFamily
         : run.code || isCodeBlock
-          ? "ui-monospace"
+          ? MONO_FONT_FAMILY
           : isHeading
             ? textStyle.headingFontFamily
             : run.bold
