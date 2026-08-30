@@ -1,5 +1,14 @@
-import { createContext, useContext } from "react";
-import { Image, Linking, Platform, StyleSheet, type TextStyle, useColorScheme } from "react-native";
+import { createContext, useCallback, useContext } from "react";
+import {
+  findNodeHandle,
+  Image,
+  Linking,
+  Platform,
+  StyleSheet,
+  Text as RNText,
+  type TextStyle,
+  useColorScheme,
+} from "react-native";
 
 import { MarkdownTextPrimitive } from "./MarkdownTextPrimitive";
 import { markdownFileIconSource } from "./markdownFileIcons";
@@ -8,6 +17,7 @@ import type {
   MarkdownFileContextMenu,
   NativeMarkdownTextStyle,
 } from "./SelectableMarkdownText.types";
+import { installMarkdownCopySanitizer } from "./T3MarkdownTextSelectionModule";
 
 export interface MarkdownFileContextMenuHandlers {
   readonly fileContextMenu: (href: string) => MarkdownFileContextMenu | undefined;
@@ -167,6 +177,19 @@ export function NativeMarkdownSelectableText(props: {
 }) {
   const colorScheme = useColorScheme();
   const menu = useContext(MarkdownFileContextMenuContext);
+  const containsInlineFileIcon = props.runs.some((run) => run.fileIcon != null);
+  const attachAndroidText = useCallback(
+    (textView: RNText | null) => {
+      if (Platform.OS !== "android" || !containsInlineFileIcon || textView === null) {
+        return;
+      }
+      const reactTag = findNodeHandle(textView);
+      if (reactTag !== null) {
+        installMarkdownCopySanitizer(reactTag);
+      }
+    },
+    [containsInlineFileIcon],
+  );
   const occurrences = new Map<string, number>();
   const prefixedExternalLinks = new Set<string>();
   const keyedRuns = props.runs.map((run) => {
@@ -213,6 +236,7 @@ export function NativeMarkdownSelectableText(props: {
   return (
     <MarkdownTextPrimitive
       key={appearanceKey}
+      nativeTextRef={attachAndroidText}
       uiTextView
       selectable
       style={{
