@@ -299,6 +299,7 @@ function NativeCodeBlock(props: {
       <ScrollView
         horizontal
         bounces={false}
+        nestedScrollEnabled={Platform.OS === "android"}
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal: 14, paddingVertical: 12 }}
       >
@@ -335,7 +336,12 @@ function NativeTable(props: {
 }) {
   const rows = collectTableRows(props.node);
   return (
-    <ScrollView horizontal bounces={false} showsHorizontalScrollIndicator={false}>
+    <ScrollView
+      horizontal
+      bounces={false}
+      nestedScrollEnabled={Platform.OS === "android"}
+      showsHorizontalScrollIndicator={false}
+    >
       <View
         style={{
           borderColor: props.textStyle.dividerColor,

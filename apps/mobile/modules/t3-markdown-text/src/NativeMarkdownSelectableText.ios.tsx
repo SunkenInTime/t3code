@@ -1,5 +1,5 @@
 import { createContext, useContext } from "react";
-import { Image, Linking, Platform, type TextStyle, useColorScheme } from "react-native";
+import { Image, Linking, Platform, StyleSheet, type TextStyle, useColorScheme } from "react-native";
 
 import { MarkdownTextPrimitive } from "./MarkdownTextPrimitive";
 import { markdownFileIconSource } from "./markdownFileIcons";
@@ -27,6 +27,14 @@ const MONO_FONT_FAMILY = Platform.select({
   ios: "ui-monospace",
   android: "monospace",
   default: "monospace",
+});
+const styles = StyleSheet.create({
+  inlineIcon: {
+    width: 14,
+    height: 14,
+    marginHorizontal: 3,
+    transform: [{ translateY: 2 }],
+  },
 });
 
 function runKeySignature(run: NativeMarkdownTextRun): string {
@@ -167,10 +175,13 @@ export function NativeMarkdownSelectableText(props: {
     occurrences.set(signature, occurrence + 1);
 
     let text = run.text;
-    if (run.fileIcon) {
+    if (run.fileIcon && Platform.OS === "ios") {
       text = `${INLINE_ATTACHMENT_PREFIX}${text}`;
     } else if (run.skillName && run.skillLabel) {
-      text = `${SKILL_ICON_PLACEHOLDER}\u00A0${run.skillLabel}`;
+      text =
+        Platform.OS === "ios"
+          ? `${SKILL_ICON_PLACEHOLDER}\u00A0${run.skillLabel}`
+          : `$${run.skillName}`;
     } else if (run.externalHost && run.href && !prefixedExternalLinks.has(run.href)) {
       prefixedExternalLinks.add(run.href);
       text = `${EXTERNAL_LINK_PREFIX}${text}`;
@@ -220,11 +231,13 @@ export function NativeMarkdownSelectableText(props: {
           <MarkdownTextPrimitive
             key={key}
             nativeID={
-              run.fileIcon
-                ? `t3-file:${Image.resolveAssetSource(markdownFileIconSource(run.fileIcon)).uri}`
-                : run.skillName
-                  ? "t3-skill:sf:cube"
-                  : undefined
+              Platform.OS === "ios"
+                ? run.fileIcon
+                  ? `t3-file:${Image.resolveAssetSource(markdownFileIconSource(run.fileIcon)).uri}`
+                  : run.skillName
+                    ? "t3-skill:sf:cube"
+                    : undefined
+                : undefined
             }
             contextMenuConfig={contextMenu ? JSON.stringify(contextMenu) : undefined}
             style={runStyle(run, props.textStyle)}
@@ -245,6 +258,9 @@ export function NativeMarkdownSelectableText(props: {
                 : undefined
             }
           >
+            {Platform.OS === "android" && run.fileIcon ? (
+              <Image source={markdownFileIconSource(run.fileIcon)} style={styles.inlineIcon} />
+            ) : null}
             {text}
           </MarkdownTextPrimitive>
         );
