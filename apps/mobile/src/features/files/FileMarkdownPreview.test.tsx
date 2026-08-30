@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 const testState = vi.hoisted(() => ({
   useNativeRenderer: false,
   resources: [] as Array<unknown>,
+  imageUris: [] as Array<string>,
 }));
 
 vi.mock("react", async (importOriginal) => ({
@@ -19,7 +20,10 @@ vi.mock("react", async (importOriginal) => ({
 }));
 vi.mock("react-native", () => ({
   ActivityIndicator: "ActivityIndicator",
-  Image: "Image",
+  Image: (props: { readonly source: { readonly uri: string } }) => {
+    testState.imageUris.push(props.source.uri);
+    return null;
+  },
   RefreshControl: "RefreshControl",
   ScrollView: "ScrollView",
   StyleSheet: { absoluteFill: {} },
@@ -119,6 +123,7 @@ describe.each([
   beforeEach(() => {
     testState.useNativeRenderer = useNativeRenderer;
     testState.resources = [];
+    testState.imageUris = [];
   });
 
   it.each([
@@ -145,7 +150,7 @@ describe.each([
     ]);
   });
 
-  it("leaves remote images with the renderer that already handles them", () => {
+  it("renders remote images directly without requesting a workspace asset", () => {
     renderPreview({
       cwd: "/workspace/project",
       relativePath: "docs/README.md",
@@ -153,5 +158,6 @@ describe.each([
     });
 
     expect(testState.resources).toEqual([]);
+    expect(testState.imageUris).toEqual(["https://example.com/diagram.png"]);
   });
 });

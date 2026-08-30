@@ -19,6 +19,7 @@ import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import {
   ThreadMarkdownImage,
   ThreadMarkdownImageUnavailable,
+  ThreadMarkdownImageView,
 } from "../../components/markdownImages";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import {
@@ -220,7 +221,16 @@ export function FileMarkdownPreview(props: {
 
     return (image) => {
       const imageSource = classifyMarkdownImageSource(image.href, imageBaseDir);
-      if (imageSource._tag === "Direct") return null;
+      if (imageSource._tag === "Direct") {
+        return (
+          <ThreadMarkdownImageView
+            uri={imageSource.uri}
+            sourceKey={imageSource.uri}
+            unavailable={false}
+            alt={image.alt}
+          />
+        );
+      }
       if (imageSource._tag === "Blocked") {
         return <ThreadMarkdownImageUnavailable alt={image.alt} />;
       }

@@ -1,13 +1,13 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import {
+  MARKDOWN_IMAGE_MAX_WIDTH,
+  resolveMarkdownImageDisplaySize,
+} from "@t3tools/client-runtime/markdown-images";
 import { useEffect, useState } from "react";
 import { ActivityIndicator, Image, StyleSheet, View, type ViewStyle } from "react-native";
 import { TouchableOpacity } from "react-native-gesture-handler";
 
 import { useAssetUrlState } from "../state/assets";
-import {
-  MARKDOWN_IMAGE_MAX_WIDTH,
-  resolveMarkdownImageDisplaySize,
-} from "../features/threads/markdownImageSize";
 import { AppText as Text } from "./AppText";
 
 export function ThreadMarkdownImageView(props: {
