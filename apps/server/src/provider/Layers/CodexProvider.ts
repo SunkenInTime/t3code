@@ -404,7 +404,7 @@ const requestAllCodexModels = Effect.fn("requestAllCodexModels")(function* (
 const readCodexConfigModelDefaults = Effect.fn("readCodexConfigModelDefaults")(function* (
   client: CodexClient.CodexAppServerClient["Service"],
   cwd: string,
-): Effect.fn.Return<CodexConfigModelDefaults, CodexErrors.CodexAppServerError> {
+) {
   const response = yield* client.request("config/read", { cwd, includeLayers: false });
   return {
     model: response.config.model,
