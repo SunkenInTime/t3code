@@ -1888,6 +1888,8 @@ export default function Sidebar() {
     () => sortLogicalProjectsForSidebar(unsortedProjectGroups, threads, sidebarProjectSortOrder),
     [sidebarProjectSortOrder, threads, unsortedProjectGroups],
   );
+  const projectGroupsRef = useRef(projectGroups);
+  projectGroupsRef.current = projectGroups;
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
   // Threads on non-primary environments (T3 Connect, hosted) resolve their
   // provider entry from their own environment's config: default instance ids
@@ -3129,7 +3131,7 @@ export default function Sidebar() {
         }
         switch (clicked.value) {
           case "project-settings": {
-            const projectGroup = projectGroups.find((group) =>
+            const projectGroup = projectGroupsRef.current.find((group) =>
               group.memberProjectRefs.some(
                 (projectRef) =>
                   projectRef.environmentId === thread.environmentId &&
@@ -3300,7 +3302,6 @@ export default function Sidebar() {
       markThreadUnread,
       openProjectSettings,
       projectCwdByKey,
-      projectGroups,
       serverConfigs,
       startThreadRename,
       updateThreadMetadata,
