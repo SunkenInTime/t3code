@@ -33,7 +33,15 @@ describe("buildThreadActionMenuItems", () => {
         ...baseState,
         supports: { settlement: false, snooze: false, pinning: false, titleRegeneration: false },
       }),
-    ).toEqual(["rename", "mark-unread", "copy", "archive", "delete"]);
+    ).toEqual(["project-settings", "rename", "mark-unread", "copy", "archive", "delete"]);
+  });
+
+  it("offers project settings before thread state actions", () => {
+    expect(buildThreadActionMenuItems(baseState)[0]).toMatchObject({
+      id: "project-settings",
+      label: "Project settings",
+      icon: "settings",
+    });
   });
 
   it("includes branch items only for threads with a branch", () => {

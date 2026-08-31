@@ -2043,11 +2043,8 @@ export default function Sidebar() {
     clearSelection();
   }, [clearSelection, projectScopeKey]);
 
-  const handleProjectSettings = useCallback(
-    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
-      event.preventDefault();
-      event.stopPropagation();
-      dispatchProjectScopeMenu({ type: "project-settings-opened" });
+  const openProjectSettings = useCallback(
+    (projectGroup: SidebarProjectSnapshot) => {
       if (isMobile) {
         setOpenMobile(false);
       }
@@ -2057,6 +2054,15 @@ export default function Sidebar() {
       });
     },
     [isMobile, router, setOpenMobile],
+  );
+  const handleProjectSettings = useCallback(
+    (event: ReactMouseEvent<HTMLButtonElement>, projectGroup: SidebarProjectSnapshot) => {
+      event.preventDefault();
+      event.stopPropagation();
+      dispatchProjectScopeMenu({ type: "project-settings-opened" });
+      openProjectSettings(projectGroup);
+    },
+    [openProjectSettings],
   );
 
   // Settled threads stay in the live shell stream (settled ≠ archived), so
@@ -3122,6 +3128,17 @@ export default function Sidebar() {
           return;
         }
         switch (clicked.value) {
+          case "project-settings": {
+            const projectGroup = projectGroups.find((group) =>
+              group.memberProjectRefs.some(
+                (projectRef) =>
+                  projectRef.environmentId === thread.environmentId &&
+                  projectRef.projectId === thread.projectId,
+              ),
+            );
+            if (projectGroup) openProjectSettings(projectGroup);
+            return;
+          }
           case "new-thread-on-branch": {
             // Explicit branch carry-over: reuse the thread's worktree when it
             // has one, otherwise its branch on the local checkout.
@@ -3281,7 +3298,9 @@ export default function Sidebar() {
       deleteThread,
       handleMultiSelectContextMenu,
       markThreadUnread,
+      openProjectSettings,
       projectCwdByKey,
+      projectGroups,
       serverConfigs,
       startThreadRename,
       updateThreadMetadata,
