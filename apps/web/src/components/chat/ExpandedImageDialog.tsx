@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { ChevronLeftIcon, ChevronRightIcon, DownloadIcon, XIcon } from "lucide-react";
 import { Button } from "../ui/button";
 import { downloadVideoPreview, type ExpandedImagePreview } from "./ExpandedImagePreview";
@@ -54,8 +55,8 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
       event.stopPropagation();
       navigateImage(1);
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
   }, [navigateImage, onClose, preview.images.length]);
 
   const item = preview.images[index];
@@ -64,7 +65,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
 
   const isDownloadingVideo = downloadingVideoSrc === item.src;
   const videoDownloadFailed = downloadFailedVideoSrc === item.src;
-  return (
+  const dialog = (
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 px-4 py-6 [-webkit-app-region:no-drag]"
       role="dialog"
@@ -158,4 +159,5 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
       )}
     </div>
   );
+  return typeof document === "undefined" ? dialog : createPortal(dialog, document.body);
 });
