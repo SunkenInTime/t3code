@@ -12,6 +12,16 @@ export interface ExpandedImagePreview {
   index: number;
 }
 
+export interface ExpandedImageElement {
+  readonly src: string;
+  readonly currentSrc: string;
+  readonly alt: string;
+}
+
+export const EXPANDED_IMAGE_ELEMENT_PROPS = { "data-expanded-image": "" } as const;
+
+const EXPANDED_IMAGE_ELEMENT_SELECTOR = "img[data-expanded-image]";
+
 export function attachVideoThumbnail(video: HTMLVideoElement, file: File): () => void {
   const url = URL.createObjectURL(file);
   video.src = url;
@@ -59,4 +69,32 @@ export function buildExpandedImagePreview(
     })),
     index: selectedIndex,
   };
+}
+
+export function buildExpandedImagePreviewFromElements(
+  images: ReadonlyArray<ExpandedImageElement>,
+  selectedImage: ExpandedImageElement,
+): ExpandedImagePreview | null {
+  const previewableImages = images.flatMap((image) => {
+    const src = image.currentSrc.trim() || image.src.trim();
+    return src.length === 0
+      ? []
+      : [{ element: image, item: { src, name: image.alt.trim() || "image" } }];
+  });
+  const selectedIndex = previewableImages.findIndex(({ element }) => element === selectedImage);
+  if (selectedIndex < 0) return null;
+  return {
+    images: previewableImages.map(({ item }) => item),
+    index: selectedIndex,
+  };
+}
+
+export function buildExpandedImagePreviewFromContainer(
+  container: ParentNode,
+  selectedImage: HTMLImageElement,
+): ExpandedImagePreview | null {
+  return buildExpandedImagePreviewFromElements(
+    [...container.querySelectorAll<HTMLImageElement>(EXPANDED_IMAGE_ELEMENT_SELECTOR)],
+    selectedImage,
+  );
 }

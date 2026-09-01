@@ -75,7 +75,10 @@ import {
   renderCodexFileCitationsAsMarkdown,
 } from "@t3tools/client-runtime/codex-markdown-directives";
 import { renderSkillInlineMarkdownChildren } from "./chat/SkillInlineText";
-import { type ExpandedImagePreview } from "./chat/ExpandedImagePreview";
+import {
+  EXPANDED_IMAGE_ELEMENT_PROPS,
+  type ExpandedImagePreview,
+} from "./chat/ExpandedImagePreview";
 import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from "./chat/FileTagChip";
 import { PierreEntryIcon } from "./chat/PierreEntryIcon";
 import {
@@ -178,7 +181,9 @@ interface ChatMarkdownProps {
   /** Append a prompt that invokes a newly created artifact-template skill. */
   onUseArtifactTemplate?: ((template: CodexArtifactTemplate) => void) | undefined;
   imageBaseDir?: string | undefined;
-  onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
+  onImageExpand?:
+    | ((preview: ExpandedImagePreview, selectedImage: HTMLImageElement) => void)
+    | undefined;
 }
 
 export function canUseMarkdownFileShellActions(
@@ -1172,24 +1177,29 @@ const CHAT_MARKDOWN_WORKSPACE_IMAGE_CLASS_NAME = cn(
 const MarkdownLinkContext = React.createContext(false);
 
 function expandableMarkdownImageProps(
-  onImageExpand: ((preview: ExpandedImagePreview) => void) | undefined,
+  onImageExpand:
+    | ((preview: ExpandedImagePreview, selectedImage: HTMLImageElement) => void)
+    | undefined,
   src: string,
   alt: string,
 ) {
   if (!onImageExpand) return {};
   const previewName = alt.trim() || "image";
-  const expand = (event: ReactMouseEvent | ReactKeyboardEvent) => {
+  const expand = (
+    event: ReactMouseEvent<HTMLImageElement> | ReactKeyboardEvent<HTMLImageElement>,
+  ) => {
     if (event.currentTarget.closest("a")) return;
     event.preventDefault();
     event.stopPropagation();
-    onImageExpand({ images: [{ src, name: previewName }], index: 0 });
+    onImageExpand({ images: [{ src, name: previewName }], index: 0 }, event.currentTarget);
   };
   return {
+    ...EXPANDED_IMAGE_ELEMENT_PROPS,
     role: "button" as const,
     tabIndex: 0,
     "aria-label": `Preview ${previewName}`,
     onClick: expand,
-    onKeyDown: (event: ReactKeyboardEvent) => {
+    onKeyDown: (event: ReactKeyboardEvent<HTMLImageElement>) => {
       if (event.key === "Enter" || event.key === " ") expand(event);
     },
   };
@@ -1223,7 +1233,9 @@ const ChatMarkdownWorkspaceImage = memo(function ChatMarkdownWorkspaceImage(prop
   readonly copyMarkdown: string;
   readonly srcFragment: string;
   readonly style?: CSSProperties | undefined;
-  readonly onImageExpand?: ((preview: ExpandedImagePreview) => void) | undefined;
+  readonly onImageExpand?:
+    | ((preview: ExpandedImagePreview, selectedImage: HTMLImageElement) => void)
+    | undefined;
 }) {
   const assetUrl = useAssetUrlState(props.threadRef.environmentId, {
     _tag: "workspace-file",
