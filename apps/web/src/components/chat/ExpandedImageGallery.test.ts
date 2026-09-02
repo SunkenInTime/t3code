@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   buildExpandedImagePreviewFromElements,
+  registerExpandedImagePreviewItem,
   type ExpandedImageElement,
 } from "./ExpandedImagePreview";
 
@@ -34,6 +35,42 @@ describe("expanded image gallery", () => {
     const second = image("https://example.test/repeated.png", "After");
 
     expect(buildExpandedImagePreviewFromElements([first, second], second)?.index).toBe(1);
+  });
+
+  it("keeps registered media actions while using the rendered source", () => {
+    const selected = image(
+      "https://example.test/preview.png",
+      "Preview",
+      "https://example.test/rendered.png",
+    );
+    registerExpandedImagePreviewItem(selected, {
+      src: selected.src,
+      name: "Preview",
+      originalUrl: "https://github.com/example/repo/image.png",
+      actionsSource: {
+        kind: "image",
+        name: "Preview",
+        src: selected.src,
+        reference: { kind: "url", url: "https://github.com/example/repo/image.png" },
+      },
+    });
+
+    expect(buildExpandedImagePreviewFromElements([selected], selected)).toEqual({
+      images: [
+        {
+          src: selected.currentSrc,
+          name: "Preview",
+          originalUrl: "https://github.com/example/repo/image.png",
+          actionsSource: {
+            kind: "image",
+            name: "Preview",
+            src: selected.currentSrc,
+            reference: { kind: "url", url: "https://github.com/example/repo/image.png" },
+          },
+        },
+      ],
+      index: 0,
+    });
   });
 
   it("rejects a selected element that cannot appear in the gallery", () => {

@@ -1,6 +1,7 @@
 import { ExternalLinkIcon, PaperclipIcon, PlayIcon } from "lucide-react";
 import type { EnvironmentId } from "@t3tools/contracts";
-import { useCallback, useRef, useState } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
+import type { Options as ReactMarkdownOptions } from "react-markdown";
 
 import { cn } from "~/lib/utils";
 
@@ -10,16 +11,16 @@ import {
   buildExpandedImagePreviewFromContainer,
   type ExpandedImagePreview,
 } from "../chat/ExpandedImagePreview";
-import { splitPullRequestBody } from "./pullRequestMarkdown.logic";
+import { remarkPullRequestAutolinks, splitPullRequestBody } from "./pullRequestMarkdown.logic";
+
+export const PullRequestMarkdownContext = createContext<string | null>(null);
 
 /**
  * A pull request body, rendered with the app's markdown renderer plus a card for each upload
  * embedded in it, which that renderer drops on the floor.
  *
- * The card links out instead of playing in place. GitHub serves the file as uploaded — Mac
- * recordings are `video/quicktime`, which no Chromium decodes — and the desktop window's
- * `media-src` allows only `'self'`, the app scheme and `blob:`, so a remote source is refused
- * before a byte is fetched. Opening the host works for every format.
+ * These upload URLs do not identify the media format. The card links to GitHub, where the
+ * original upload can be opened or downloaded even when its codec cannot play in the client.
  */
 export function PullRequestMarkdown({
   text,
@@ -40,15 +41,20 @@ export function PullRequestMarkdown({
   } | null>(null);
   const expandedImage = expandedImageState?.text === text ? expandedImageState.preview : null;
   const expandImage = useCallback(
-    (fallbackPreview: ExpandedImagePreview, selectedImage: HTMLImageElement) => {
+    (fallbackPreview: ExpandedImagePreview, selectedImage?: HTMLImageElement) => {
       const root = rootRef.current;
       const preview =
-        root === null
+        root === null || selectedImage === undefined
           ? fallbackPreview
           : (buildExpandedImagePreviewFromContainer(root, selectedImage) ?? fallbackPreview);
       setExpandedImageState({ text, preview });
     },
     [text],
+  );
+  const repositoryUrl = useContext(PullRequestMarkdownContext);
+  const extraRemarkPlugins = useMemo<NonNullable<ReactMarkdownOptions["remarkPlugins"]>>(
+    () => (repositoryUrl ? [[remarkPullRequestAutolinks, { repositoryUrl }]] : []),
+    [repositoryUrl],
   );
   return (
     <>
@@ -62,6 +68,7 @@ export function PullRequestMarkdown({
                 cwd={cwd}
                 environmentId={environmentId}
                 onImageExpand={expandImage}
+                extraRemarkPlugins={extraRemarkPlugins}
               />
             );
           }
