@@ -45,14 +45,15 @@ A thread ID supplies the workspace for relative paths; absolute paths refer to t
 host, not the client.
 
 [`AssetAccess.ts`](../../apps/server/src/assets/AssetAccess.ts) resolves symlinks, requires a regular
-file, and validates the resolved file's literal extension. It opens the file and signs its canonical
-path and device/inode identity for one hour. The token grants access to that exact file, not adjacent
-files or its containing directory. Serving rechecks the canonical path, media type, and opened
-descriptor's identity, then streams full or partial responses from that descriptor. Replacing a
-file atomically requires a freshly signed URL; editing it in place does not. Because the token names
-one file, an HTML document served this way cannot load sibling assets; the directory-scoped
-`workspace-file` resource remains the route for HTML inside the workspace. Uploaded attachments keep
-their separate asset resource.
+file, and validates the resolved file's literal extension. Image tokens sign the canonical path for
+one hour so an atomic image replacement at that path keeps the same URL valid. Video, HTML, and PDF
+tokens also sign the file's device/inode identity, so replacing those files requires a fresh URL.
+Neither token grants access to adjacent files or the containing directory. Serving rechecks the
+canonical path and media type, opens the current file without following symlinks, and streams full or
+partial responses from that descriptor. External project favicons use the same descriptor-backed
+path check. Because the token names one file, an HTML document served this way cannot load sibling
+assets; the directory-scoped `workspace-file` resource remains the route for HTML inside the
+workspace. Uploaded attachments keep their separate asset resource.
 
 Signed asset URLs are bearer credentials. Anyone who obtains a URL and can reach the environment
 can fetch that file until it expires. Clients should copy the authored reference, not the temporary
