@@ -152,7 +152,9 @@ describe.each([
 
   it.each([
     ["/workspace/project", "/tmp/README.md", "/tmp/images/diagram.png"],
+    ["/workspace/project", "/README.md", "/images/diagram.png"],
     ["C:\\Users\\dara\\project", "D:\\tmp\\README.md", "D:\\tmp\\images\\diagram.png"],
+    ["C:\\Users\\dara\\project", "C:\\README.md", "C:\\images\\diagram.png"],
   ])("uses a media asset for an external file at %s and %s", (cwd, relativePath, expectedPath) => {
     renderPreview({
       cwd,

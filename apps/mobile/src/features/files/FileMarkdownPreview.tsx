@@ -41,6 +41,14 @@ interface MarkdownPreviewStyles {
   readonly nativeTextStyle: NativeMarkdownTextStyle;
 }
 
+function fileParentDirectory(path: string): string | null {
+  const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
+  if (separatorIndex < 0) return null;
+  if (separatorIndex === 0) return path.slice(0, 1);
+  if (separatorIndex === 2 && /^[A-Za-z]:[\\/]/.test(path)) return path.slice(0, 3);
+  return path.slice(0, separatorIndex);
+}
+
 function useMarkdownPreviewStyles(renderImage?: MarkdownImageRenderer): MarkdownPreviewStyles {
   const { appearance } = useAppearancePreferences();
   const markdownFontSizes = useMemo(
@@ -214,14 +222,8 @@ export function FileMarkdownPreview(props: {
     }
   }, [props.onRefresh]);
   const renderImage = useMemo<MarkdownImageRenderer>(() => {
-    const lastSeparator = Math.max(
-      props.relativePath.lastIndexOf("/"),
-      props.relativePath.lastIndexOf("\\"),
-    );
-    const imageBaseDir =
-      lastSeparator >= 0
-        ? resolveWorkspaceFilePath(props.cwd, props.relativePath.slice(0, lastSeparator))
-        : props.cwd;
+    const markdownPath = resolveWorkspaceFilePath(props.cwd, props.relativePath);
+    const imageBaseDir = fileParentDirectory(markdownPath) ?? props.cwd;
 
     return (image) => {
       const imageSource = classifyMarkdownImageSource(image.href, imageBaseDir);
