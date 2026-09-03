@@ -186,6 +186,25 @@ describe.each([
     expect(testState.imageUris).toEqual(["https://signed.test/diagram.png#logo"]);
   });
 
+  it.each([
+    ["/tmp/images/diagram.png", "/tmp/images/diagram.png"],
+    ["file:///tmp/images/diagram%20one.png", "/tmp/images/diagram one.png"],
+  ])("uses a media asset for the host image target %s", (source, expectedPath) => {
+    renderPreview({
+      cwd: "/workspace/project",
+      relativePath: "docs/README.md",
+      markdown: `![diagram](${source})`,
+    });
+
+    expect(testState.resources).toEqual([
+      {
+        _tag: "media-file",
+        threadId: ThreadId.make("thread-1"),
+        path: expectedPath,
+      },
+    ]);
+  });
+
   it("renders remote images directly without requesting a workspace asset", () => {
     renderPreview({
       cwd: "/workspace/project",
@@ -195,5 +214,16 @@ describe.each([
 
     expect(testState.resources).toEqual([]);
     expect(testState.imageUris).toEqual(["https://example.com/diagram.png"]);
+  });
+
+  it("normalizes a protocol-relative image before native rendering", () => {
+    renderPreview({
+      cwd: "/workspace/project",
+      relativePath: "docs/README.md",
+      markdown: "![remote](//cdn.example.com/diagram.png)",
+    });
+
+    expect(testState.resources).toEqual([]);
+    expect(testState.imageUris).toEqual(["https://cdn.example.com/diagram.png"]);
   });
 });

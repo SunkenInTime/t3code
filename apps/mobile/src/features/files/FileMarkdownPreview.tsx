@@ -3,6 +3,7 @@ import {
   markdownImageSourceFragment,
 } from "@t3tools/client-runtime/markdown-images";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { normalizeNativeMarkdownUrl } from "@t3tools/mobile-markdown-text/links";
 import { useCallback, useMemo, useState } from "react";
 import {
   Markdown,
@@ -31,7 +32,7 @@ import {
   type MarkdownImageRenderer,
   type NativeMarkdownTextStyle,
 } from "../../native/SelectableMarkdownText";
-import { isAbsolutePath, resolveWorkspaceFilePath } from "./filePath";
+import { resolveWorkspaceFilePath, resolveWorkspaceRelativeFilePath } from "./filePath";
 
 interface MarkdownPreviewStyles {
   readonly theme: PartialMarkdownTheme;
@@ -227,7 +228,7 @@ export function FileMarkdownPreview(props: {
       if (imageSource._tag === "Direct") {
         return (
           <ThreadMarkdownImageView
-            uri={imageSource.uri}
+            uri={normalizeNativeMarkdownUrl(imageSource.uri)}
             sourceKey={imageSource.uri}
             unavailable={false}
             alt={image.alt}
@@ -241,7 +242,10 @@ export function FileMarkdownPreview(props: {
         <ThreadMarkdownImage
           environmentId={props.environmentId}
           resource={{
-            _tag: isAbsolutePath(props.relativePath) ? "media-file" : "workspace-file",
+            _tag:
+              resolveWorkspaceRelativeFilePath(props.cwd, imageSource.path) === null
+                ? "media-file"
+                : "workspace-file",
             threadId: props.threadId,
             path: imageSource.path,
           }}
