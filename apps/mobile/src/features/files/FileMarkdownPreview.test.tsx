@@ -150,6 +150,42 @@ describe.each([
     ]);
   });
 
+  it.each([
+    ["/workspace/project", "/tmp/README.md", "/tmp/images/diagram.png"],
+    ["C:\\Users\\dara\\project", "D:\\tmp\\README.md", "D:\\tmp\\images\\diagram.png"],
+  ])("uses a media asset for an external file at %s and %s", (cwd, relativePath, expectedPath) => {
+    renderPreview({
+      cwd,
+      relativePath,
+      markdown: "![diagram](images/diagram.png)",
+    });
+
+    expect(testState.resources).toEqual([
+      {
+        _tag: "media-file",
+        threadId: ThreadId.make("thread-1"),
+        path: expectedPath,
+      },
+    ]);
+  });
+
+  it("preserves an SVG fragment on the signed asset URL", () => {
+    renderPreview({
+      cwd: "/workspace/project",
+      relativePath: "docs/README.md",
+      markdown: "![logo](images/icons.svg#logo)",
+    });
+
+    expect(testState.resources).toEqual([
+      {
+        _tag: "workspace-file",
+        threadId: ThreadId.make("thread-1"),
+        path: "/workspace/project/docs/images/icons.svg",
+      },
+    ]);
+    expect(testState.imageUris).toEqual(["https://signed.test/diagram.png#logo"]);
+  });
+
   it("renders remote images directly without requesting a workspace asset", () => {
     renderPreview({
       cwd: "/workspace/project",

@@ -1,4 +1,4 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { AssetResource, EnvironmentId } from "@t3tools/contracts";
 import {
   MARKDOWN_IMAGE_MAX_WIDTH,
   resolveMarkdownImageDisplaySize,
@@ -131,24 +131,20 @@ function ThreadMarkdownImageRequest(props: {
   );
 }
 
-/** Markdown image whose src is a workspace file. It loads through a signed asset URL. */
+/** Environment-hosted markdown image that loads through a signed asset URL. */
 export function ThreadMarkdownImage(props: {
   readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly path: string;
+  readonly resource: Extract<AssetResource, { readonly _tag: "media-file" | "workspace-file" }>;
   readonly alt: string | null;
+  readonly srcFragment?: string;
   readonly onPressImage?: ((uri: string) => void) | undefined;
 }) {
-  const assetUrl = useAssetUrlState(props.environmentId, {
-    _tag: "workspace-file",
-    threadId: props.threadId,
-    path: props.path,
-  });
+  const assetUrl = useAssetUrlState(props.environmentId, props.resource);
 
   return (
     <ThreadMarkdownImageView
-      uri={assetUrl._tag === "Success" ? assetUrl.url : null}
-      sourceKey={props.path}
+      uri={assetUrl._tag === "Success" ? assetUrl.url + (props.srcFragment ?? "") : null}
+      sourceKey={`${props.resource._tag}:${props.resource.path}`}
       unavailable={assetUrl._tag === "Failure"}
       alt={props.alt}
       onPressImage={props.onPressImage}

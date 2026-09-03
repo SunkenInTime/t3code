@@ -1,4 +1,7 @@
-import { classifyMarkdownImageSource } from "@t3tools/client-runtime/markdown-images";
+import {
+  classifyMarkdownImageSource,
+  markdownImageSourceFragment,
+} from "@t3tools/client-runtime/markdown-images";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { useCallback, useMemo, useState } from "react";
 import {
@@ -28,7 +31,7 @@ import {
   type MarkdownImageRenderer,
   type NativeMarkdownTextStyle,
 } from "../../native/SelectableMarkdownText";
-import { resolveWorkspaceFilePath } from "./filePath";
+import { isAbsolutePath, resolveWorkspaceFilePath } from "./filePath";
 
 interface MarkdownPreviewStyles {
   readonly theme: PartialMarkdownTheme;
@@ -237,9 +240,13 @@ export function FileMarkdownPreview(props: {
       return (
         <ThreadMarkdownImage
           environmentId={props.environmentId}
-          threadId={props.threadId}
-          path={imageSource.path}
+          resource={{
+            _tag: isAbsolutePath(props.relativePath) ? "media-file" : "workspace-file",
+            threadId: props.threadId,
+            path: imageSource.path,
+          }}
           alt={image.alt}
+          srcFragment={markdownImageSourceFragment(image.href)}
         />
       );
     };
