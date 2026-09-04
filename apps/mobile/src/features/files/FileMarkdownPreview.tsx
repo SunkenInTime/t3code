@@ -240,16 +240,17 @@ export function FileMarkdownPreview(props: {
       if (imageSource._tag === "Blocked") {
         return <ThreadMarkdownImageUnavailable alt={image.alt} />;
       }
+      const workspaceRelativePath = resolveWorkspaceRelativeFilePath(props.cwd, imageSource.path);
       return (
         <ThreadMarkdownImage
           environmentId={props.environmentId}
           resource={{
-            _tag:
-              resolveWorkspaceRelativeFilePath(props.cwd, imageSource.path) === null
-                ? "media-file"
-                : "workspace-file",
+            _tag: workspaceRelativePath === null ? "media-file" : "workspace-file",
             threadId: props.threadId,
-            path: imageSource.path,
+            path:
+              workspaceRelativePath === null
+                ? imageSource.path
+                : resolveWorkspaceFilePath(props.cwd, workspaceRelativePath),
           }}
           alt={image.alt}
           srcFragment={markdownImageSourceFragment(image.href)}

@@ -89,10 +89,8 @@ export function resolveWorkspaceRelativeFilePath(
   }
 
   const relativePath = normalizedTarget.slice(normalizedRoot.length + 1);
-  // `/repo/../x` starts with the root but escapes it.
-  if (relativePath.split("/").includes("..")) {
-    return null;
-  }
+  // Normalization allows paths within the workspace to walk up between
+  // subdirectories while still rejecting paths that escape the root.
   return normalizeRelativePath(relativePath);
 }
 

@@ -151,6 +151,38 @@ describe.each([
   });
 
   it.each([
+    [
+      "/workspace/project",
+      "docs/guides/README.md",
+      "../../images/diagram.png",
+      "/workspace/project/images/diagram.png",
+    ],
+    [
+      "C:\\Users\\dara\\project",
+      "docs\\guides\\README.md",
+      "..\\..\\images\\diagram.png",
+      "C:\\Users\\dara\\project\\images\\diagram.png",
+    ],
+  ])(
+    "normalizes a parent-relative image within %s from %s",
+    (cwd, relativePath, imageSource, expectedPath) => {
+      renderPreview({
+        cwd,
+        relativePath,
+        markdown: `![diagram](${imageSource})`,
+      });
+
+      expect(testState.resources).toEqual([
+        {
+          _tag: "workspace-file",
+          threadId: ThreadId.make("thread-1"),
+          path: expectedPath,
+        },
+      ]);
+    },
+  );
+
+  it.each([
     ["/workspace/project", "/tmp/README.md", "/tmp/images/diagram.png"],
     ["/workspace/project", "/README.md", "/images/diagram.png"],
     ["C:\\Users\\dara\\project", "D:\\tmp\\README.md", "D:\\tmp\\images\\diagram.png"],
