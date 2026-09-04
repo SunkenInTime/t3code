@@ -23,7 +23,7 @@ export function ThreadMarkdownImageView(props: {
   readonly unavailable: boolean;
   readonly alt: string | null;
   readonly actionsSource?: MediaActionsSource;
-  readonly onPressPreview?: (source: FilePreviewSource) => void;
+  readonly onPressPreview: (source: FilePreviewSource) => void;
 }) {
   const sourceIdentifier = useId();
   const mediaActions = useMediaActions(props.actionsSource);
@@ -52,27 +52,12 @@ export function ThreadMarkdownImageView(props: {
     availableWidth > 0 ? Math.min(availableWidth, MARKDOWN_IMAGE_MAX_WIDTH) : "100%";
   const frameStyle: ViewStyle = displaySize ?? { width: placeholderWidth, aspectRatio: 16 / 9 };
 
-  const imageFrame =
-    props.uri === null || failed ? null : (
-      <View
-        className="items-center justify-center overflow-hidden rounded-[10px] bg-md-code-bg"
-        style={frameStyle}
-      >
-        <ThreadMarkdownImageRequest
-          key={props.uri}
-          uri={props.uri}
-          onLoad={setSourceSize}
-          onError={() => setFailedUri(props.uri!)}
-        />
-      </View>
-    );
-
   return (
     <View
       onLayout={(event) => setAvailableWidth(event.nativeEvent.layout.width)}
       style={{ alignSelf: "stretch", gap: 6 }}
     >
-      {imageFrame === null ? (
+      {props.uri === null || failed ? (
         <MediaActionsMenu media={mediaActions}>
           <Pressable
             accessibilityRole="imagebutton"
@@ -90,7 +75,7 @@ export function ThreadMarkdownImageView(props: {
             )}
           </Pressable>
         </MediaActionsMenu>
-      ) : props.onPressPreview ? (
+      ) : (
         <PresentationSource identifier={sourceIdentifier} style={{ alignSelf: "flex-start" }}>
           <MediaActionsMenu media={mediaActions}>
             <Pressable
@@ -100,7 +85,7 @@ export function ThreadMarkdownImageView(props: {
                 mediaActions.actions.length > 0 ? "Touch and hold for media actions" : undefined
               }
               onPress={() =>
-                props.onPressPreview?.({
+                props.onPressPreview({
                   kind: "image",
                   uri: props.uri!,
                   name: props.actionsSource?.name ?? props.alt ?? "Image",
@@ -110,12 +95,22 @@ export function ThreadMarkdownImageView(props: {
               }
               style={{ alignSelf: "flex-start" }}
             >
-              {imageFrame}
+              <View
+                className="items-center justify-center overflow-hidden rounded-[10px] bg-md-code-bg"
+                style={{
+                  ...frameStyle,
+                }}
+              >
+                <ThreadMarkdownImageRequest
+                  key={props.uri}
+                  uri={props.uri}
+                  onLoad={setSourceSize}
+                  onError={() => setFailedUri(props.uri)}
+                />
+              </View>
             </Pressable>
           </MediaActionsMenu>
         </PresentationSource>
-      ) : (
-        imageFrame
       )}
       {props.alt ? (
         <Text selectable className="text-xs text-foreground-muted">
@@ -165,7 +160,7 @@ export function ThreadMarkdownImage(props: {
   readonly alt: string | null;
   readonly srcFragment?: string;
   readonly actionsSource?: MediaActionsSource;
-  readonly onPressPreview?: (source: FilePreviewSource) => void;
+  readonly onPressPreview: (source: FilePreviewSource) => void;
 }) {
   const assetUrl = useAssetUrlState(props.environmentId, props.resource);
 

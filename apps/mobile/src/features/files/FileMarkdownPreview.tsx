@@ -1,4 +1,6 @@
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { resolveMediaSource } from "@t3tools/client-runtime/media-source";
+import { getBrowseDirectoryPath } from "@t3tools/client-runtime/state/projects";
 import { useCallback, useMemo, useState } from "react";
 import {
   Markdown,
@@ -26,7 +28,7 @@ import {
   type MarkdownImageRenderer,
   type NativeMarkdownTextStyle,
 } from "../../native/SelectableMarkdownText";
-import { resolveFileMarkdownImage } from "./fileMarkdownImage";
+import { resolveWorkspaceFilePath } from "./filePath";
 
 interface MarkdownPreviewStyles {
   readonly theme: PartialMarkdownTheme;
@@ -207,13 +209,16 @@ export function FileMarkdownPreview(props: {
       setIsPullRefreshing(false);
     }
   }, [props.onRefresh]);
-  const renderImage = useMemo<MarkdownImageRenderer>(() => {
-    return (image) => {
-      const media = resolveFileMarkdownImage({
-        cwd: props.cwd,
-        relativePath: props.relativePath,
-        href: image.href,
+  const markdownDirectory = useMemo(
+    () => getBrowseDirectoryPath(resolveWorkspaceFilePath(props.cwd, props.relativePath)),
+    [props.cwd, props.relativePath],
+  );
+  const renderImage = useCallback<MarkdownImageRenderer>(
+    (image) => {
+      const media = resolveMediaSource(image.href, {
         threadId: props.threadId,
+        workspaceRoot: markdownDirectory,
+        imageEmbed: true,
       });
       if (media?.access === "direct") {
         return null;
@@ -227,10 +232,12 @@ export function FileMarkdownPreview(props: {
           resource={media.resource}
           alt={image.alt}
           srcFragment={media.srcFragment}
+          onPressPreview={() => undefined}
         />
       );
-    };
-  }, [props.cwd, props.environmentId, props.relativePath, props.threadId]);
+    },
+    [markdownDirectory, props.environmentId, props.threadId],
+  );
   const styles = useMarkdownPreviewStyles(renderImage);
   const onLinkPress = useCallback((href: string) => {
     void tryOpenExternalUrl(href, "markdown-link");
