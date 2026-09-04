@@ -1,9 +1,4 @@
-import {
-  classifyMarkdownImageSource,
-  markdownImageSourceFragment,
-} from "@t3tools/client-runtime/markdown-images";
 import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { normalizeNativeMarkdownUrl } from "@t3tools/mobile-markdown-text/links";
 import { useCallback, useMemo, useState } from "react";
 import {
   Markdown,
@@ -23,8 +18,7 @@ import { useUniwindTheme } from "../../lib/useUniwindTheme";
 import {
   ThreadMarkdownImage,
   ThreadMarkdownImageUnavailable,
-  ThreadMarkdownImageView,
-} from "../../components/markdownImages";
+} from "../threads/ThreadMarkdownImage";
 import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
 import {
   hasNativeSelectableMarkdownText,
@@ -32,21 +26,13 @@ import {
   type MarkdownImageRenderer,
   type NativeMarkdownTextStyle,
 } from "../../native/SelectableMarkdownText";
-import { resolveWorkspaceFilePath, resolveWorkspaceRelativeFilePath } from "./filePath";
+import { resolveFileMarkdownImage } from "./fileMarkdownImage";
 
 interface MarkdownPreviewStyles {
   readonly theme: PartialMarkdownTheme;
   readonly styles: NodeStyleOverrides;
   readonly renderers: CustomRenderers;
   readonly nativeTextStyle: NativeMarkdownTextStyle;
-}
-
-function fileParentDirectory(path: string): string | null {
-  const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  if (separatorIndex < 0) return null;
-  if (separatorIndex === 0) return path.slice(0, 1);
-  if (separatorIndex === 2 && /^[A-Za-z]:[\\/]/.test(path)) return path.slice(0, 3);
-  return path.slice(0, separatorIndex);
 }
 
 function useMarkdownPreviewStyles(renderImage?: MarkdownImageRenderer): MarkdownPreviewStyles {
@@ -222,38 +208,25 @@ export function FileMarkdownPreview(props: {
     }
   }, [props.onRefresh]);
   const renderImage = useMemo<MarkdownImageRenderer>(() => {
-    const markdownPath = resolveWorkspaceFilePath(props.cwd, props.relativePath);
-    const imageBaseDir = fileParentDirectory(markdownPath) ?? props.cwd;
-
     return (image) => {
-      const imageSource = classifyMarkdownImageSource(image.href, imageBaseDir);
-      if (imageSource._tag === "Direct") {
-        return (
-          <ThreadMarkdownImageView
-            uri={normalizeNativeMarkdownUrl(imageSource.uri)}
-            sourceKey={imageSource.uri}
-            unavailable={false}
-            alt={image.alt}
-          />
-        );
+      const media = resolveFileMarkdownImage({
+        cwd: props.cwd,
+        relativePath: props.relativePath,
+        href: image.href,
+        threadId: props.threadId,
+      });
+      if (media?.access === "direct") {
+        return null;
       }
-      if (imageSource._tag === "Blocked") {
+      if (media === null || media.kind !== "image" || media.access === "unavailable") {
         return <ThreadMarkdownImageUnavailable alt={image.alt} />;
       }
-      const workspaceRelativePath = resolveWorkspaceRelativeFilePath(props.cwd, imageSource.path);
       return (
         <ThreadMarkdownImage
           environmentId={props.environmentId}
-          resource={{
-            _tag: workspaceRelativePath === null ? "media-file" : "workspace-file",
-            threadId: props.threadId,
-            path:
-              workspaceRelativePath === null
-                ? imageSource.path
-                : resolveWorkspaceFilePath(props.cwd, workspaceRelativePath),
-          }}
+          resource={media.resource}
           alt={image.alt}
-          srcFragment={markdownImageSourceFragment(image.href)}
+          srcFragment={media.srcFragment}
         />
       );
     };
