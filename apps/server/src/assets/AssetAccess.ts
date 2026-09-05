@@ -636,10 +636,6 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
       Effect.orElseSucceed(() => null),
     );
     if (faviconPath !== claims.filePath) return null;
-    const path = yield* Path.Path;
-    if (!hostPreviewMimeTypeFromExtension(path.extname(faviconPath))?.startsWith("image/")) {
-      return null;
-    }
     const file = yield* openMediaFile(faviconPath).pipe(
       Effect.tapError((cause) =>
         Effect.logError("Failed to open external project favicon.", {
@@ -674,9 +670,7 @@ export const resolveAsset = Effect.fn("AssetAccess.resolveAsset")(function* (
     );
     if (canonicalFile !== claims.filePath) return null;
     const mimeType = hostPreviewMimeTypeFromExtension(path.extname(canonicalFile));
-    if (!mimeType || (claims.kind === "media-image-path" && !mimeType.startsWith("image/"))) {
-      return null;
-    }
+    if (!mimeType) return null;
     const file = yield* openMediaFile(
       canonicalFile,
       claims.kind === "media-file-exact" ? claims : undefined,
