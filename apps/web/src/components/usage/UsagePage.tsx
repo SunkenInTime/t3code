@@ -1,3 +1,4 @@
+import { useAtomValue } from "@effect/atom-react";
 import type { UsageProviderKind } from "@t3tools/contracts";
 import { CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -6,7 +7,10 @@ import type { DailyTotals, HourlyTotals } from "@t3tools/shared/usageMerge";
 
 import { isElectron } from "../../env";
 import { cn } from "../../lib/utils";
+import { environmentPresentations } from "../../state/presentation";
+import { serverEnvironment } from "../../state/server";
 import { useUsage, type EnvironmentUsageStatus } from "../../state/usage";
+import { useAtomCommand } from "../../state/use-atom-command";
 import {
   enumerateDays,
   enumerateHourStarts,
@@ -32,8 +36,21 @@ import {
 } from "../WorkspaceBreadcrumb";
 import { WorkspacePageContainer } from "../WorkspacePageContainer";
 import { WorkspacePageHeader } from "../WorkspacePageHeader";
+import { UsageLimitsSection } from "./UsageLimits";
+import { UsagePriceOverrides } from "./UsagePriceOverrides";
 import { UsageProviderChart, type UsageChartMetric } from "./UsageProviderChart";
 import { PROVIDER_ORDER, PROVIDER_PRESENTATION, providersWithUsage } from "./usageProviders";
+
+type UsageMetric = UsageChartMetric | "limits";
+const METRIC_OPTIONS = [
+  { value: "cost", label: "Cost" },
+  { value: "tokens", label: "Tokens" },
+  { value: "limits", label: "Limits" },
+] as const satisfies readonly { value: UsageMetric; label: string }[];
+
+function isUsageMetric(value: string | null | undefined): value is UsageMetric {
+  return METRIC_OPTIONS.some((option) => option.value === value);
+}
 
 const WINDOW_OPTIONS = [
   { days: 1, label: "Past 24h" },
@@ -47,11 +64,16 @@ export function UsagePage() {
     days: 30,
     window: makeWindow(30),
   }));
-  const [metric, setMetric] = useState<UsageChartMetric>("cost");
+  const [metric, setMetric] = useState<UsageMetric>("cost");
+  const showingLimits = metric === "limits";
   const [breakdown, setBreakdown] = useState<"model" | "time">("model");
   const { days: windowDays, window } = windowSelection;
   const isPast24Hours = windowDays === 1;
   const { merged, environments, isPending, isPartial, refresh } = useUsage(window);
+  const presentations = useAtomValue(environmentPresentations.presentationsAtom);
+  const refreshProviders = useAtomCommand(serverEnvironment.refreshProviders, {
+    reportFailure: false,
+  });
 
   // Hold the content until every environment is terminal. Rendering merged
   // totals while devices are still answering makes every number on the page
@@ -94,6 +116,14 @@ export function UsagePage() {
     });
   };
   const refreshWindow = () => {
+    if (showingLimits) {
+      for (const [environmentId, presentation] of presentations) {
+        if (presentation.connection.phase === "connected" && presentation.serverConfig !== null) {
+          void refreshProviders({ environmentId, input: {} });
+        }
+      }
+      return;
+    }
     const nextWindow = makeWindow(windowDays, undefined, isPast24Hours ? "hour" : "day");
     if (
       nextWindow.sinceDay === window.sinceDay &&
@@ -116,10 +146,14 @@ export function UsagePage() {
         <WorkspaceBreadcrumbItem current>
           <h1>Usage</h1>
         </WorkspaceBreadcrumbItem>
-        <WorkspaceBreadcrumbSeparator className="hidden md:flex" />
-        <WorkspaceBreadcrumbItem className="hidden min-w-0 shrink md:flex">
-          <span className="truncate">{windowLabel}</span>
-        </WorkspaceBreadcrumbItem>
+        {showingLimits ? null : (
+          <>
+            <WorkspaceBreadcrumbSeparator className="hidden md:flex" />
+            <WorkspaceBreadcrumbItem className="hidden min-w-0 shrink md:flex">
+              <span className="truncate">{windowLabel}</span>
+            </WorkspaceBreadcrumbItem>
+          </>
+        )}
       </WorkspaceBreadcrumb>
       <div className="ms-auto hidden min-w-0 items-center justify-end gap-2 lg:flex">
         <ToggleGroup
@@ -128,19 +162,22 @@ export function UsagePage() {
           value={[metric]}
           onValueChange={(next) => {
             const value = next[0];
-            if (value === "cost" || value === "tokens") setMetric(value);
+            if (isUsageMetric(value)) setMetric(value);
           }}
         >
-          {(["cost", "tokens"] as const).map((option) => (
-            <Toggle key={option} value={option}>
-              {option === "cost" ? "Cost" : "Tokens"}
+          {METRIC_OPTIONS.map((option) => (
+            <Toggle key={option.value} value={option.value}>
+              {option.label}
             </Toggle>
           ))}
         </ToggleGroup>
+        {/* The period does not apply to Limits, so it stays in place but
+            disabled; unmounting it shifted the metric toggle ~300px. */}
         <ToggleGroup
           aria-label="Usage period"
           variant="segmented"
           value={[String(windowDays)]}
+          disabled={showingLimits}
           onValueChange={(next) => {
             const value = next[0];
             if (value) selectWindow(Number(value));
@@ -152,7 +189,12 @@ export function UsagePage() {
             </Toggle>
           ))}
         </ToggleGroup>
-        <Button onClick={refreshWindow} aria-label="Refresh usage" size="icon-sm" variant="ghost">
+        <Button
+          onClick={refreshWindow}
+          aria-label={showingLimits ? "Refresh limits" : "Refresh usage"}
+          size="icon-sm"
+          variant="ghost"
+        >
           <RefreshCwIcon className="size-3.5" />
         </Button>
       </div>
@@ -160,7 +202,7 @@ export function UsagePage() {
         <Select
           value={metric}
           onValueChange={(value) => {
-            if (value === "cost" || value === "tokens") setMetric(value);
+            if (isUsageMetric(value)) setMetric(value);
           }}
         >
           <SelectTrigger
@@ -169,14 +211,23 @@ export function UsagePage() {
             variant="ghost"
             className="w-auto min-w-0"
           >
-            <SelectValue>{metric === "cost" ? "Cost" : "Tokens"}</SelectValue>
+            <SelectValue>
+              {METRIC_OPTIONS.find((option) => option.value === metric)?.label}
+            </SelectValue>
           </SelectTrigger>
           <SelectPopup align="end" alignItemWithTrigger={false}>
-            <SelectItem value="cost">Cost</SelectItem>
-            <SelectItem value="tokens">Tokens</SelectItem>
+            {METRIC_OPTIONS.map((option) => (
+              <SelectItem key={option.value} value={option.value}>
+                {option.label}
+              </SelectItem>
+            ))}
           </SelectPopup>
         </Select>
-        <Select value={String(windowDays)} onValueChange={(value) => selectWindow(Number(value))}>
+        <Select
+          value={String(windowDays)}
+          disabled={showingLimits}
+          onValueChange={(value) => selectWindow(Number(value))}
+        >
           <SelectTrigger
             aria-label="Usage period"
             size="compact"
@@ -195,7 +246,12 @@ export function UsagePage() {
             ))}
           </SelectPopup>
         </Select>
-        <Button onClick={refreshWindow} aria-label="Refresh usage" size="icon-sm" variant="ghost">
+        <Button
+          onClick={refreshWindow}
+          aria-label={showingLimits ? "Refresh limits" : "Refresh usage"}
+          size="icon-sm"
+          variant="ghost"
+        >
           <RefreshCwIcon className="size-3.5" />
         </Button>
       </div>
@@ -209,7 +265,14 @@ export function UsagePage() {
 
         <ScrollArea className="min-h-0 flex-1">
           <WorkspacePageContainer width="wide">
-            {settling ? (
+            {!showingLimits ? (
+              <div className="flex justify-end">
+                <UsagePriceOverrides usage={environments} />
+              </div>
+            ) : null}
+            {showingLimits ? (
+              <UsageLimitsSection />
+            ) : settling ? (
               <>
                 {environments.length > 1 ? <UsageDeviceStrip environments={environments} /> : null}
                 <UsageSkeleton />
