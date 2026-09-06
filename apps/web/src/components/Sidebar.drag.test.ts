@@ -245,7 +245,9 @@ describe("sidebar drag projection", () => {
       settledExpanded: true,
     });
     const args = layout(pinned, active, over);
+    // dnd-kit moves the lifted row by the pointer delta, so only peers matter.
     for (let index = 0; index < pinned.length; index += 1) {
+      if (index === args.activeIndex) continue;
       expect(strategy({ ...args, index })).toEqual(verticalListSortingStrategy({ ...args, index }));
     }
   });
@@ -282,6 +284,7 @@ describe("sidebar drag projection", () => {
     });
     const args = layout(items, active, over);
     for (let index = 0; index < items.length; index += 1) {
+      if (index === args.activeIndex) continue;
       expect(strategy({ ...args, index })).toEqual(verticalListSortingStrategy({ ...args, index }));
     }
   });
@@ -304,11 +307,11 @@ describe("sidebar drag projection", () => {
   });
 
   it.each([
-    [sidebarMarkerId("pinned-divider"), 16, 16],
-    ["a1", -67, 16],
-    ["a2", -67, -67],
+    [sidebarMarkerId("pinned-divider"), 0, 0],
+    ["a1", -83, 0],
+    ["a2", -83, -83],
   ] as const)(
-    "opens the active pointer slot over %s and keeps a label of height for the emptied pins",
+    "opens the active pointer slot over %s without adding an empty pinned row",
     (over, a1Offset, a2Offset) => {
       const items = [
         pinnedHeader,
@@ -321,33 +324,14 @@ describe("sidebar drag projection", () => {
       ];
       const result = preview({ items, settledOrder: [], settledExpanded: true }, "p", over);
       expect(result.get(sidebarMarkerId("pinned-header"))).toEqual(stationary);
-      expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(-67);
+      expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(-83);
       expect(result.get("a1")?.y).toBe(a1Offset);
       expect(result.get("a2")?.y).toBe(a2Offset);
-      expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(16);
+      expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(0);
     },
   );
 
-  it("projects an active reorder with no pins so the empty pinned header keeps its label height", () => {
-    const items = [
-      pinnedHeader,
-      divider,
-      thread("a1", "active"),
-      thread("a2", "active"),
-      thread("a3", "active"),
-      settledHeader,
-      thread("s", "settled"),
-    ];
-    const result = preview({ items, settledOrder: [], settledExpanded: true }, "a3", "a1");
-    expect(result.get(sidebarMarkerId("pinned-header"))).toEqual(stationary);
-    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(16);
-    expect(result.get("a3")).toEqual(stationary);
-    expect(result.get("a1")?.y).toBe(99);
-    expect(result.get("a2")?.y).toBe(99);
-    expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(16);
-  });
-
-  it("leaves an active reorder to the default strategy while pins exist", () => {
+  it("opens label space below each pinned boundary while dragging", () => {
     const items = [
       pinnedHeader,
       thread("p", "pinned"),
@@ -357,9 +341,51 @@ describe("sidebar drag projection", () => {
       settledHeader,
       thread("s", "settled"),
     ];
-    const result = preview({ items, settledOrder: [], settledExpanded: true }, "a2", "a1");
-    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(0);
-    expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(0);
+    // Reorder inside active: the header gap shifts every row, the divider
+    // gap shifts the active rows and the shelf below by a second label.
+    const result = preview(
+      { items, settledOrder: [], settledExpanded: true, boundaryLabelHeight: 16 },
+      "a2",
+      "a1",
+    );
+    expect(result.get(sidebarMarkerId("pinned-header"))).toEqual(stationary);
+    expect(result.get("p")?.y).toBe(16);
+    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(16);
+    expect(result.get("a2")).toEqual(stationary);
+    expect(result.get("a1")?.y).toBe(32 + 83);
+    expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(32);
+    expect(result.get("s")?.y).toBe(32);
+  });
+
+  it("stacks the labels with their gaps when the pinned section is empty", () => {
+    const items = [
+      pinnedHeader,
+      divider,
+      thread("a1", "active"),
+      thread("a2", "active"),
+      settledHeader,
+      thread("s", "settled"),
+    ];
+    const result = preview(
+      { items, settledOrder: [], settledExpanded: true, boundaryLabelHeight: 16 },
+      "a2",
+      "a1",
+    );
+    expect(result.get(sidebarMarkerId("pinned-header"))).toEqual(stationary);
+    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(16);
+    expect(result.get("a1")?.y).toBe(32 + 83);
+    expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(32);
+  });
+
+  it("scales the label space with the measured root scale", () => {
+    const items = [pinnedHeader, thread("p", "pinned"), divider, thread("a1", "active")];
+    const result = preview(
+      { items, settledOrder: [], settledExpanded: true, boundaryLabelHeight: 16 },
+      "a1",
+      "p",
+      2,
+    );
+    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(32 + 165);
   });
 
   it("keeps the pinned header above the first arriving pin", () => {
@@ -383,7 +409,7 @@ describe("sidebar drag projection", () => {
   });
 
   it.each([
-    ["p", -67, -21],
+    ["p", -83, -37],
     ["s", 0, 46],
   ] as const)(
     "replaces the empty Active target when %s enters",

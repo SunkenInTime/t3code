@@ -19,9 +19,9 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
   const running = new Map<HTMLElement, { animation: Animation; offset: number }>();
   const entering = new Map<HTMLElement, Animation>();
   const exiting = new Map<HTMLElement, Animation>();
-  // The lifted row's visual top at release, relative to the list, so the
-  // release commit can glide it into its committed slot.
-  let released: { key: string; top: number } | null = null;
+  // Visual tops at drag release, relative to the list, so the release
+  // commit can glide every row from where dnd-kit left it into its slot.
+  let released: Map<HTMLElement, number> | null = null;
 
   const remainingOffset = (node: HTMLElement) => {
     const current = running.get(node);
@@ -164,24 +164,28 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
         }
       }
       if (released !== null) {
-        const node = parent.querySelector<HTMLElement>(
-          `[data-thread-key="${released.key.replace(/["\\]/g, "\\$&")}"]`,
-        );
-        const position = node === null ? undefined : next.get(node);
-        if (node && position && !reducedMotion?.matches) move(node, released.top - position.top);
+        if (!reducedMotion?.matches) {
+          for (const [node, position] of next) {
+            const top = released.get(node);
+            if (top !== undefined) move(node, top - position.top);
+          }
+        }
         released = null;
       }
       positions = next;
     },
     /** Called on drag release, before the commit that clears dnd-kit's
-     * transform. `visualTop` is the lifted row's client top; the next update
-     * animates that row from there into wherever it lands, and the other
-     * rows only refresh their baseline since they already sit at their
-     * previewed positions. */
-    release(key: string, visualTop: number | null | undefined) {
+     * transforms. Takes every row's visual top, including the lifted row
+     * under the pointer and the peers holding the label gaps open, so the
+     * next update glides each of them into its committed slot. */
+    release() {
       suspend();
-      if (visualTop == null) return;
-      released = { key, top: visualTop - parent.getBoundingClientRect().top };
+      const origin = parent.getBoundingClientRect().top;
+      released = new Map(
+        Array.from(parent.children)
+          .filter((node): node is HTMLElement => node instanceof HTMLElement && !exiting.has(node))
+          .map((node) => [node, node.getBoundingClientRect().top - origin]),
+      );
     },
     suspend,
     dispose() {

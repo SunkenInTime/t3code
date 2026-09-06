@@ -71,8 +71,6 @@ function fixture(rows: TestRow[]) {
     children: rows,
     ownerDocument: { defaultView: { matchMedia: () => media } },
     getBoundingClientRect: () => ({ top: 0 }),
-    querySelector: (selector: string) =>
-      parent.children.find((row) => selector === `[data-thread-key="${row.name}"]`) ?? null,
     append(node: TestRow) {
       parent.children.push(node);
       node.remove.mockImplementation(() => {
@@ -152,37 +150,39 @@ describe("sidebar list motion", () => {
     expectMove(a, -83);
   });
 
-  it("glides the released row from its lifted position into its committed slot", () => {
+  it("glides every row from its released position into its committed slot", () => {
     const [a, b, c] = [new TestRow("a"), new TestRow("b"), new TestRow("c")];
     const { motion, layout } = fixture([a, b, c]);
     motion.update(true);
     motion.suspend();
-    // a is lifted 130px below its slot; b previews upward into a's place.
+    // a is lifted 130px below its slot; b previews upward into a's place
+    // and c holds a 16px label gap open below the divider.
     a.dragTranslate = 130;
     b.dragTranslate = -83;
+    c.dragTranslate = 16;
     motion.update(false);
-    motion.release("a", a.getBoundingClientRect().top);
+    motion.release();
     layout([b, a, c]);
-    a.dragTranslate = b.dragTranslate = 0;
+    a.dragTranslate = b.dragTranslate = c.dragTranslate = 0;
     motion.update(true);
     // Lifted top 138, committed slot top 91: glide the remaining 47px.
     expectMove(a, 47);
+    // b already sits where it lands; c closes its 16px gap.
     expect(b.animations).toHaveLength(0);
-    expect(c.animations).toHaveLength(0);
+    expectMove(c, 16);
   });
 
-  it("does not glide when release has no position or motion is reduced", () => {
+  it("does not glide on release when motion is reduced", () => {
     const [a, b] = [new TestRow("a"), new TestRow("b")];
     const { motion, layout, media } = fixture([a, b]);
     motion.update(true);
-    motion.release("a", null);
+    media.matches = true;
+    a.dragTranslate = 100;
+    motion.release();
     layout([b, a]);
+    a.dragTranslate = 0;
     motion.update(true);
     expect(a.animations).toHaveLength(0);
-    media.matches = true;
-    motion.release("b", 300);
-    layout([a, b]);
-    motion.update(true);
     expect(b.animations).toHaveLength(0);
   });
 

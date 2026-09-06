@@ -5,7 +5,6 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
-  type DragCancelEvent,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
@@ -491,7 +490,7 @@ function SnoozePopoverButton(props: {
 type SortableThreadRowBag = Pick<
   ReturnType<typeof useSortable>,
   "listeners" | "setNodeRef" | "transform" | "transition" | "isDragging"
-> & { id: string };
+>;
 
 function SortableThreadRow(props: {
   id: string;
@@ -503,7 +502,7 @@ function SortableThreadRow(props: {
     disabled: { draggable: props.disabled },
     animateLayoutChanges: animateSidebarLayoutChanges,
   });
-  return props.children({ id: props.id, listeners, setNodeRef, transform, transition, isDragging });
+  return props.children({ listeners, setNodeRef, transform, transition, isDragging });
 }
 
 // Unsent work shares one look: the new-thread draft rows and thread rows
@@ -567,12 +566,16 @@ function SidebarSectionPlaceholder(props: {
   );
 }
 
-// Boundary labels overlay the cards' padding during a drag. They read at
-// full strength so the sections are easy to find, and the section under the
-// lifted row takes the accent. The measured marker stays empty, so showing a
-// label never pushes a row out of the way, and the label paints above the
-// lifted row so it stays visible when the row lands on the boundary, such as
-// the first drop into an empty pinned section.
+// Boundary labels appear during a drag in space the sorting strategy opens
+// below each marker (SIDEBAR_DRAG_LABEL_HEIGHT), so they never sit on a row.
+// The marker itself stays zero height, so nothing is reserved at rest and
+// pickup measurements are unchanged. They read at full strength so the
+// sections are easy to find, and the section under the lifted row takes the
+// accent. They paint above the lifted row so a card dragged across a
+// boundary never hides its label.
+// Matches the label's h-4 below.
+const SIDEBAR_DRAG_LABEL_HEIGHT = 16;
+
 function SidebarDragBoundary(props: {
   marker: "pinned-header" | "pinned-divider";
   label: string;
@@ -586,7 +589,7 @@ function SidebarDragBoundary(props: {
       className="pointer-events-none relative z-30 mx-0.5 h-0"
     >
       {props.visible ? (
-        <div className="absolute inset-x-2 top-0 flex h-4 -translate-y-1/2 items-center gap-1.5">
+        <div className="absolute inset-x-2 top-0 flex h-4 items-center gap-1.5">
           <span
             className={cn(
               "inline-flex h-4 shrink-0 items-center rounded-sm border bg-sidebar px-1.5 text-[10px] leading-none font-medium",
@@ -1372,8 +1375,6 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const sortableRootProps = sortable
     ? {
         ref: sortable.setNodeRef,
-        // Lets the list motion find this row for the release glide.
-        "data-thread-key": sortable.id,
         style: {
           transform: CSS.Translate.toString(sortable.transform),
           transition: sortable.transition,
@@ -3189,11 +3190,8 @@ export default function Sidebar() {
     },
     [sectionByThreadKey],
   );
-  const handleThreadDragCancel = useCallback((event: DragCancelEvent) => {
-    listMotionRef.current?.release(
-      String(event.active.id),
-      event.active.rect.current.translated?.top,
-    );
+  const handleThreadDragCancel = useCallback(() => {
+    listMotionRef.current?.release();
     setDragState(null);
     setDragTargetSection(null);
   }, []);
@@ -3248,8 +3246,8 @@ export default function Sidebar() {
   const listMotionPaused = dragState !== null;
   useLayoutEffect(() => {
     // Drag release clears the baseline, so its commit cannot replay the
-    // sortable preview; only the released row glides into its slot. Later
-    // thread actions can animate while writes settle.
+    // sortable preview; rows glide from their released positions instead.
+    // Later thread actions can animate while writes settle.
     // Draft navigation can reveal a frozen row without changing the draft count.
     listMotionRef.current?.update(
       !listMotionPaused && sidebarListItems.length + visibleDraftSessionCount > 0,
@@ -3279,6 +3277,7 @@ export default function Sidebar() {
     () =>
       createSidebarSortingStrategy({
         items: sidebarListItems,
+        boundaryLabelHeight: SIDEBAR_DRAG_LABEL_HEIGHT,
         settledOrder: draggedSettledOrder,
         settledExpanded: settledShelfExpanded,
         settledVisibleCount,
@@ -3356,10 +3355,7 @@ export default function Sidebar() {
   ]);
   const handleThreadDragEnd = useCallback(
     (event: DragEndEvent) => {
-      listMotionRef.current?.release(
-        String(event.active.id),
-        event.active.rect.current.translated?.top,
-      );
+      listMotionRef.current?.release();
       setDragState(null);
       setDragTargetSection(null);
       const activeKey = String(event.active.id);

@@ -10,11 +10,6 @@ import {
 } from "./Sidebar.logic";
 
 const stationary = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
-
-/** Height kept for the pinned header while the previewed pinned section is
- * empty, so the Pinned and Active labels have room to stack. It exists only
- * during a drag; nothing is reserved at rest. */
-const EMPTY_PINNED_HEADER_HEIGHT = 16;
 const hidden = { ...stationary, scaleY: 0 };
 type ThreadItem = Extract<SidebarListItem, { kind: "thread" }>;
 type Layout = Parameters<SortingStrategy>[0];
@@ -67,6 +62,9 @@ export function createSidebarSortingStrategy(input: {
   snoozedThreadCount?: number;
   cardHeight?: number;
   slimHeight?: number;
+  /** Space each pinned boundary opens for its label while dragging. The
+   * markers stay zero height at rest, so nothing is reserved until pickup. */
+  boundaryLabelHeight?: number;
 }): SortingStrategy {
   const { items } = input;
   const indices = new Map(items.map((item, index) => [sidebarListItemId(item), index]));
@@ -79,15 +77,10 @@ export function createSidebarSortingStrategy(input: {
     if (active?.kind !== "thread" || !over || !rects[0]) return [];
     const target = resolveSidebarDropTarget(items, active.key, sidebarListItemId(over));
     if (!target) return [];
-    if (target.section === active.section && over.kind === "thread") {
-      if (target.section === "settled") return [];
-      // Reordering the active list with no pins still projects, so the
-      // empty pinned header keeps its label height for the drag.
-      const otherPins = items.some(
-        (item) => item.kind === "thread" && item.section === "pinned" && item.key !== active.key,
-      );
-      if (target.section === "pinned" || otherPins) return null;
-    }
+    // Settled keeps time order, so a reorder inside it previews nothing.
+    // Every other drag projects so the boundary labels get their space.
+    if (target.section === active.section && over.kind === "thread" && target.section === "settled")
+      return [];
     const groups: Record<SidebarSection, ThreadItem[]> = {
       pinned: [],
       active: [],
@@ -110,6 +103,7 @@ export function createSidebarSortingStrategy(input: {
     const scale = slimHeight !== undefined ? slimHeight / 36 : (cardHeight ?? 82) / 82;
     cardHeight ??= 82 * scale;
     slimHeight ??= 36 * scale;
+    const labelHeight = (input.boundaryLabelHeight ?? 0) * scale;
     const group = groups[target.section];
     const order =
       target.section === "pinned"
@@ -166,10 +160,9 @@ export function createSidebarSortingStrategy(input: {
           : slimHeight;
       const moved = item.kind === "thread" && item.key === active.key;
       const height =
-        item.kind === "marker" && item.marker === "pinned-header"
-          ? groups.pinned.length === 0
-            ? EMPTY_PINNED_HEADER_HEIGHT * scale
-            : 0
+        item.kind === "marker" &&
+        (item.marker === "pinned-header" || item.marker === "pinned-divider")
+          ? labelHeight
           : moved
             ? fallback
             : (rect?.height ?? fallback);
