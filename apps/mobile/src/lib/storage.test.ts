@@ -100,7 +100,6 @@ import {
   saveConnection,
   savePreferencesPatch,
 } from "../persistence/imperative";
-import { resolveMobileAutoSettlePreferences } from "../persistence/mobile-preferences";
 import { toStableSavedRemoteConnection } from "./connection";
 
 const managedConnection = {
@@ -203,34 +202,6 @@ describe("mobile connection storage", () => {
     await expect(loadPreferences()).resolves.toEqual({});
   });
 
-  it("defaults retired mobile settling preferences to manual-only", async () => {
-    mocks.setPreferencesJson(JSON.stringify({ autoSettleOnMerge: true }), 10);
-
-    const preferences = await loadPreferences();
-    expect(preferences).toEqual({});
-    expect(resolveMobileAutoSettlePreferences(preferences)).toEqual({
-      autoSettleMode: "never",
-      autoSettleAfterDays: 3,
-    });
-  });
-
-  it("preserves valid mobile settling preferences", async () => {
-    mocks.setPreferencesJson(
-      JSON.stringify({ autoSettleMode: "inactivity", autoSettleAfterDays: 30 }),
-      10,
-    );
-
-    const preferences = await loadPreferences();
-    expect(preferences).toEqual({
-      autoSettleMode: "inactivity",
-      autoSettleAfterDays: 30,
-    });
-    expect(resolveMobileAutoSettlePreferences(preferences)).toEqual({
-      autoSettleMode: "inactivity",
-      autoSettleAfterDays: 30,
-    });
-  });
-
   it("falls back to secure storage when SQLite cannot save preferences", async () => {
     mocks.setDatabaseFailures(true, true);
     await expect(savePreferencesPatch({ baseFontSize: 19 })).resolves.toEqual({ baseFontSize: 19 });
@@ -242,33 +213,35 @@ describe("mobile connection storage", () => {
     expect(fallback.updatedAt).toEqual(expect.any(Number));
   });
 
-  it("persists Thread List v2 shelf expansion preferences", async () => {
+  it("persists thread list shelf expansion preferences", async () => {
     await expect(
       savePreferencesPatch({
-        threadListV2SettledShelfExpanded: false,
-        threadListV2SnoozedShelfExpanded: true,
+        threadListSettledShelfExpanded: false,
+        threadListSnoozedShelfExpanded: true,
       }),
     ).resolves.toEqual({
-      threadListV2SettledShelfExpanded: false,
-      threadListV2SnoozedShelfExpanded: true,
+      threadListSettledShelfExpanded: false,
+      threadListSnoozedShelfExpanded: true,
     });
 
     await expect(loadPreferences()).resolves.toEqual({
-      threadListV2SettledShelfExpanded: false,
-      threadListV2SnoozedShelfExpanded: true,
+      threadListSettledShelfExpanded: false,
+      threadListSnoozedShelfExpanded: true,
     });
     expect(JSON.parse(mocks.getPreferencesJson() ?? "")).toEqual({
-      threadListV2SettledShelfExpanded: false,
-      threadListV2SnoozedShelfExpanded: true,
+      threadListSettledShelfExpanded: false,
+      threadListSnoozedShelfExpanded: true,
     });
   });
 
-  it("ignores invalid Thread List v2 shelf expansion preference types", async () => {
+  it("drops legacy and invalid thread list shelf expansion preferences", async () => {
     mocks.setPreferencesJson(
       JSON.stringify({
         baseFontSize: 17,
-        threadListV2SettledShelfExpanded: "false",
-        threadListV2SnoozedShelfExpanded: 1,
+        threadListV2SettledShelfExpanded: true,
+        threadListV2SnoozedShelfExpanded: true,
+        threadListSettledShelfExpanded: "false",
+        threadListSnoozedShelfExpanded: 1,
       }),
       10,
     );

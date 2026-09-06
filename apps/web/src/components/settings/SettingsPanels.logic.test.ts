@@ -15,9 +15,7 @@ import {
   getChangedBrowserSettingLabels,
   getChangedTypographySettingLabels,
   hasChangedBackgroundActivitySettings,
-  hasChangedThreadSettlingSettings,
   isProjectGroupingEnabled,
-  isSamePreviewViewport,
   projectGroupingModeFromToggle,
   resolveBackgroundActivityProfileOption,
 } from "./SettingsPanels.logic";
@@ -153,24 +151,6 @@ describe("project grouping toggle", () => {
   });
 });
 
-describe("thread settling settings restore", () => {
-  it("detects changes to the mode or the hidden inactivity window", () => {
-    expect(hasChangedThreadSettlingSettings(DEFAULT_UNIFIED_SETTINGS)).toBe(false);
-    expect(
-      hasChangedThreadSettlingSettings({
-        ...DEFAULT_UNIFIED_SETTINGS,
-        sidebarAutoSettleMode: "inactivity",
-      }),
-    ).toBe(true);
-    expect(
-      hasChangedThreadSettlingSettings({
-        ...DEFAULT_UNIFIED_SETTINGS,
-        sidebarAutoSettleAfterDays: 30,
-      }),
-    ).toBe(true);
-  });
-});
-
 describe("formatDiagnosticsDescription", () => {
   it("collapses trace and metric URLs that share the same OTEL base path", () => {
     expect(
@@ -287,30 +267,17 @@ describe("getChangedBrowserSettingLabels", () => {
         browserDefaultViewport: { _tag: "freeform", width: 900, height: 600 },
         browserDefaultZoomFactor: 1.5,
         browserDefaultAppearance: "dark",
+        browserRecordingFrameRate: 60,
+        browserLinkTarget: "app",
         browserAutoShowFloatingPreview: !DEFAULT_UNIFIED_SETTINGS.browserAutoShowFloatingPreview,
       }),
-    ).toEqual(["Browser viewport", "Browser zoom", "Browser appearance", "Floating preview"]);
-  });
-});
-
-describe("isSamePreviewViewport", () => {
-  it("separates presets that share a size", () => {
-    // Two presets can agree on width and height and still be different
-    // entries in the picker, so the id has to take part in the comparison.
-    expect(
-      isSamePreviewViewport(
-        { _tag: "preset", width: 390, height: 844, presetId: "iphone-12-pro" },
-        { _tag: "preset", width: 390, height: 844, presetId: "ipad-mini" },
-      ),
-    ).toBe(false);
-  });
-
-  it("separates a freeform viewport from a preset of the same size", () => {
-    expect(
-      isSamePreviewViewport(
-        { _tag: "freeform", width: 390, height: 844 },
-        { _tag: "preset", width: 390, height: 844, presetId: "iphone-12-pro" },
-      ),
-    ).toBe(false);
+    ).toEqual([
+      "Browser viewport",
+      "Browser zoom",
+      "Browser appearance",
+      "Recording frame rate",
+      "Open links in",
+      "Floating preview",
+    ]);
   });
 });

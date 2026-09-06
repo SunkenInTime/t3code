@@ -5,15 +5,7 @@ import * as Option from "effect/Option";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Semaphore from "effect/Semaphore";
-import {
-  DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
-  DEFAULT_SIDEBAR_AUTO_SETTLE_MODE,
-  MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
-  MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
-  type SidebarAutoSettleAfterDays,
-  type SidebarAutoSettleMode,
-  type SidebarProjectGroupingMode,
-} from "@t3tools/contracts";
+import type { SidebarProjectGroupingMode } from "@t3tools/contracts";
 import { MOBILE_THEME_IDS, type MobileThemeId, type MobileThemeMode } from "../lib/mobileTheme";
 
 import * as MobileDatabase from "./mobile-database";
@@ -39,8 +31,6 @@ export interface Preferences {
   /** @deprecated Kept temporarily so older OTA bundles retain the selected mode. */
   readonly projectGroupingEnabled?: boolean;
   readonly projectGroupingMode?: SidebarProjectGroupingMode;
-  readonly autoSettleMode?: SidebarAutoSettleMode;
-  readonly autoSettleAfterDays?: SidebarAutoSettleAfterDays;
   /**
    * Device-local mirror of the web `legacySidebarEnabled` setting. Mobile has
    * no client-settings sync, so the legacy grouped thread list is opted into
@@ -51,10 +41,9 @@ export interface Preferences {
   readonly legacyThreadListEnabled?: boolean;
   /** Device-local counterpart of desktop's `planModeEnabled` legacy flag. */
   readonly planModeEnabled?: boolean;
-  /** Undefined preserves the default expanded Settled shelf. */
-  readonly threadListV2SettledShelfExpanded?: boolean;
-  /** Undefined preserves the default collapsed Snoozed shelf. */
-  readonly threadListV2SnoozedShelfExpanded?: boolean;
+  /** Fresh keys reset both shelves to collapsed when users update. */
+  readonly threadListSettledShelfExpanded?: boolean;
+  readonly threadListSnoozedShelfExpanded?: boolean;
 }
 
 export class MobilePreferencesLoadError extends Schema.TaggedErrorClass<MobilePreferencesLoadError>()(
@@ -110,12 +99,10 @@ function sanitizePreferences(parsed: Preferences): Preferences {
     collapsedProjectGroups?: readonly string[];
     projectGroupingEnabled?: boolean;
     projectGroupingMode?: SidebarProjectGroupingMode;
-    autoSettleMode?: SidebarAutoSettleMode;
-    autoSettleAfterDays?: SidebarAutoSettleAfterDays;
     legacyThreadListEnabled?: boolean;
     planModeEnabled?: boolean;
-    threadListV2SettledShelfExpanded?: boolean;
-    threadListV2SnoozedShelfExpanded?: boolean;
+    threadListSettledShelfExpanded?: boolean;
+    threadListSnoozedShelfExpanded?: boolean;
   } = {};
 
   if (typeof parsed.liveActivitiesEnabled === "boolean") {
@@ -177,44 +164,19 @@ function sanitizePreferences(parsed: Preferences): Preferences {
   ) {
     preferences.projectGroupingMode = parsed.projectGroupingMode;
   }
-  if (
-    parsed.autoSettleMode === "never" ||
-    parsed.autoSettleMode === "change-request" ||
-    parsed.autoSettleMode === "inactivity"
-  ) {
-    preferences.autoSettleMode = parsed.autoSettleMode;
-  }
-  if (
-    typeof parsed.autoSettleAfterDays === "number" &&
-    Number.isInteger(parsed.autoSettleAfterDays) &&
-    parsed.autoSettleAfterDays >= MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS &&
-    parsed.autoSettleAfterDays <= MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS
-  ) {
-    preferences.autoSettleAfterDays = parsed.autoSettleAfterDays;
-  }
   if (typeof parsed.legacyThreadListEnabled === "boolean") {
     preferences.legacyThreadListEnabled = parsed.legacyThreadListEnabled;
   }
   if (typeof parsed.planModeEnabled === "boolean") {
     preferences.planModeEnabled = parsed.planModeEnabled;
   }
-  if (typeof parsed.threadListV2SettledShelfExpanded === "boolean") {
-    preferences.threadListV2SettledShelfExpanded = parsed.threadListV2SettledShelfExpanded;
+  if (typeof parsed.threadListSettledShelfExpanded === "boolean") {
+    preferences.threadListSettledShelfExpanded = parsed.threadListSettledShelfExpanded;
   }
-  if (typeof parsed.threadListV2SnoozedShelfExpanded === "boolean") {
-    preferences.threadListV2SnoozedShelfExpanded = parsed.threadListV2SnoozedShelfExpanded;
+  if (typeof parsed.threadListSnoozedShelfExpanded === "boolean") {
+    preferences.threadListSnoozedShelfExpanded = parsed.threadListSnoozedShelfExpanded;
   }
   return preferences;
-}
-
-export function resolveMobileAutoSettlePreferences(preferences: Preferences): {
-  readonly autoSettleMode: SidebarAutoSettleMode;
-  readonly autoSettleAfterDays: SidebarAutoSettleAfterDays;
-} {
-  return {
-    autoSettleMode: preferences.autoSettleMode ?? DEFAULT_SIDEBAR_AUTO_SETTLE_MODE,
-    autoSettleAfterDays: preferences.autoSettleAfterDays ?? DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
-  };
 }
 
 export const make = Effect.fn("MobilePreferencesStore.make")(function* () {
