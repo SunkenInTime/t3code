@@ -567,9 +567,9 @@ function SidebarSectionPlaceholder(props: {
 }
 
 // Boundary labels overlay the cards' padding during a drag. They read at
-// full strength so the sections are easy to find, and take the accent only
-// for the section a drop would move the thread into. The measured marker
-// stays empty, so showing a label never pushes a row out of the way.
+// full strength so the sections are easy to find, and the section under the
+// lifted row takes the accent. The measured marker stays empty, so showing a
+// label never pushes a row out of the way.
 function SidebarDragBoundary(props: {
   marker: "pinned-header" | "pinned-divider";
   label: string;
@@ -611,8 +611,8 @@ function SidebarDragBoundary(props: {
 function SidebarSectionHeader(props: {
   marker: "snoozed-header" | "settled-header";
   label: string;
-  // While dragging, the settled header reads at full strength; it takes the
-  // accent only when a drop on it would settle the thread.
+  // While dragging, the settled header reads at full strength and takes the
+  // accent while the lifted row is over it.
   dragging?: boolean;
   isDropTarget?: boolean;
   toggle: { expanded: boolean; onToggle: () => void };
@@ -4687,11 +4687,6 @@ export default function Sidebar() {
                         );
                       };
                       const from = dragState?.activeSection ?? null;
-                      // The section a drop would move the thread into, if any.
-                      const changingTo =
-                        from !== null && resolveSidebarDropVerb(from, dragTargetSection) !== null
-                          ? dragTargetSection
-                          : null;
                       const previewPinnedCount =
                         pinnedThreads.length +
                         (from !== "pinned" && dragTargetSection === "pinned" ? 1 : 0) -
@@ -4726,7 +4721,7 @@ export default function Sidebar() {
                                 marker="pinned-header"
                                 label="Pinned"
                                 visible={from !== null}
-                                isDropTarget={changingTo === "pinned"}
+                                isDropTarget={dragTargetSection === "pinned"}
                               />,
                             );
                             break;
@@ -4737,7 +4732,7 @@ export default function Sidebar() {
                                 marker="pinned-divider"
                                 label="Active"
                                 visible={from !== null && previewPinnedCount > 0}
-                                isDropTarget={changingTo === "active"}
+                                isDropTarget={dragTargetSection === "active"}
                               />,
                             );
                             break;
@@ -4748,7 +4743,7 @@ export default function Sidebar() {
                                 marker="active-placeholder"
                                 label="Active"
                                 showHint={from !== null}
-                                isDropTarget={changingTo === "active"}
+                                isDropTarget={dragTargetSection === "active"}
                               />,
                             );
                             break;
@@ -4780,7 +4775,7 @@ export default function Sidebar() {
                                     : `Settled (${settledThreads.length})`
                                 }
                                 dragging={from !== null}
-                                isDropTarget={changingTo === "settled"}
+                                isDropTarget={dragTargetSection === "settled"}
                                 toggle={{
                                   expanded: settledShelfExpanded,
                                   onToggle: toggleSettledShelf,
@@ -4795,7 +4790,7 @@ export default function Sidebar() {
                                 marker="settled-placeholder"
                                 label="Settled"
                                 showHint={from !== null && from !== "settled"}
-                                isDropTarget={changingTo === "settled"}
+                                isDropTarget={dragTargetSection === "settled"}
                               />,
                             );
                             break;
