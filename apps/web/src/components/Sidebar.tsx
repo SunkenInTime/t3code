@@ -569,7 +569,9 @@ function SidebarSectionPlaceholder(props: {
 // Boundary labels overlay the cards' padding during a drag. They read at
 // full strength so the sections are easy to find, and the section under the
 // lifted row takes the accent. The measured marker stays empty, so showing a
-// label never pushes a row out of the way.
+// label never pushes a row out of the way, and the label paints above the
+// lifted row so it stays visible when the row lands on the boundary, such as
+// the first drop into an empty pinned section.
 function SidebarDragBoundary(props: {
   marker: "pinned-header" | "pinned-divider";
   label: string;
@@ -580,7 +582,7 @@ function SidebarDragBoundary(props: {
     <SortableSidebarMarker
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
-      className="pointer-events-none relative z-10 mx-0.5 h-0"
+      className="pointer-events-none relative z-30 mx-0.5 h-0"
     >
       {props.visible ? (
         <div className="absolute inset-x-2 top-0 flex h-4 -translate-y-1/2 items-center gap-1.5">
@@ -1356,10 +1358,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       !props.isActive &&
       !isSelected &&
       "opacity-70 transition-opacity hover:opacity-100",
-    // The lifted row is an opaque card so boundary labels beneath it vanish
-    // instead of showing through. The row tint is translucent in dark themes
-    // and the pointer keeps the hover color applied, so both the tint and the
-    // solid sidebar color are stacked as background images.
+    // The lifted row is an opaque card so the rows beneath it never show
+    // through. The row tint is translucent in dark themes and the pointer
+    // keeps the hover color applied, so both the tint and the solid sidebar
+    // color are stacked as background images.
     props.sortable?.isDragging &&
       "bg-[linear-gradient(var(--sidebar-row-active),var(--sidebar-row-active)),linear-gradient(var(--sidebar),var(--sidebar))] text-sidebar-foreground opacity-100 shadow-lg",
   );
