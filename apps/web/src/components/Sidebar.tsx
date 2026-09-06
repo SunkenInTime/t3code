@@ -564,15 +564,14 @@ function SidebarSectionPlaceholder(props: {
   );
 }
 
-// Boundary labels overlay the cards' padding during a drag. The measured
-// marker stays empty, so showing a label never pushes a row out of the way.
+// Boundary labels overlay the cards' padding during a drag, in the accent
+// color for the whole drag so they never flicker with the pointer. The
+// measured marker stays empty, so showing a label never pushes a row out of
+// the way.
 function SidebarDragBoundary(props: {
   marker: "pinned-header" | "pinned-divider";
   label: string;
   visible: boolean;
-  // The pinned boundary wears the accent for the whole drag, marking the
-  // section that changes state, so it never flickers with the pointer.
-  accent?: boolean;
 }) {
   return (
     <SortableSidebarMarker
@@ -584,16 +583,12 @@ function SidebarDragBoundary(props: {
         <div className="absolute inset-x-2 top-0 flex h-4 -translate-y-1/2 items-center gap-1.5">
           <span
             className={cn(
-              "inline-flex h-4 shrink-0 items-center rounded-sm border border-sidebar-border bg-sidebar px-1.5 text-[10px] leading-none font-medium text-sidebar-muted-foreground",
-              props.accent && "border-primary/40 text-primary",
+              "inline-flex h-4 shrink-0 items-center rounded-sm border border-primary/40 bg-sidebar px-1.5 text-[10px] leading-none font-medium text-primary",
             )}
           >
             {props.label}
           </span>
-          <span
-            aria-hidden
-            className={cn("h-px flex-1 bg-sidebar-border", props.accent && "bg-primary/50")}
-          />
+          <span aria-hidden className="h-px flex-1 bg-primary/50" />
         </div>
       ) : null}
     </SortableSidebarMarker>
@@ -4710,7 +4705,6 @@ export default function Sidebar() {
                                 marker="pinned-header"
                                 label="Pinned"
                                 visible={from !== null}
-                                accent
                               />,
                             );
                             break;
