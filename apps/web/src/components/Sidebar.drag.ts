@@ -12,8 +12,8 @@ import {
 const stationary = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
 
 /** Height kept for the pinned header while the previewed pinned section is
- * empty, so the Pinned and Active labels have room to stack. The header
- * reserves the same height at rest when there are no pins. */
+ * empty, so the Pinned and Active labels have room to stack. It exists only
+ * during a drag; nothing is reserved at rest. */
 const EMPTY_PINNED_HEADER_HEIGHT = 16;
 const hidden = { ...stationary, scaleY: 0 };
 type ThreadItem = Extract<SidebarListItem, { kind: "thread" }>;
@@ -79,8 +79,15 @@ export function createSidebarSortingStrategy(input: {
     if (active?.kind !== "thread" || !over || !rects[0]) return [];
     const target = resolveSidebarDropTarget(items, active.key, sidebarListItemId(over));
     if (!target) return [];
-    if (target.section === active.section && over.kind === "thread")
-      return target.section === "settled" ? [] : null;
+    if (target.section === active.section && over.kind === "thread") {
+      if (target.section === "settled") return [];
+      // Reordering the active list with no pins still projects, so the
+      // empty pinned header keeps its label height for the drag.
+      const otherPins = items.some(
+        (item) => item.kind === "thread" && item.section === "pinned" && item.key !== active.key,
+      );
+      if (target.section === "pinned" || otherPins) return null;
+    }
     const groups: Record<SidebarSection, ThreadItem[]> = {
       pinned: [],
       active: [],

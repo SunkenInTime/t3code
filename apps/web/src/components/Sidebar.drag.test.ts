@@ -328,6 +328,40 @@ describe("sidebar drag projection", () => {
     },
   );
 
+  it("projects an active reorder with no pins so the empty pinned header keeps its label height", () => {
+    const items = [
+      pinnedHeader,
+      divider,
+      thread("a1", "active"),
+      thread("a2", "active"),
+      thread("a3", "active"),
+      settledHeader,
+      thread("s", "settled"),
+    ];
+    const result = preview({ items, settledOrder: [], settledExpanded: true }, "a3", "a1");
+    expect(result.get(sidebarMarkerId("pinned-header"))).toEqual(stationary);
+    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(16);
+    expect(result.get("a3")).toEqual(stationary);
+    expect(result.get("a1")?.y).toBe(99);
+    expect(result.get("a2")?.y).toBe(99);
+    expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(16);
+  });
+
+  it("leaves an active reorder to the default strategy while pins exist", () => {
+    const items = [
+      pinnedHeader,
+      thread("p", "pinned"),
+      divider,
+      thread("a1", "active"),
+      thread("a2", "active"),
+      settledHeader,
+      thread("s", "settled"),
+    ];
+    const result = preview({ items, settledOrder: [], settledExpanded: true }, "a2", "a1");
+    expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(0);
+    expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(0);
+  });
+
   it("keeps the pinned header above the first arriving pin", () => {
     const items = [
       pinnedHeader,
