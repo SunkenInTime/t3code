@@ -5,6 +5,7 @@ import {
   PointerSensor,
   useSensor,
   useSensors,
+  type DragCancelEvent,
   type DragEndEvent,
   type DragOverEvent,
   type DragStartEvent,
@@ -490,7 +491,7 @@ function SnoozePopoverButton(props: {
 type SortableThreadRowBag = Pick<
   ReturnType<typeof useSortable>,
   "listeners" | "setNodeRef" | "transform" | "transition" | "isDragging"
->;
+> & { id: string };
 
 function SortableThreadRow(props: {
   id: string;
@@ -502,7 +503,7 @@ function SortableThreadRow(props: {
     disabled: { draggable: props.disabled },
     animateLayoutChanges: animateSidebarLayoutChanges,
   });
-  return props.children({ listeners, setNodeRef, transform, transition, isDragging });
+  return props.children({ id: props.id, listeners, setNodeRef, transform, transition, isDragging });
 }
 
 // Unsent work shares one look: the new-thread draft rows and thread rows
@@ -1377,6 +1378,8 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   const sortableRootProps = sortable
     ? {
         ref: sortable.setNodeRef,
+        // Lets the list motion find this row for the release glide.
+        "data-thread-key": sortable.id,
         style: {
           transform: CSS.Translate.toString(sortable.transform),
           transition: sortable.transition,
@@ -3192,8 +3195,11 @@ export default function Sidebar() {
     },
     [sectionByThreadKey],
   );
-  const handleThreadDragCancel = useCallback(() => {
-    listMotionRef.current?.suspend();
+  const handleThreadDragCancel = useCallback((event: DragCancelEvent) => {
+    listMotionRef.current?.release(
+      String(event.active.id),
+      event.active.rect.current.translated?.top,
+    );
     setDragState(null);
     setDragTargetSection(null);
   }, []);
@@ -3248,7 +3254,8 @@ export default function Sidebar() {
   const listMotionPaused = dragState !== null;
   useLayoutEffect(() => {
     // Drag release clears the baseline, so its commit cannot replay the
-    // sortable preview. Later thread actions can animate while writes settle.
+    // sortable preview; only the released row glides into its slot. Later
+    // thread actions can animate while writes settle.
     // Draft navigation can reveal a frozen row without changing the draft count.
     listMotionRef.current?.update(
       !listMotionPaused && sidebarListItems.length + visibleDraftSessionCount > 0,
@@ -3355,7 +3362,10 @@ export default function Sidebar() {
   ]);
   const handleThreadDragEnd = useCallback(
     (event: DragEndEvent) => {
-      listMotionRef.current?.suspend();
+      listMotionRef.current?.release(
+        String(event.active.id),
+        event.active.rect.current.translated?.top,
+      );
       setDragState(null);
       setDragTargetSection(null);
       const activeKey = String(event.active.id);

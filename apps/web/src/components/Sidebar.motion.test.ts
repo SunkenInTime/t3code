@@ -70,6 +70,9 @@ function fixture(rows: TestRow[]) {
   const parent = {
     children: rows,
     ownerDocument: { defaultView: { matchMedia: () => media } },
+    getBoundingClientRect: () => ({ top: 0 }),
+    querySelector: (selector: string) =>
+      parent.children.find((row) => selector === `[data-thread-key="${row.name}"]`) ?? null,
     append(node: TestRow) {
       parent.children.push(node);
       node.remove.mockImplementation(() => {
@@ -147,6 +150,40 @@ describe("sidebar list motion", () => {
     expectMove(c, 166);
     expectMove(b, -83);
     expectMove(a, -83);
+  });
+
+  it("glides the released row from its lifted position into its committed slot", () => {
+    const [a, b, c] = [new TestRow("a"), new TestRow("b"), new TestRow("c")];
+    const { motion, layout } = fixture([a, b, c]);
+    motion.update(true);
+    motion.suspend();
+    // a is lifted 130px below its slot; b previews upward into a's place.
+    a.dragTranslate = 130;
+    b.dragTranslate = -83;
+    motion.update(false);
+    motion.release("a", a.getBoundingClientRect().top);
+    layout([b, a, c]);
+    a.dragTranslate = b.dragTranslate = 0;
+    motion.update(true);
+    // Lifted top 138, committed slot top 91: glide the remaining 47px.
+    expectMove(a, 47);
+    expect(b.animations).toHaveLength(0);
+    expect(c.animations).toHaveLength(0);
+  });
+
+  it("does not glide when release has no position or motion is reduced", () => {
+    const [a, b] = [new TestRow("a"), new TestRow("b")];
+    const { motion, layout, media } = fixture([a, b]);
+    motion.update(true);
+    motion.release("a", null);
+    layout([b, a]);
+    motion.update(true);
+    expect(a.animations).toHaveLength(0);
+    media.matches = true;
+    motion.release("b", 300);
+    layout([a, b]);
+    motion.update(true);
+    expect(b.animations).toHaveLength(0);
   });
 
   it("does not carry a canceled drag's transformed position into the next move", () => {

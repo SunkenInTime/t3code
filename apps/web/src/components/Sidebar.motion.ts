@@ -19,6 +19,9 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
   const running = new Map<HTMLElement, { animation: Animation; offset: number }>();
   const entering = new Map<HTMLElement, Animation>();
   const exiting = new Map<HTMLElement, Animation>();
+  // The lifted row's visual top at release, relative to the list, so the
+  // release commit can glide it into its committed slot.
+  let released: { key: string; top: number } | null = null;
 
   const remainingOffset = (node: HTMLElement) => {
     const current = running.get(node);
@@ -86,6 +89,23 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
     for (const node of running.keys()) cancel(node);
     clearFades();
     positions = null;
+    released = null;
+  };
+  const move = (node: HTMLElement, offset: number) => {
+    cancel(node);
+    if (offset === 0) return;
+    const animation = node.animate(
+      [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0px)" }],
+      motionTiming,
+    );
+    running.set(node, { animation, offset });
+    animation.addEventListener(
+      "finish",
+      () => {
+        if (running.get(node)?.animation === animation) running.delete(node);
+      },
+      { once: true },
+    );
   };
 
   return {
@@ -140,24 +160,28 @@ export function createSidebarListMotion(parent: HTMLUListElement) {
           if (previousTop === position.top) continue;
           // Computed progress includes the effect's easing. Only our own
           // translate is carried forward; dnd-kit's transforms are never read.
-          const offset = previousTop + remainingOffset(node) - position.top;
-          cancel(node);
-          if (offset === 0) continue;
-          const animation = node.animate(
-            [{ transform: `translateY(${offset}px)` }, { transform: "translateY(0px)" }],
-            motionTiming,
-          );
-          running.set(node, { animation, offset });
-          animation.addEventListener(
-            "finish",
-            () => {
-              if (running.get(node)?.animation === animation) running.delete(node);
-            },
-            { once: true },
-          );
+          move(node, previousTop + remainingOffset(node) - position.top);
         }
       }
+      if (released !== null) {
+        const node = parent.querySelector<HTMLElement>(
+          `[data-thread-key="${released.key.replace(/["\\]/g, "\\$&")}"]`,
+        );
+        const position = node === null ? undefined : next.get(node);
+        if (node && position && !reducedMotion?.matches) move(node, released.top - position.top);
+        released = null;
+      }
       positions = next;
+    },
+    /** Called on drag release, before the commit that clears dnd-kit's
+     * transform. `visualTop` is the lifted row's client top; the next update
+     * animates that row from there into wherever it lands, and the other
+     * rows only refresh their baseline since they already sit at their
+     * previewed positions. */
+    release(key: string, visualTop: number | null | undefined) {
+      suspend();
+      if (visualTop == null) return;
+      released = { key, top: visualTop - parent.getBoundingClientRect().top };
     },
     suspend,
     dispose() {
