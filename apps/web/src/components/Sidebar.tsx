@@ -1346,9 +1346,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       !isSelected &&
       "opacity-70 transition-opacity hover:opacity-100",
     // The lifted row is an opaque card so boundary labels beneath it vanish
-    // instead of showing through.
+    // instead of showing through. The row tint is translucent in dark themes
+    // and the pointer keeps the hover color applied, so both the tint and the
+    // solid sidebar color are stacked as background images.
     props.sortable?.isDragging &&
-      "bg-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
+      "bg-[linear-gradient(var(--sidebar-row-active),var(--sidebar-row-active)),linear-gradient(var(--sidebar),var(--sidebar))] text-sidebar-foreground opacity-100 shadow-lg",
   );
   // dnd-kit props for the row root. Same bag on both variants: every row in
   // the list translates around the gap as the drag passes it.
