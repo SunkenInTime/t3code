@@ -46,6 +46,7 @@ import {
   FolderPlusIcon,
   GitBranchIcon,
   PinIcon,
+  PinOffIcon,
   PlusIcon,
   SearchIcon,
   SettingsIcon,
@@ -150,6 +151,8 @@ import {
   reduceSidebarProjectScopeMenuState,
   resolveAdjacentThreadId,
   resolveSidebarDropTarget,
+  resolveSidebarDropVerb,
+  type SidebarDropVerb,
   resolveSidebarThreadStatus,
   searchSidebarThreadsByTitle,
   shouldCreateNewThreadInCurrentProject,
@@ -546,7 +549,6 @@ function SidebarSectionPlaceholder(props: {
   marker: "active-placeholder" | "settled-placeholder";
   label: string;
   showHint: boolean;
-  isDropTarget: boolean;
 }) {
   return (
     <SortableSidebarMarker
@@ -555,7 +557,6 @@ function SidebarSectionPlaceholder(props: {
       className={cn(
         "mx-0.5 flex h-9 items-center justify-center rounded-md border border-dashed border-transparent text-xs text-sidebar-muted-foreground/60",
         props.showHint && "border-sidebar-border",
-        props.isDropTarget && "border-primary/40 bg-primary/5 text-primary",
       )}
     >
       {props.showHint ? props.label : null}
@@ -569,7 +570,9 @@ function SidebarDragBoundary(props: {
   marker: "pinned-header" | "pinned-divider";
   label: string;
   visible: boolean;
-  isDropTarget: boolean;
+  // The pinned boundary wears the accent for the whole drag, marking the
+  // section that changes state, so it never flickers with the pointer.
+  accent?: boolean;
 }) {
   return (
     <SortableSidebarMarker
@@ -581,15 +584,15 @@ function SidebarDragBoundary(props: {
         <div className="absolute inset-x-2 top-0 flex h-4 -translate-y-1/2 items-center gap-1.5">
           <span
             className={cn(
-              "inline-flex h-4 shrink-0 items-center gap-2 rounded-sm border border-sidebar-border bg-sidebar px-1.5 text-[10px] leading-none font-medium text-sidebar-muted-foreground",
-              props.isDropTarget && "border-primary/40 text-primary",
+              "inline-flex h-4 shrink-0 items-center rounded-sm border border-sidebar-border bg-sidebar px-1.5 text-[10px] leading-none font-medium text-sidebar-muted-foreground",
+              props.accent && "border-primary/40 text-primary",
             )}
           >
             {props.label}
           </span>
           <span
             aria-hidden
-            className={cn("h-px flex-1 bg-sidebar-border", props.isDropTarget && "bg-primary/50")}
+            className={cn("h-px flex-1 bg-sidebar-border", props.accent && "bg-primary/50")}
           />
         </div>
       ) : null}
@@ -601,14 +604,15 @@ function SidebarDragBoundary(props: {
 function SidebarSectionHeader(props: {
   marker: "snoozed-header" | "settled-header";
   label: string;
-  isDropTarget?: boolean;
+  // Settled wears the accent for the whole drag, like the pinned boundary.
+  accent?: boolean;
   toggle: { expanded: boolean; onToggle: () => void };
 }) {
   const snoozed = props.marker === "snoozed-header";
   const className = cn(
     "flex h-full w-full items-center gap-2 rounded-md border border-dashed border-transparent px-2 text-left text-xs font-medium",
     snoozed ? "text-blue-600 dark:text-blue-400" : "text-sidebar-muted-foreground/60",
-    props.isDropTarget && "border-primary/40 bg-primary/5 text-primary",
+    props.accent && "text-primary",
   );
   const content = (
     <>
@@ -618,7 +622,7 @@ function SidebarSectionHeader(props: {
         className={cn(
           "h-px min-w-2 flex-1",
           snoozed ? "bg-blue-500/20 dark:bg-blue-400/15" : "bg-sidebar-border/60",
-          props.isDropTarget && "bg-primary/30",
+          props.accent && "bg-primary/50",
         )}
       />
       <ChevronDownIcon
@@ -887,6 +891,42 @@ const SidebarDraftBlock = memo(function SidebarDraftBlock(props: {
   );
 });
 
+// Verb and icon on the lifted row while it hovers over another section. Uses
+// the same icons as the row actions and context menu so the drop reads as the
+// action it performs.
+const dropVerbBadge: Record<SidebarDropVerb, ReactNode> = {
+  pin: (
+    <>
+      <PinIcon aria-hidden className="size-3" />
+      Pin
+    </>
+  ),
+  unpin: (
+    <>
+      <PinOffIcon aria-hidden className="size-3" />
+      Unpin
+    </>
+  ),
+  settle: (
+    <>
+      <CircleCheckIcon aria-hidden className="size-3" />
+      Settle
+    </>
+  ),
+  unsettle: (
+    <>
+      <Undo2Icon aria-hidden className="size-3" />
+      Un-settle
+    </>
+  ),
+  wake: (
+    <>
+      <AlarmClockOffIcon aria-hidden className="size-3" />
+      Wake
+    </>
+  ),
+};
+
 const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   thread: SidebarThreadSummary;
   variant: "card" | "slim";
@@ -906,7 +946,11 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
   // sortable bag applied to the row root so the whole row drags (the
   // pointer sensor's distance constraint keeps plain clicks working).
   sortable?: SortableThreadRowBag | undefined;
-  dropSection: Exclude<SidebarSection, "snoozed"> | null;
+  dropVerb: SidebarDropVerb | null;
+  // While dragging, the pin marker stays only for a pinned thread still over
+  // the pinned section. Any other position shows the verb badge instead, and
+  // the badge carries its own icon.
+  dragOverPinned: boolean;
   // Compact wake countdown ("2h") for rows in the snoozed shelf.
   snoozeWakeLabelText: string | null;
   // When a snooze ended (timer or early wake); drives the Woke pill until
@@ -1301,6 +1345,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       !props.isActive &&
       !isSelected &&
       "opacity-70 transition-opacity hover:opacity-100",
+    // The lifted row is an opaque card so boundary labels beneath it vanish
+    // instead of showing through.
+    props.sortable?.isDragging &&
+      "bg-sidebar-row-active text-sidebar-foreground opacity-100 shadow-lg",
   );
   // dnd-kit props for the row root. Same bag on both variants: every row in
   // the list translates around the gap as the drag passes it.
@@ -1322,18 +1370,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       }
     : {};
   const dragDestination =
-    sortable?.isDragging && props.dropSection !== null ? (
+    sortable?.isDragging && props.dropVerb !== null ? (
       <span
         role="status"
-        className="pointer-events-none ml-auto inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-primary/30 bg-sidebar px-1.5 text-[11px] font-medium text-primary"
+        className="pointer-events-none ml-auto inline-flex h-5 shrink-0 items-center gap-1 rounded-sm border border-primary/40 bg-primary/10 px-1.5 text-[11px] font-medium text-primary"
       >
-        <span className="sr-only">Move to </span>
-        <span aria-hidden>→</span>
-        {props.dropSection === "pinned"
-          ? "Pinned"
-          : props.dropSection === "active"
-            ? "Active"
-            : "Settled"}
+        {dropVerbBadge[props.dropVerb]}
       </span>
     ) : null;
 
@@ -1437,32 +1479,33 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       <TooltipPopup side="top">Unsent draft</TooltipPopup>
     </Tooltip>
   ) : null;
-  const pinIndicator =
-    props.isPinned && !sortable?.isDragging ? (
-      props.pinningSupported ? (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <button
-                type="button"
-                aria-label="Unpin thread"
-                onClick={handleUnpinClick}
-                className="inline-flex cursor-pointer items-center rounded-sm text-muted-foreground/65 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              />
-            }
-          >
-            <PinIcon aria-hidden className="size-3 shrink-0" />
-          </TooltipTrigger>
-          <TooltipPopup>Unpin thread</TooltipPopup>
-        </Tooltip>
-      ) : (
-        <PinIcon
-          aria-label="Pinned"
-          role="img"
-          className="size-3 shrink-0 text-muted-foreground/65"
-        />
-      )
-    ) : null;
+  const showPin =
+    props.isPinned && (!sortable?.isDragging || (props.dragOverPinned && props.dropVerb === null));
+  const pinIndicator = showPin ? (
+    props.pinningSupported && !sortable?.isDragging ? (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <button
+              type="button"
+              aria-label="Unpin thread"
+              onClick={handleUnpinClick}
+              className="inline-flex cursor-pointer items-center rounded-sm text-muted-foreground/65 outline-none transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          }
+        >
+          <PinIcon aria-hidden className="size-3 shrink-0" />
+        </TooltipTrigger>
+        <TooltipPopup>Unpin thread</TooltipPopup>
+      </Tooltip>
+    ) : (
+      <PinIcon
+        aria-label="Pinned"
+        role="img"
+        className="size-3 shrink-0 text-muted-foreground/65"
+      />
+    )
+  ) : null;
 
   if (variant === "slim") {
     return (
@@ -1471,7 +1514,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
         {...sortableRootProps}
         className={cn(
           "list-none [content-visibility:auto] [contain-intrinsic-size:auto_34px]",
-          sortable?.isDragging && "z-20 opacity-80",
+          sortable?.isDragging && "relative z-20",
         )}
       >
         <Tooltip disabled={sortable?.isDragging}>
@@ -1629,7 +1672,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: {
       {...sortableRootProps}
       className={cn(
         "list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_96px]",
-        sortable?.isDragging && "z-20 opacity-80",
+        sortable?.isDragging && "relative z-20",
       )}
     >
       <Tooltip disabled={snoozeMenuOpen || sortable?.isDragging}>
@@ -4533,12 +4576,13 @@ export default function Sidebar() {
                             }
                             isPinned={thread.pinnedAt != null}
                             sortable={sortable}
-                            dropSection={
-                              dragState?.activeKey === threadKey &&
-                              dragTargetSection !== dragState.activeSection &&
-                              dragTargetSection !== "snoozed"
-                                ? dragTargetSection
+                            dropVerb={
+                              dragState?.activeKey === threadKey
+                                ? resolveSidebarDropVerb(dragState.activeSection, dragTargetSection)
                                 : null
+                            }
+                            dragOverPinned={
+                              dragState?.activeKey === threadKey && dragTargetSection === "pinned"
                             }
                             snoozeWakeLabelText={
                               section === "snoozed" && thread.snoozedUntil != null
@@ -4663,8 +4707,8 @@ export default function Sidebar() {
                                 key="pinned-header"
                                 marker="pinned-header"
                                 label="Pinned"
-                                isDropTarget={dragTargetSection === "pinned"}
                                 visible={from !== null}
+                                accent
                               />,
                             );
                             break;
@@ -4674,7 +4718,6 @@ export default function Sidebar() {
                                 key="pinned-divider"
                                 marker="pinned-divider"
                                 label="Active"
-                                isDropTarget={dragTargetSection === "active"}
                                 visible={from !== null && previewPinnedCount > 0}
                               />,
                             );
@@ -4686,7 +4729,6 @@ export default function Sidebar() {
                                 marker="active-placeholder"
                                 label="Active"
                                 showHint={from !== null}
-                                isDropTarget={dragTargetSection === "active"}
                               />,
                             );
                             break;
@@ -4717,7 +4759,7 @@ export default function Sidebar() {
                                     ? "Settled"
                                     : `Settled (${settledThreads.length})`
                                 }
-                                isDropTarget={dragTargetSection === "settled"}
+                                accent={from !== null}
                                 toggle={{
                                   expanded: settledShelfExpanded,
                                   onToggle: toggleSettledShelf,
@@ -4732,7 +4774,6 @@ export default function Sidebar() {
                                 marker="settled-placeholder"
                                 label="Settled"
                                 showHint={from !== null && from !== "settled"}
-                                isDropTarget={dragTargetSection === "settled"}
                               />,
                             );
                             break;
