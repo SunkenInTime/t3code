@@ -549,6 +549,7 @@ function SidebarSectionPlaceholder(props: {
   marker: "active-placeholder" | "settled-placeholder";
   label: string;
   showHint: boolean;
+  isDropTarget: boolean;
 }) {
   return (
     <SortableSidebarMarker
@@ -556,7 +557,8 @@ function SidebarSectionPlaceholder(props: {
       data-testid={`sidebar-${props.marker}`}
       className={cn(
         "mx-0.5 flex h-9 items-center justify-center rounded-md border border-dashed border-transparent text-xs text-sidebar-muted-foreground/60",
-        props.showHint && "border-sidebar-border",
+        props.showHint && "border-sidebar-foreground/25 text-sidebar-foreground/80",
+        props.isDropTarget && "border-primary/40 bg-primary/5 text-primary",
       )}
     >
       {props.showHint ? props.label : null}
@@ -564,14 +566,15 @@ function SidebarSectionPlaceholder(props: {
   );
 }
 
-// Boundary labels overlay the cards' padding during a drag, in the accent
-// color for the whole drag so they never flicker with the pointer. The
-// measured marker stays empty, so showing a label never pushes a row out of
-// the way.
+// Boundary labels overlay the cards' padding during a drag. They read at
+// full strength so the sections are easy to find, and take the accent only
+// for the section a drop would move the thread into. The measured marker
+// stays empty, so showing a label never pushes a row out of the way.
 function SidebarDragBoundary(props: {
   marker: "pinned-header" | "pinned-divider";
   label: string;
   visible: boolean;
+  isDropTarget: boolean;
 }) {
   return (
     <SortableSidebarMarker
@@ -583,12 +586,21 @@ function SidebarDragBoundary(props: {
         <div className="absolute inset-x-2 top-0 flex h-4 -translate-y-1/2 items-center gap-1.5">
           <span
             className={cn(
-              "inline-flex h-4 shrink-0 items-center rounded-sm border border-primary/40 bg-sidebar px-1.5 text-[10px] leading-none font-medium text-primary",
+              "inline-flex h-4 shrink-0 items-center rounded-sm border bg-sidebar px-1.5 text-[10px] leading-none font-medium",
+              props.isDropTarget
+                ? "border-primary/40 text-primary"
+                : "border-sidebar-foreground/25 text-sidebar-foreground/80",
             )}
           >
             {props.label}
           </span>
-          <span aria-hidden className="h-px flex-1 bg-primary/50" />
+          <span
+            aria-hidden
+            className={cn(
+              "h-px flex-1",
+              props.isDropTarget ? "bg-primary/50" : "bg-sidebar-foreground/25",
+            )}
+          />
         </div>
       ) : null}
     </SortableSidebarMarker>
@@ -599,15 +611,18 @@ function SidebarDragBoundary(props: {
 function SidebarSectionHeader(props: {
   marker: "snoozed-header" | "settled-header";
   label: string;
-  // Settled wears the accent for the whole drag, like the pinned boundary.
-  accent?: boolean;
+  // While dragging, the settled header reads at full strength; it takes the
+  // accent only when a drop on it would settle the thread.
+  dragging?: boolean;
+  isDropTarget?: boolean;
   toggle: { expanded: boolean; onToggle: () => void };
 }) {
   const snoozed = props.marker === "snoozed-header";
   const className = cn(
     "flex h-full w-full items-center gap-2 rounded-md border border-dashed border-transparent px-2 text-left text-xs font-medium",
     snoozed ? "text-blue-600 dark:text-blue-400" : "text-sidebar-muted-foreground/60",
-    props.accent && "text-primary",
+    props.dragging && "text-sidebar-foreground/80",
+    props.isDropTarget && "border-primary/40 bg-primary/5 text-primary",
   );
   const content = (
     <>
@@ -617,7 +632,8 @@ function SidebarSectionHeader(props: {
         className={cn(
           "h-px min-w-2 flex-1",
           snoozed ? "bg-blue-500/20 dark:bg-blue-400/15" : "bg-sidebar-border/60",
-          props.accent && "bg-primary/50",
+          props.dragging && "bg-sidebar-foreground/25",
+          props.isDropTarget && "bg-primary/50",
         )}
       />
       <ChevronDownIcon
@@ -4671,6 +4687,11 @@ export default function Sidebar() {
                         );
                       };
                       const from = dragState?.activeSection ?? null;
+                      // The section a drop would move the thread into, if any.
+                      const changingTo =
+                        from !== null && resolveSidebarDropVerb(from, dragTargetSection) !== null
+                          ? dragTargetSection
+                          : null;
                       const previewPinnedCount =
                         pinnedThreads.length +
                         (from !== "pinned" && dragTargetSection === "pinned" ? 1 : 0) -
@@ -4705,6 +4726,7 @@ export default function Sidebar() {
                                 marker="pinned-header"
                                 label="Pinned"
                                 visible={from !== null}
+                                isDropTarget={changingTo === "pinned"}
                               />,
                             );
                             break;
@@ -4715,6 +4737,7 @@ export default function Sidebar() {
                                 marker="pinned-divider"
                                 label="Active"
                                 visible={from !== null && previewPinnedCount > 0}
+                                isDropTarget={changingTo === "active"}
                               />,
                             );
                             break;
@@ -4725,6 +4748,7 @@ export default function Sidebar() {
                                 marker="active-placeholder"
                                 label="Active"
                                 showHint={from !== null}
+                                isDropTarget={changingTo === "active"}
                               />,
                             );
                             break;
@@ -4755,7 +4779,8 @@ export default function Sidebar() {
                                     ? "Settled"
                                     : `Settled (${settledThreads.length})`
                                 }
-                                accent={from !== null}
+                                dragging={from !== null}
+                                isDropTarget={changingTo === "settled"}
                                 toggle={{
                                   expanded: settledShelfExpanded,
                                   onToggle: toggleSettledShelf,
@@ -4770,6 +4795,7 @@ export default function Sidebar() {
                                 marker="settled-placeholder"
                                 label="Settled"
                                 showHint={from !== null && from !== "settled"}
+                                isDropTarget={changingTo === "settled"}
                               />,
                             );
                             break;

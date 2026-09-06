@@ -38,9 +38,9 @@ the dragged thread shows the action the drop performs, with its icon: **Pin**, *
 **Settle**, **Un-settle**, or **Wake**. Its status and hover actions hide during the drag. A pinned
 thread keeps its pin only while it stays in the pinned section; once it leaves, the badge takes
 over. Reordering within the same section shows no badge. When there are no pins, drag to the top
-edge to pin a thread. For the whole drag, the section labels wear the accent color and do not
-react to the pointer. The badge on the dragged thread is the signal that the drop changes its
-state. Section labels also
+edge to pin a thread. Section labels stay readable for the whole drag, and the section a drop
+would move the thread into takes the accent color. Reordering within a section highlights
+nothing. Section labels also
 identify empty sections and a collapsed settled shelf.
 
 Drag within the pinned or active section to change its order. Other rows slide aside to show the
