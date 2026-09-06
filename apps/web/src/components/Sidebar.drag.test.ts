@@ -304,11 +304,11 @@ describe("sidebar drag projection", () => {
   });
 
   it.each([
-    [sidebarMarkerId("pinned-divider"), 0, 0],
-    ["a1", -83, 0],
-    ["a2", -83, -83],
+    [sidebarMarkerId("pinned-divider"), 16, 16],
+    ["a1", -67, 16],
+    ["a2", -67, -67],
   ] as const)(
-    "opens the active pointer slot over %s without adding an empty pinned row",
+    "opens the active pointer slot over %s and keeps a label of height for the emptied pins",
     (over, a1Offset, a2Offset) => {
       const items = [
         pinnedHeader,
@@ -321,10 +321,10 @@ describe("sidebar drag projection", () => {
       ];
       const result = preview({ items, settledOrder: [], settledExpanded: true }, "p", over);
       expect(result.get(sidebarMarkerId("pinned-header"))).toEqual(stationary);
-      expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(-83);
+      expect(result.get(sidebarMarkerId("pinned-divider"))?.y).toBe(-67);
       expect(result.get("a1")?.y).toBe(a1Offset);
       expect(result.get("a2")?.y).toBe(a2Offset);
-      expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(0);
+      expect(result.get(sidebarMarkerId("settled-header"))?.y).toBe(16);
     },
   );
 
@@ -349,7 +349,7 @@ describe("sidebar drag projection", () => {
   });
 
   it.each([
-    ["p", -83, -37],
+    ["p", -67, -21],
     ["s", 0, 46],
   ] as const)(
     "replaces the empty Active target when %s enters",

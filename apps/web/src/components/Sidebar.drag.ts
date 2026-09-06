@@ -10,6 +10,11 @@ import {
 } from "./Sidebar.logic";
 
 const stationary = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
+
+/** Height kept for the pinned header while the previewed pinned section is
+ * empty, so the Pinned and Active labels have room to stack. The header
+ * reserves the same height at rest when there are no pins. */
+export const EMPTY_PINNED_HEADER_HEIGHT = 16;
 const hidden = { ...stationary, scaleY: 0 };
 type ThreadItem = Extract<SidebarListItem, { kind: "thread" }>;
 type Layout = Parameters<SortingStrategy>[0];
@@ -153,7 +158,15 @@ export function createSidebarSortingStrategy(input: {
           ? cardHeight
           : slimHeight;
       const moved = item.kind === "thread" && item.key === active.key;
-      top += (moved ? fallback : (rect?.height ?? fallback)) + 1;
+      const height =
+        item.kind === "marker" && item.marker === "pinned-header"
+          ? groups.pinned.length === 0
+            ? EMPTY_PINNED_HEADER_HEIGHT * scale
+            : 0
+          : moved
+            ? fallback
+            : (rect?.height ?? fallback);
+      top += height + 1;
     }
     result[activeIndex] = stationary;
     return result;

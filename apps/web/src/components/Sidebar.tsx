@@ -577,12 +577,18 @@ function SidebarDragBoundary(props: {
   label: string;
   visible: boolean;
   isDropTarget: boolean;
+  // The pinned header keeps one label of height while there are no pins so
+  // the Pinned and Active labels can stack instead of sharing a line.
+  reserveHeight?: boolean;
 }) {
   return (
     <SortableSidebarMarker
       marker={props.marker}
       data-testid={`sidebar-${props.marker}`}
-      className="pointer-events-none relative z-30 mx-0.5 h-0"
+      className={cn(
+        "pointer-events-none relative z-30 mx-0.5",
+        props.reserveHeight ? "h-4" : "h-0",
+      )}
     >
       {props.visible ? (
         <div className="absolute inset-x-2 top-0 flex h-4 -translate-y-1/2 items-center gap-1.5">
@@ -4689,14 +4695,6 @@ export default function Sidebar() {
                         );
                       };
                       const from = dragState?.activeSection ?? null;
-                      const previewPinnedCount =
-                        pinnedThreads.length +
-                        (from !== "pinned" && dragTargetSection === "pinned" ? 1 : 0) -
-                        (from === "pinned" &&
-                        dragTargetSection !== null &&
-                        dragTargetSection !== "pinned"
-                          ? 1
-                          : 0);
                       const items: ReactNode[] = [
                         <SidebarDraftBlock
                           key="draft-sessions"
@@ -4724,6 +4722,7 @@ export default function Sidebar() {
                                 label="Pinned"
                                 visible={from !== null}
                                 isDropTarget={dragTargetSection === "pinned"}
+                                reserveHeight={pinnedThreads.length === 0}
                               />,
                             );
                             break;
@@ -4733,7 +4732,7 @@ export default function Sidebar() {
                                 key="pinned-divider"
                                 marker="pinned-divider"
                                 label="Active"
-                                visible={from !== null && previewPinnedCount > 0}
+                                visible={from !== null}
                                 isDropTarget={dragTargetSection === "active"}
                               />,
                             );
