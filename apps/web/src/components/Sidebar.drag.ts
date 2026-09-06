@@ -14,7 +14,7 @@ const stationary = { x: 0, y: 0, scaleX: 1, scaleY: 1 };
 /** Height kept for the pinned header while the previewed pinned section is
  * empty, so the Pinned and Active labels have room to stack. The header
  * reserves the same height at rest when there are no pins. */
-export const EMPTY_PINNED_HEADER_HEIGHT = 16;
+const EMPTY_PINNED_HEADER_HEIGHT = 16;
 const hidden = { ...stationary, scaleY: 0 };
 type ThreadItem = Extract<SidebarListItem, { kind: "thread" }>;
 type Layout = Parameters<SortingStrategy>[0];
