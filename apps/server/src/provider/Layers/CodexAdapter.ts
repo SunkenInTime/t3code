@@ -2487,7 +2487,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         detail: `Invalid attachment id '${attachment.id}'.`,
       });
     }
-    const bytes = yield* fileSystem.readFile(attachmentPath).pipe(
+    // Codex reads the file itself when the turn starts, so only the path
+    // crosses the JSON-RPC boundary. Stat first: a missing file would otherwise
+    // degrade into a silent placeholder on the Codex side instead of an error.
+    const fileInfo = yield* fileSystem.stat(attachmentPath).pipe(
       Effect.mapError(
         (cause) =>
           new ProviderAdapterRequestError({
@@ -2498,15 +2501,22 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
           }),
       ),
     );
+    if (fileInfo.type !== "File") {
+      return yield* new ProviderAdapterRequestError({
+        provider: PROVIDER,
+        method: "turn/start",
+        detail: `Attachment '${attachment.id}' is not a regular file.`,
+      });
+    }
     return {
-      type: "image" as const,
-      url: `data:${attachment.mimeType};base64,${Buffer.from(bytes).toString("base64")}`,
+      type: "localImage" as const,
+      path: attachmentPath,
     };
   });
 
   const sendTurn: CodexAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
-    // Codex ingests images only. Anything else would be base64-encoded as an
-    // image and rejected or misread; generic files reach the agent through the
+    // Codex ingests images only. Anything else would be passed as an image
+    // path and rejected or misread; generic files reach the agent through the
     // path line ProviderService puts in the prompt.
     const codexAttachments = yield* Effect.forEach(
       (input.attachments ?? []).filter((attachment) => attachment.type === "image"),
