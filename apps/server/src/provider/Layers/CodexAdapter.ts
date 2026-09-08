@@ -396,7 +396,6 @@ function mcpToolPresentation(
         ? ({ _tag: "display-name", displayName: argumentAppName } as const)
         : undefined);
     const name =
-      normalizedDisplayName(asUnknownRecord(surface.app)?.displayName) ??
       normalizedDisplayName(appContext?.appName) ??
       argumentAppName ??
       (app?._tag === "display-name" ? app.displayName : undefined) ??

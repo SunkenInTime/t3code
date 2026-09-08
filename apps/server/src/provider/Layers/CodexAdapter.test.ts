@@ -584,6 +584,7 @@ const lifecycleLayer = it.layer(
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    // Tests with unnamed native apps must stub the process spawner to avoid real macOS lookups.
     Layer.provideMerge(Layer.succeed(HostProcessPlatform, "darwin")),
   ),
 );
@@ -1476,7 +1477,7 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
               _meta: {
                 "codex/toolSurface": {
                   kind: "computerUse",
-                  app: { kind: "displayName", displayName: "TextEdit" },
+                  app: { kind: "displayName", displayName: "Fallback app name" },
                 },
               },
               content: [],
@@ -1540,15 +1541,15 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
             toolSurface: "computer",
             toolIcon: {
               _tag: "native-app",
-              app: { _tag: "display-name", displayName: "TextEdit" },
+              app: { _tag: "display-name", displayName: "Fallback app name" },
             },
             toolSource: {
-              key: "native-app-name:textedit",
+              key: "native-app-name:fallback app name",
               name: "TextEdit",
               kind: "computer",
               icon: {
                 _tag: "native-app",
-                app: { _tag: "display-name", displayName: "TextEdit" },
+                app: { _tag: "display-name", displayName: "Fallback app name" },
               },
             },
           },

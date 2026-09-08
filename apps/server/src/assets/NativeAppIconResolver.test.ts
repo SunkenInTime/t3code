@@ -3,8 +3,10 @@ import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
+import * as PlatformError from "effect/PlatformError";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
@@ -28,6 +30,41 @@ function emptyProcessHandle(output = "") {
 }
 
 describe("resolveNativeAppIcon", () => {
+  it.effect("backs off failed app lookups and retries after a minute", () =>
+    Effect.gen(function* () {
+      let attempts = 0;
+      const spawner = ChildProcessSpawner.make(() =>
+        Effect.suspend(() => {
+          attempts++;
+          return attempts === 1
+            ? Effect.fail(
+                PlatformError.systemError({
+                  _tag: "NotFound",
+                  module: "ChildProcessSpawner",
+                  method: "spawn",
+                }),
+              )
+            : Effect.succeed(
+                emptyProcessHandle(
+                  '{"path":"/Applications/Review.app","displayName":"Review","version":"1"}',
+                ),
+              );
+        }),
+      );
+      const resolve = yield* NativeAppIconResolver.makeApplicationResolver().pipe(
+        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(HostProcessPlatform, "darwin"),
+      );
+      const app = { _tag: "app-id", appId: "dev.review.app" } as const;
+      expect(yield* resolve(app)).toBeNull();
+      expect(yield* resolve(app)).toBeNull();
+      expect(attempts).toBe(1);
+      yield* TestClock.adjust("61 seconds");
+      expect(yield* resolve(app)).toMatchObject({ displayName: "Review" });
+      expect(attempts).toBe(2);
+    }),
+  );
+
   it.effect.skipIf(HostProcessPlatform.defaultValue() !== "darwin")(
     "renders visible pixels at the requested dimensions on macOS",
     () =>

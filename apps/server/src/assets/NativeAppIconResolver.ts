@@ -138,7 +138,6 @@ const decodeApplication = Schema.decodeUnknownOption(
 /** Each adapter caches names; asset requests cache the same lookup independently. */
 export const makeApplicationResolver = Effect.fn("NativeAppIconResolver.makeApplicationResolver")(
   function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
     const platform = yield* HostProcessPlatform;
     const semaphore = yield* Semaphore.make(2);
     const cache = yield* Cache.makeWith(
@@ -150,16 +149,13 @@ export const makeApplicationResolver = Effect.fn("NativeAppIconResolver.makeAppl
             "-e",
             applicationScript,
             key,
-          ]).pipe(
-            Effect.map((output) => Option.getOrNull(decodeApplication(output))),
-            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-          ),
+          ]).pipe(Effect.map((output) => Option.getOrNull(decodeApplication(output)))),
         ),
       {
         capacity: RESOLUTION_CACHE_MAX_ENTRIES,
         timeToLive: Exit.match({
           onSuccess: () => RESOLUTION_CACHE_TTL,
-          onFailure: () => Duration.zero,
+          onFailure: () => Duration.minutes(1),
         }),
       },
     );
@@ -175,7 +171,6 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const config = yield* ServerConfig.ServerConfig;
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const resolveApplication = yield* makeApplicationResolver();
   const hostPlatform = yield* HostProcessPlatform;
   const resolutionSemaphore = yield* Semaphore.make(2);
@@ -216,10 +211,7 @@ export const make = Effect.gen(function* () {
             ),
           );
           return yield* existingFile(cachePath);
-        }).pipe(
-          Effect.provideService(FileSystem.FileSystem, fileSystem),
-          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-        ),
+        }),
       ),
     {
       capacity: RESOLUTION_CACHE_MAX_ENTRIES,
