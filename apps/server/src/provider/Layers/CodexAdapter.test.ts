@@ -1508,6 +1508,101 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     }),
   );
 
+  it.effect("caps in-flight native name lookups per session", () =>
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const total = 6;
+      const appId = (index: number) => `dev.burst-${index}.app`;
+      // Each lookup blocks until its gate opens and records when it started.
+      const gates = new Map<string, Deferred.Deferred<void>>();
+      const started = new Map<string, Deferred.Deferred<void>>();
+      for (let index = 0; index <= total; index += 1) {
+        gates.set(appId(index), yield* Deferred.make<void>());
+        started.set(appId(index), yield* Deferred.make<void>());
+      }
+      const lookup = vi.spyOn(spawner, "string").mockImplementation((child) =>
+        Effect.gen(function* () {
+          const reference = JSON.parse(
+            (child._tag === "StandardCommand" ? child.args.at(-1) : undefined) ?? "{}",
+          ) as { appId?: string };
+          const id = reference.appId ?? "";
+          yield* Deferred.succeed(started.get(id)!, undefined);
+          yield* Deferred.await(gates.get(id)!);
+          return "null";
+        }),
+      );
+      try {
+        const { adapter, runtime } = yield* startLifecycleRuntime();
+        const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, total)).pipe(
+          Effect.forkChild,
+        );
+        const emit = (index: number) =>
+          runtime.emit({
+            id: asEventId(`evt-native-burst-${index}`),
+            kind: "notification",
+            provider: ProviderDriverKind.make("codex"),
+            createdAt: "2026-01-01T00:00:02.000Z",
+            method: "item/completed",
+            threadId: asThreadId("thread-1"),
+            turnId: asTurnId("turn-1"),
+            itemId: asItemId(`native-burst-${index}`),
+            payload: {
+              completedAtMs: 1_778_000_002_000,
+              threadId: "thread-1",
+              turnId: "turn-1",
+              item: {
+                type: "mcpToolCall",
+                id: `native-burst-${index}`,
+                server: "node_repl",
+                tool: "js",
+                arguments: {},
+                durationMs: 12,
+                error: null,
+                result: {
+                  _meta: {
+                    "codex/toolSurface": {
+                      kind: "computerUse",
+                      app: { kind: "appId", appId: appId(index) },
+                    },
+                  },
+                  content: [],
+                },
+                status: "completed",
+              },
+            },
+          });
+        for (let index = 0; index < total; index += 1) {
+          yield* emit(index);
+          yield* TestClock.adjust("250 millis");
+        }
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+        expect(events.map((event) => event.payload)).toMatchObject(
+          Array.from({ length: total }, () => ({ toolSource: { name: "Computer Use" } })),
+        );
+        // Two lookups hold the semaphore permits and the other two forked lookups
+        // start once those finish. Then probe with a fresh app: its lookup queues
+        // behind any over-cap fibers in the FIFO semaphore, so once it has
+        // started, apps past the cap that are still unstarted were never forked.
+        for (let index = 0; index < total; index += 1) {
+          yield* Deferred.succeed(gates.get(appId(index))!, undefined);
+        }
+        const probeFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 1)).pipe(
+          Effect.forkChild,
+        );
+        yield* emit(total);
+        yield* Deferred.await(started.get(appId(total))!);
+        expect(yield* Deferred.isDone(started.get(appId(4))!)).toBe(false);
+        expect(yield* Deferred.isDone(started.get(appId(5))!)).toBe(false);
+        yield* Deferred.succeed(gates.get(appId(total))!, undefined);
+        yield* TestClock.adjust("250 millis");
+        yield* Fiber.join(probeFiber);
+      } finally {
+        for (const gate of gates.values()) yield* Deferred.succeed(gate, undefined);
+        lookup.mockRestore();
+      }
+    }),
+  );
+
   it.effect("presents browser and computer-use calls with Codex-style titles and sources", () =>
     Effect.gen(function* () {
       const { adapter, runtime } = yield* startLifecycleRuntime();

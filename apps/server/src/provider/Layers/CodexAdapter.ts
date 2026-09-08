@@ -807,6 +807,9 @@ function nonEmptyDetail(value: string | null | undefined): string | undefined {
 // Keeps one oversized patch from pushing a wall of paths through every consumer
 // of the approval, while still saying how much it covers.
 const MAX_DESCRIBED_FILE_CHANGES = 20;
+// Native name lookups that outlive their event budget keep running per session;
+// this caps how many distinct apps can be in flight at once.
+const MAX_PENDING_APPLICATION_LOOKUPS = 4;
 
 // An apply-patch approval carries the edited paths as the keys of `fileChanges`.
 // Without them the approval card has nothing to show but its own title — the
@@ -2305,6 +2308,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         let rateLimits: CodexRateLimitSnapshot | undefined;
         const sessionScope = yield* Scope.make("sequential");
         let sessionScopeTransferred = false;
+        const pendingApplicationLookups = new Map<
+          string,
+          Fiber.Fiber<{ readonly displayName: string } | null>
+        >();
         yield* Effect.addFinalizer(() =>
           sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
         );
@@ -2447,8 +2454,19 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               // Name enrichment must not hold up the serialized provider event
               // stream, so only the wait is bounded. The lookup keeps running in
               // the session scope; interrupting it would evict the pending cache
-              // entry and a slow first lookup could never warm the cache.
-              const lookup = yield* resolveApplication(icon.app).pipe(Effect.forkIn(sessionScope));
+              // entry and a slow first lookup could never warm the cache. Repeat
+              // events share the in-flight lookup, and a burst of new apps is
+              // capped rather than allowed to queue fibers without limit.
+              const lookupKey = JSON.stringify(icon.app);
+              let lookup = pendingApplicationLookups.get(lookupKey);
+              if (!lookup) {
+                if (pendingApplicationLookups.size >= MAX_PENDING_APPLICATION_LOOKUPS) continue;
+                lookup = yield* resolveApplication(icon.app).pipe(
+                  Effect.ensuring(Effect.sync(() => pendingApplicationLookups.delete(lookupKey))),
+                  Effect.forkIn(sessionScope),
+                );
+                pendingApplicationLookups.set(lookupKey, lookup);
+              }
               const application = yield* Fiber.join(lookup).pipe(
                 Effect.timeout("250 millis"),
                 Effect.orElseSucceed(() => null),
