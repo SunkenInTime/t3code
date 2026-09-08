@@ -3,11 +3,14 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 import {
+  type ChatAttachment,
   type ClientOrchestrationCommand,
   type IsoDateTime,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
+  type ThreadId,
+  type UploadChatAttachment,
 } from "@t3tools/contracts";
 
 import {
@@ -76,9 +79,6 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
   Effect.gen(function* () {
     const receivedAt = DateTime.formatIso(yield* DateTime.now);
     const canonicalCommand = canonicalizeClientCommandTimestamps(command, receivedAt);
-    const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const serverConfig = yield* ServerConfig;
     const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
 
     const normalizeProjectWorkspaceRoot = (workspaceRoot: string) =>
@@ -129,19 +129,62 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       } satisfies OrchestrationCommand;
     }
 
-    if (canonicalCommand.type !== "thread.turn.start") {
-      return canonicalCommand as OrchestrationCommand;
+    if (canonicalCommand.type === "thread.turn.start") {
+      return {
+        ...canonicalCommand,
+        message: {
+          ...canonicalCommand.message,
+          attachments: yield* normalizeCommandAttachments({
+            threadId: canonicalCommand.threadId,
+            attachments: canonicalCommand.message.attachments,
+          }),
+        },
+      } satisfies OrchestrationCommand;
     }
 
+    if (canonicalCommand.type === "thread.user-input.respond") {
+      const { attachments, ...rest } = canonicalCommand;
+      const normalized: OrchestrationCommand =
+        attachments === undefined || attachments.length === 0
+          ? rest
+          : {
+              ...rest,
+              attachments: yield* normalizeCommandAttachments({
+                threadId: canonicalCommand.threadId,
+                attachments,
+              }),
+            };
+      return normalized;
+    }
+
+    return canonicalCommand as OrchestrationCommand;
+  });
+
+/**
+ * Turns client attachments into thread-owned files: pending uploads are
+ * claimed under a thread-scoped id, inline data URLs are persisted. Anything
+ * claimed is removed again when a later attachment in the batch fails.
+ */
+const normalizeCommandAttachments = Effect.fn("Normalizer.normalizeCommandAttachments")(
+  function* (input: {
+    readonly threadId: ThreadId;
+    readonly attachments: ReadonlyArray<UploadChatAttachment | ChatAttachment>;
+  }) {
+    if (input.attachments.length === 0) {
+      return [];
+    }
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const serverConfig = yield* ServerConfig;
     const claimedAttachmentPaths: string[] = [];
-    const normalizedAttachments = yield* Effect.forEach(
-      canonicalCommand.message.attachments,
+    return yield* Effect.forEach(
+      input.attachments,
       (attachment) =>
         Effect.gen(function* () {
           if (!("dataUrl" in attachment)) {
             const claim = planAttachmentClaim({
               attachmentsDir: serverConfig.attachmentsDir,
-              threadId: canonicalCommand.threadId,
+              threadId: input.threadId,
               attachmentId: attachment.id,
             });
             if (!claim.ok) {
@@ -180,7 +223,7 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
               });
             }
 
-            // Keep the pending copy until the turn succeeds. A failed thread
+            // Keep the pending copy until the command succeeds. A failed thread
             // bootstrap can then retry with a fresh thread id. A copy, not a
             // hard link: an agent editing the delivered file in place must not
             // mutate the retry source.
@@ -212,7 +255,7 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
             });
           }
 
-          const attachmentId = createAttachmentId(canonicalCommand.threadId);
+          const attachmentId = createAttachmentId(input.threadId);
           if (!attachmentId) {
             return yield* new OrchestrationDispatchCommandError({
               message: "Failed to create a safe attachment id.",
@@ -259,30 +302,42 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
         }),
       { concurrency: 1 },
     ).pipe(Effect.tapError(() => removeClaimedAttachmentPaths(claimedAttachmentPaths)));
+  },
+);
 
-    return {
-      ...canonicalCommand,
-      message: {
-        ...canonicalCommand.message,
-        attachments: normalizedAttachments,
-      },
-    } satisfies OrchestrationCommand;
-  });
+function commandAttachments(
+  command: ClientOrchestrationCommand | OrchestrationCommand,
+): ReadonlyArray<UploadChatAttachment | ChatAttachment> {
+  switch (command.type) {
+    case "thread.turn.start":
+      return command.message.attachments;
+    case "thread.user-input.respond":
+      return command.attachments ?? [];
+    default:
+      return [];
+  }
+}
 
 export const cleanupFailedUploadedAttachments = Effect.fn(
   "Normalizer.cleanupFailedUploadedAttachments",
 )(function* (command: ClientOrchestrationCommand, normalizedCommand: OrchestrationCommand) {
-  if (command.type !== "thread.turn.start" || normalizedCommand.type !== "thread.turn.start") {
+  if (command.type !== normalizedCommand.type) {
+    return;
+  }
+  const originalAttachments = commandAttachments(command);
+  const normalizedAttachments = commandAttachments(normalizedCommand);
+  if (normalizedAttachments.length === 0) {
     return;
   }
 
   const serverConfig = yield* ServerConfig;
   const claimedPaths: string[] = [];
-  for (const [index, attachment] of normalizedCommand.message.attachments.entries()) {
-    const original = command.message.attachments[index];
+  for (const [index, attachment] of normalizedAttachments.entries()) {
+    const original = originalAttachments[index];
     if (
       !original ||
       "dataUrl" in original ||
+      "dataUrl" in attachment ||
       parseThreadSegmentFromAttachmentId(original.id) !== PENDING_ATTACHMENT_THREAD_SEGMENT
     ) {
       continue;

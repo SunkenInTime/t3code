@@ -1,4 +1,5 @@
 import {
+  type ChatAttachment,
   ApprovalRequestId,
   DEFAULT_MODEL,
   EventId,
@@ -168,12 +169,30 @@ export interface CodexSessionRuntimeOptions {
   readonly appServerArgs?: ReadonlyArray<string>;
 }
 
+/** Image the app server reads from disk when the turn or steer is submitted. */
+export interface CodexSessionRuntimeImageInput {
+  readonly type: "localImage";
+  readonly path: string;
+}
+
+/** Image attached to a request_user_input answer. */
+export interface CodexUserInputAttachment {
+  /** Steered into the running turn so the model sees it with the answer. */
+  readonly input: CodexSessionRuntimeImageInput;
+  /** Echoed on the answered event so the timeline can show what was sent. */
+  readonly attachment: ChatAttachment;
+}
+
+/**
+ * Leads the steered message that carries answer images. The model reads it
+ * right after the request_user_input tool result, so it ties the images to
+ * the answer it just received.
+ */
+const USER_INPUT_ATTACHMENT_STEER_TEXT = "Attached with my answer to your question:";
+
 export interface CodexSessionRuntimeSendTurnInput {
   readonly input?: string;
-  readonly attachments?: ReadonlyArray<{
-    readonly type: "localImage";
-    readonly path: string;
-  }>;
+  readonly attachments?: ReadonlyArray<CodexSessionRuntimeImageInput>;
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier | undefined;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort | undefined;
@@ -212,6 +231,7 @@ export interface CodexSessionRuntimeShape {
   readonly respondToUserInput: (
     requestId: ApprovalRequestId,
     answers: ProviderUserInputAnswers,
+    attachments?: ReadonlyArray<CodexUserInputAttachment>,
   ) => Effect.Effect<void, CodexSessionRuntimeError>;
   readonly events: Stream.Stream<ProviderEvent, never>;
   readonly close: Effect.Effect<void>;
@@ -594,10 +614,7 @@ export function buildTurnStartParams(input: {
   readonly threadId: string;
   readonly runtimeMode: RuntimeMode;
   readonly prompt?: string;
-  readonly attachments?: ReadonlyArray<{
-    readonly type: "localImage";
-    readonly path: string;
-  }>;
+  readonly attachments?: ReadonlyArray<CodexSessionRuntimeImageInput>;
   readonly model?: string;
   readonly serviceTier?: CodexServiceTier;
   readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
@@ -2475,7 +2492,7 @@ export const makeCodexSessionRuntime = (
             },
           });
         }),
-      respondToUserInput: (requestId, answers) =>
+      respondToUserInput: (requestId, answers, attachments) =>
         Effect.gen(function* () {
           const pending = (yield* Ref.get(pendingUserInputsRef)).get(requestId);
           if (!pending) {
@@ -2484,6 +2501,28 @@ export const makeCodexSessionRuntime = (
             });
           }
           const codexAnswers = yield* toCodexUserInputAnswers(answers);
+          if (attachments && attachments.length > 0) {
+            // The answer itself can only carry text, so the images travel as
+            // steered input on the turn that is blocked on this question. Codex
+            // drains steered input at the top of its next model request, the
+            // same request that carries the tool result, so the model sees the
+            // images together with the answers. Steering before releasing the
+            // answer keeps the question open if the app server rejects it.
+            if (!pending.turnId) {
+              return yield* CodexErrors.CodexAppServerRequestError.invalidParams(
+                "This question is not bound to an active turn, so images cannot be attached to the answer.",
+              );
+            }
+            const providerThreadId = yield* readProviderThreadId;
+            yield* client.request("turn/steer", {
+              threadId: providerThreadId,
+              expectedTurnId: pending.turnId,
+              input: [
+                { type: "text", text: USER_INPUT_ATTACHMENT_STEER_TEXT },
+                ...attachments.map((entry) => entry.input),
+              ],
+            });
+          }
           yield* Ref.update(pendingUserInputsRef, (current) => {
             const next = new Map(current);
             next.delete(requestId);
@@ -2499,6 +2538,9 @@ export const makeCodexSessionRuntime = (
             ...(pending.itemId ? { itemId: pending.itemId } : {}),
             payload: {
               answers: codexAnswers,
+              ...(attachments && attachments.length > 0
+                ? { attachments: attachments.map((entry) => entry.attachment) }
+                : {}),
             },
           });
         }),

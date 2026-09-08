@@ -41,6 +41,7 @@ import { ProviderAdapterValidationError } from "../Errors.ts";
 import type { CodexAdapterShape } from "../Services/CodexAdapter.ts";
 import { ProviderSessionDirectory } from "../Services/ProviderSessionDirectory.ts";
 import {
+  type CodexUserInputAttachment,
   type CodexSessionRuntimeOptions,
   type CodexSessionRuntimeSendTurnInput,
   type CodexSessionRuntimeShape,
@@ -114,8 +115,11 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
   );
 
   public readonly respondToUserInputImpl = vi.fn(
-    (_requestId: ApprovalRequestId, _answers: ProviderUserInputAnswers): Promise<void> =>
-      Promise.resolve(undefined),
+    (
+      _requestId: ApprovalRequestId,
+      _answers: ProviderUserInputAnswers,
+      _attachments?: ReadonlyArray<CodexUserInputAttachment>,
+    ): Promise<void> => Promise.resolve(undefined),
   );
 
   public readonly closeImpl = vi.fn(() => Promise.resolve(undefined));
@@ -154,8 +158,16 @@ class FakeCodexRuntime implements CodexSessionRuntimeShape {
     return Effect.promise(() => this.respondToRequestImpl(requestId, decision));
   }
 
-  respondToUserInput(requestId: ApprovalRequestId, answers: ProviderUserInputAnswers) {
-    return Effect.promise(() => this.respondToUserInputImpl(requestId, answers));
+  respondToUserInput(
+    requestId: ApprovalRequestId,
+    answers: ProviderUserInputAnswers,
+    attachments?: ReadonlyArray<CodexUserInputAttachment>,
+  ) {
+    return Effect.promise(() =>
+      attachments
+        ? this.respondToUserInputImpl(requestId, answers, attachments)
+        : this.respondToUserInputImpl(requestId, answers),
+    );
   }
 
   get events() {
@@ -412,6 +424,73 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
 
       NodeAssert.equal(result._tag, "Failure");
       NodeAssert.equal(result.failure._tag, "ProviderAdapterSessionNotFoundError");
+    }),
+  );
+
+  it.effect("steers answer images to the runtime as local image paths", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const config = yield* ServerConfig;
+      const threadId = asThreadId("thread-answer-images");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      const attachment = {
+        type: "image" as const,
+        id: "thread-answer-images-00000000-0000-4000-8000-0000000000aa",
+        name: "screenshot.png",
+        mimeType: "image/png",
+        sizeBytes: 6,
+      };
+      const attachmentPath = NodePath.join(config.attachmentsDir, `${attachment.id}.png`);
+      NodeFS.writeFileSync(attachmentPath, Buffer.from("pixels"));
+
+      yield* adapter
+        .respondToUserInput(threadId, ApprovalRequestId.make("user-input-1"), { "0": "yes" }, [
+          attachment,
+        ])
+        .pipe(Effect.ensuring(Effect.sync(() => NodeFS.rmSync(attachmentPath, { force: true }))));
+
+      NodeAssert.deepStrictEqual(runtime.respondToUserInputImpl.mock.calls[0], [
+        "user-input-1",
+        { "0": "yes" },
+        [{ input: { type: "localImage", path: attachmentPath }, attachment }],
+      ]);
+    }),
+  );
+
+  it.effect("keeps the question open when an answer image is missing on disk", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CodexAdapter;
+      const threadId = asThreadId("thread-answer-missing-image");
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const runtime = sessionRuntimeFactory.lastRuntime;
+      NodeAssert.ok(runtime);
+      runtime.respondToUserInputImpl.mockClear();
+
+      const result = yield* adapter
+        .respondToUserInput(threadId, ApprovalRequestId.make("user-input-2"), { "0": "yes" }, [
+          {
+            type: "image",
+            id: "thread-answer-missing-image-00000000-0000-4000-8000-0000000000ab",
+            name: "screenshot.png",
+            mimeType: "image/png",
+            sizeBytes: 6,
+          },
+        ])
+        .pipe(Effect.result);
+
+      NodeAssert.equal(result._tag, "Failure");
+      NodeAssert.equal(result.failure._tag, "ProviderAdapterRequestError");
+      NodeAssert.equal(runtime.respondToUserInputImpl.mock.calls.length, 0);
     }),
   );
 

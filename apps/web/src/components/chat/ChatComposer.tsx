@@ -1277,6 +1277,8 @@ export interface ChatComposerProps {
   activePendingDraftAnswers: Record<string, PendingUserInputDraftAnswer>;
   activePendingQuestionIndex: number;
   respondingRequestIds: ApprovalRequestId[];
+  /** Images staged in the composer go out with the answer to the active question. */
+  pendingUserInputAcceptsImages: boolean;
 
   // Plan
   showPlanFollowUpPrompt: boolean;
@@ -1397,6 +1399,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activePendingApproval,
     pendingApprovals,
     pendingUserInputs,
+    pendingUserInputAcceptsImages,
     activePendingProgress,
     activePendingResolvedAnswers,
     activePendingIsResponding,
@@ -2127,7 +2130,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (!isComposerCollapsedMobile && showPlanFollowUpPrompt && activeProposedPlan !== null);
   const showCollapsedMobilePromptRow =
     isComposerCollapsedMobile && !isComposerApprovalState && pendingUserInputs.length === 0;
-  const showComposerAttachAction = fileStagingLimit !== null && pendingUserInputs.length === 0;
+  const showComposerAttachAction =
+    fileStagingLimit !== null && (pendingUserInputs.length === 0 || pendingUserInputAcceptsImages);
+  const attachActionLabel = pendingUserInputs.length > 0 ? "Attach images" : "Attach files";
   const composerFooterHasWideActions = showPlanFollowUpPrompt || activePendingProgress !== null;
   const composerFooterActionLayoutKey = useMemo(() => {
     if (activePendingProgress) {
@@ -4255,7 +4260,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   // ------------------------------------------------------------------
   const addComposerAttachments = async (files: File[]) => {
     if (!activeThreadId || files.length === 0) return;
-    if (pendingUserInputs.length > 0) {
+    const attachingToAnswer = pendingUserInputs.length > 0;
+    if (attachingToAnswer && !pendingUserInputAcceptsImages) {
       toastManager.add({
         type: "error",
         title: "Attach files after answering pending questions.",
@@ -4316,6 +4322,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (attachmentKind === "image") {
         acceptedImages.push(normalizeComposerImageFileMimeType(file));
       } else {
+        if (attachingToAnswer) {
+          error = "Only images can go with an answer. Attach other files after answering.";
+          continue;
+        }
         if (fileStagingLimit === null) {
           error = "This server does not support file attachments.";
           continue;
@@ -5684,13 +5694,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                               size="icon-sm"
                               onPointerDown={(event) => event.preventDefault()}
                               onClick={() => attachmentInputRef.current?.click()}
-                              aria-label="Attach files"
+                              aria-label={attachActionLabel}
                             />
                           }
                         >
                           <PaperclipIcon />
                         </TooltipTrigger>
-                        <TooltipPopup>Attach files</TooltipPopup>
+                        <TooltipPopup>{attachActionLabel}</TooltipPopup>
                       </Tooltip>
                     </>
                   ) : null}

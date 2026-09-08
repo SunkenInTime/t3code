@@ -477,6 +477,30 @@ describe("deriveWorkLogEntries", () => {
     ]);
   });
 
+  it("keeps answer images on resolved user input entries", () => {
+    const attachment = {
+      type: "image",
+      id: "thread-1-image",
+      name: "screenshot.png",
+      mimeType: "image/png",
+      sizeBytes: 6,
+    };
+    const entries = deriveWorkLogEntries([
+      makeActivity({
+        id: "answered",
+        kind: "user-input.resolved",
+        summary: "User input submitted",
+        tone: "info",
+        payload: {
+          requestId: "request-1",
+          answers: { "0": "yes" },
+          attachments: [attachment, { bogus: true }],
+        },
+      }),
+    ]);
+    expect(entries[0]?.attachments).toEqual([attachment]);
+  });
+
   it("omits tool started entries and keeps completed entries", () => {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({

@@ -30,6 +30,8 @@ import {
   type KeybindingCommand,
   OrchestrationThreadActivity,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
+  type ChatAttachment,
+  type UploadChatAttachment,
   ProviderInteractionMode,
   ProviderDriverKind,
   resolveEnvironmentMachineKind,
@@ -1526,6 +1528,7 @@ export default function ChatView(props: ChatViewProps) {
   });
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt);
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages);
+  const removeComposerDraftImage = useComposerDraftStore((store) => store.removeImage);
   const addComposerDraftFiles = useComposerDraftStore((store) => store.addFiles);
   const setComposerDraftTerminalContexts = useComposerDraftStore(
     (store) => store.setTerminalContexts,
@@ -2659,6 +2662,12 @@ export default function ChatView(props: ChatViewProps) {
   const activePendingIsResponding = activePendingUserInput
     ? respondingUserInputRequestIds.includes(activePendingUserInput.requestId)
     : false;
+  // Async questions become a normal message, which every provider takes
+  // attachments on. Native callbacks can only carry images when the provider
+  // steers them into the running turn, which Codex does.
+  const activePendingUserInputAcceptsImages =
+    activePendingUserInput !== null &&
+    (activePendingUserInput.dismissible || selectedProvider === "codex");
   const activeProposedPlan = useMemo(() => {
     if (!latestTurnSettled) {
       return null;
@@ -7038,32 +7047,113 @@ export default function ChatView(props: ChatViewProps) {
     [activeThreadId, environmentId, respondToThreadApproval, setThreadError],
   );
 
+  // The image half of the send path: uploads when the server takes them,
+  // inline data URLs for servers that predate uploads.
+  const prepareAnswerImages = useCallback(
+    async (
+      images: ReadonlyArray<ComposerImageAttachment>,
+    ): Promise<
+      | {
+          readonly ok: true;
+          readonly attachments: ReadonlyArray<UploadChatAttachment | ChatAttachment>;
+        }
+      | { readonly ok: false; readonly reason: string }
+    > => {
+      if (supportsAttachmentUploads) {
+        for (const image of images) {
+          startAttachmentUpload({ environmentId, image, draftTarget: composerDraftTarget });
+        }
+        await awaitAttachmentUploads(images.map((image) => image.id));
+        const uploaded = getUploadedAttachments({ environmentId, images });
+        return uploaded === null
+          ? { ok: false, reason: "Retry or remove failed uploads before sending." }
+          : { ok: true, attachments: uploaded };
+      }
+      return {
+        ok: true,
+        attachments: await Promise.all(
+          images.map(async (image) => ({
+            type: "image" as const,
+            name: image.name,
+            mimeType: image.mimeType,
+            sizeBytes: image.sizeBytes,
+            dataUrl: await readFileAsDataUrl(image.file),
+            ...(image.source ? { source: image.source } : {}),
+          })),
+        ),
+      };
+    },
+    [composerDraftTarget, environmentId, supportsAttachmentUploads],
+  );
+
   const onRespondToUserInput = useCallback(
     async (requestId: ApprovalRequestId, answers: Record<string, unknown>) => {
       if (!activeThreadId) return;
 
+      // Read the staged images up front so a paste that lands while the
+      // reply is in flight stays in the draft for the next message.
+      const answerImages = activePendingUserInputAcceptsImages
+        ? [...(composerRef.current?.getSendContext().images ?? [])]
+        : [];
       setRespondingUserInputRequestIds((existing) =>
         existing.includes(requestId) ? existing : [...existing, requestId],
       );
+      const finishResponding = () =>
+        setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
+
+      let attachments: ReadonlyArray<UploadChatAttachment | ChatAttachment> = [];
+      if (answerImages.length > 0) {
+        const prepared = await prepareAnswerImages(answerImages);
+        if (!prepared.ok) {
+          setThreadError(activeThreadId, prepared.reason);
+          finishResponding();
+          return;
+        }
+        attachments = prepared.attachments;
+      }
+
       const result = await respondToThreadUserInput({
         environmentId,
         input: {
           threadId: activeThreadId,
           requestId,
           answers,
+          ...(attachments.length > 0 ? { attachments } : {}),
         },
       });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        setThreadError(
-          activeThreadId,
-          error instanceof Error ? error.message : "Failed to submit user input.",
-        );
+      if (result._tag === "Failure") {
+        if (!isAtomCommandInterrupted(result)) {
+          const error = squashAtomCommandFailure(result);
+          setThreadError(
+            activeThreadId,
+            error instanceof Error ? error.message : "Failed to submit user input.",
+          );
+        }
+      } else if (answerImages.length > 0) {
+        // The server now owns thread-scoped copies; drop the pending uploads
+        // and the composer previews.
+        if (supportsAttachmentUploads) {
+          releaseDraftAttachments(answerImages);
+        }
+        for (const image of answerImages) {
+          removeComposerDraftImage(composerDraftTarget, image.id);
+        }
       }
-      setRespondingUserInputRequestIds((existing) => existing.filter((id) => id !== requestId));
+      finishResponding();
       return result;
     },
-    [activeThreadId, environmentId, respondToThreadUserInput, setThreadError],
+    [
+      activePendingUserInputAcceptsImages,
+      activeThreadId,
+      composerDraftTarget,
+      composerRef,
+      environmentId,
+      prepareAnswerImages,
+      removeComposerDraftImage,
+      respondToThreadUserInput,
+      setThreadError,
+      supportsAttachmentUploads,
+    ],
   );
 
   // Closes an async question without messaging the agent. The server records
@@ -8141,6 +8231,7 @@ export default function ChatView(props: ChatViewProps) {
                             activePendingDraftAnswers={activePendingDraftAnswers}
                             activePendingQuestionIndex={activePendingQuestionIndex}
                             respondingRequestIds={respondingRequestIds}
+                            pendingUserInputAcceptsImages={activePendingUserInputAcceptsImages}
                             showPlanFollowUpPrompt={showPlanFollowUpPrompt}
                             activeProposedPlan={activeProposedPlan}
                             activeTasksProgress={activeComposerTasksProgress}

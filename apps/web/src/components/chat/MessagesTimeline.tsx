@@ -3217,6 +3217,14 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
       ? undefined
       : (workEntry.toolIcon ?? workEntry.toolSource?.icon);
   const previewText = displayLabel ?? workEntryDisplayLabel(workEntry, workspaceRoot);
+  const answerImages = useMemo(
+    () =>
+      (workEntry.attachments ?? []).filter(isImageAttachment).map((image) => ({
+        image,
+        resource: { _tag: "attachment", attachmentId: image.id } as const,
+      })),
+    [workEntry.attachments],
+  );
   const viewedImagePath = workEntryViewedImagePath(workEntry);
   const viewedImage =
     viewedImagePath && threadRef
@@ -3345,6 +3353,25 @@ const PlainWorkEntryRow = memo(function PlainWorkEntryRow(props: {
           </span>
         </div>
       </div>
+      {answerImages.length > 0 && threadRef ? (
+        <div
+          className="mt-1 ms-7 flex cursor-default flex-wrap gap-1.5"
+          onClick={stopRowToggle}
+          onPointerDown={stopRowToggle}
+        >
+          {answerImages.map(({ image, resource }) => (
+            <ChatMarkdownAssetImage
+              key={image.id}
+              environmentId={threadRef.environmentId}
+              resource={resource}
+              alt={image.name}
+              maxHeightRem={6}
+              workspaceRoot={workspaceRoot}
+              onImageExpand={onImageExpand}
+            />
+          ))}
+        </div>
+      ) : null}
       {expanded && viewedImage && threadRef ? (
         <div
           className="mt-1 ms-7 cursor-default"

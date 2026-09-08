@@ -1133,12 +1133,26 @@ const ThreadApprovalRespondCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+// Attachments ride alongside the text answers. Native callback questions
+// steer them into the running turn; async questions carry them on the
+// follow-up message the answer becomes.
 const ThreadUserInputRespondCommand = Schema.Struct({
   type: Schema.Literal("thread.user-input.respond"),
   commandId: CommandId,
   threadId: ThreadId,
   requestId: ApprovalRequestId,
   answers: ProviderUserInputAnswers,
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
+  createdAt: IsoDateTime,
+});
+
+const ClientThreadUserInputRespondCommand = Schema.Struct({
+  type: Schema.Literal("thread.user-input.respond"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requestId: ApprovalRequestId,
+  answers: ProviderUserInputAnswers,
+  attachments: Schema.optional(Schema.Array(Schema.Union([UploadChatAttachment, ChatAttachment]))),
   createdAt: IsoDateTime,
 });
 
@@ -1226,7 +1240,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
-  ThreadUserInputRespondCommand,
+  ClientThreadUserInputRespondCommand,
   ThreadUserInputDismissCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
@@ -1585,6 +1599,7 @@ const ThreadUserInputResponseRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   requestId: ApprovalRequestId,
   answers: ProviderUserInputAnswers,
+  attachments: Schema.optional(Schema.Array(ChatAttachment)),
   createdAt: IsoDateTime,
 });
 

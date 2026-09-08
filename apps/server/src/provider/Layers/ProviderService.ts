@@ -1919,7 +1919,26 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         "provider.thread_id": input.threadId,
         "provider.request_id": input.requestId,
       });
-      yield* routed.adapter.respondToUserInput(routed.threadId, input.requestId, input.answers);
+      const attachments = input.attachments ?? [];
+      // Only Codex can steer images into the turn that is waiting on the
+      // answer. Failing here keeps the question open so the user can drop the
+      // images instead of having them vanish.
+      if (attachments.length > 0 && routed.adapter.provider !== "codex") {
+        return yield* new ProviderAdapterRequestError({
+          provider: routed.adapter.provider,
+          method: "item/tool/requestUserInput",
+          detail:
+            "This provider cannot take images with an answer yet. Answer in text and send the images as a follow-up message.",
+        });
+      }
+      yield* attachments.length > 0
+        ? routed.adapter.respondToUserInput(
+            routed.threadId,
+            input.requestId,
+            input.answers,
+            attachments,
+          )
+        : routed.adapter.respondToUserInput(routed.threadId, input.requestId, input.answers);
     }).pipe(
       withMetrics({
         counter: providerTurnsTotal,

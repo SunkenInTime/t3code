@@ -4,6 +4,7 @@ import {
 } from "@t3tools/client-runtime/pending-requests";
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
+import * as Schema from "effect/Schema";
 import { shallow } from "zustand/vanilla/shallow";
 import { isBackgroundTaskActivity } from "@t3tools/client-runtime/state/subagentRuntime";
 import {
@@ -18,6 +19,7 @@ import {
 } from "@t3tools/client-runtime/work-log/presentation";
 import { extractToolActivityPresentation } from "@t3tools/client-runtime/work-log/tool-presentation";
 import {
+  ChatAttachment as ChatAttachmentSchema,
   isToolLifecycleItemType,
   type AssetResource,
   type OrchestrationLatestTurn,
@@ -59,6 +61,8 @@ export interface WorkLogEntry {
   label: string;
   detail?: string;
   viewedImagePath?: string;
+  /** Images sent with a question answer, shown under the resolved row. */
+  attachments?: ReadonlyArray<ChatAttachment>;
   command?: string;
   rawCommand?: string;
   changedFiles?: ReadonlyArray<string>;
@@ -92,6 +96,13 @@ export interface WorkLogEntry {
 }
 
 const workLogCollapseKey = Symbol();
+
+const isChatAttachment = Schema.is(ChatAttachmentSchema);
+
+/** The provider echoes answer attachments on the resolved activity. */
+function extractAnsweredAttachments(value: unknown): ReadonlyArray<ChatAttachment> {
+  return Array.isArray(value) ? value.filter(isChatAttachment) : [];
+}
 
 interface DerivedWorkLogEntry extends WorkLogEntry {
   sourceActivityKind: OrchestrationThreadActivity["kind"];
@@ -559,6 +570,12 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   }
   if (viewedImagePath) {
     entry.viewedImagePath = viewedImagePath;
+  }
+  if (activity.kind === "user-input.resolved") {
+    const attachments = extractAnsweredAttachments(payload?.attachments);
+    if (attachments.length > 0) {
+      entry.attachments = attachments;
+    }
   }
   if (commandPreview.command) {
     entry.command = commandPreview.command;

@@ -8,6 +8,7 @@
  * @module CodexAdapterLive
  */
 import {
+  ChatAttachment,
   EventId,
   type CanonicalItemType,
   type CanonicalRequestType,
@@ -181,6 +182,11 @@ function readPayload<A>(
   const isPayload = Schema.is(schema);
   return isPayload(payload) ? payload : undefined;
 }
+
+/** Attachments the runtime adds to the answered notification alongside the Codex answers. */
+const UserInputAnsweredAttachments = Schema.Struct({
+  attachments: Schema.Array(ChatAttachment),
+});
 
 function trimText(value: string | undefined | null): string | undefined {
   const trimmed = value?.trim();
@@ -1899,12 +1905,14 @@ function mapToRuntimeEvents(
     if (!payload) {
       return [];
     }
+    const attachments = readPayload(UserInputAnsweredAttachments, event.payload)?.attachments;
     return [
       {
         ...runtimeEventBase(event, canonicalThreadId),
         type: "user-input.resolved",
         payload: {
           answers: toCanonicalUserInputAnswers(payload.answers),
+          ...(attachments && attachments.length > 0 ? { attachments } : {}),
         },
       },
     ];
@@ -2473,8 +2481,8 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     );
 
   const resolveAttachment = Effect.fn("resolveAttachment")(function* (
-    input: ProviderSendTurnInput,
-    attachment: NonNullable<ProviderSendTurnInput["attachments"]>[number],
+    attachment: ChatAttachment,
+    method: "turn/start" | "turn/steer" = "turn/start",
   ) {
     const attachmentPath = resolveAttachmentPath({
       attachmentsDir: serverConfig.attachmentsDir,
@@ -2483,7 +2491,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     if (!attachmentPath) {
       return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,
-        method: "turn/start",
+        method,
         detail: `Invalid attachment id '${attachment.id}'.`,
       });
     }
@@ -2495,7 +2503,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         (cause) =>
           new ProviderAdapterRequestError({
             provider: PROVIDER,
-            method: "turn/start",
+            method,
             detail: `Failed to read attachment file: ${cause.message}.`,
             cause,
           }),
@@ -2504,7 +2512,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     if (fileInfo.type !== "File") {
       return yield* new ProviderAdapterRequestError({
         provider: PROVIDER,
-        method: "turn/start",
+        method,
         detail: `Attachment '${attachment.id}' is not a regular file.`,
       });
     }
@@ -2520,7 +2528,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
     // path line ProviderService puts in the prompt.
     const codexAttachments = yield* Effect.forEach(
       (input.attachments ?? []).filter((attachment) => attachment.type === "image"),
-      (attachment) => resolveAttachment(input, attachment),
+      (attachment) => resolveAttachment(attachment),
       { concurrency: 1 },
     );
 
@@ -2649,19 +2657,32 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
       ),
     );
 
-  const respondToUserInput: CodexAdapterShape["respondToUserInput"] = (
-    threadId,
-    requestId,
-    answers,
-  ) =>
-    requireSession(threadId).pipe(
-      Effect.flatMap((session) => session.runtime.respondToUserInput(requestId, answers)),
-      Effect.mapError((cause) =>
-        cause._tag === "ProviderAdapterSessionNotFoundError"
-          ? cause
-          : mapCodexRuntimeError(threadId, "item/tool/requestUserInput", cause),
-      ),
+  const respondToUserInput: CodexAdapterShape["respondToUserInput"] = Effect.fn(
+    "respondToUserInput",
+  )(function* (threadId, requestId, answers, attachments) {
+    const session = yield* requireSession(threadId);
+    // Images only, as in sendTurn: the runtime steers them into the turn as
+    // local image inputs, which is not a channel for arbitrary files.
+    const codexAttachments = yield* Effect.forEach(
+      (attachments ?? []).filter((attachment) => attachment.type === "image"),
+      (attachment) =>
+        resolveAttachment(attachment, "turn/steer").pipe(
+          Effect.map((input) => ({ input, attachment })),
+        ),
+      { concurrency: 1 },
     );
+    yield* session.runtime
+      .respondToUserInput(
+        requestId,
+        answers,
+        codexAttachments.length > 0 ? codexAttachments : undefined,
+      )
+      .pipe(
+        Effect.mapError((cause) =>
+          mapCodexRuntimeError(threadId, "item/tool/requestUserInput", cause),
+        ),
+      );
+  });
 
   const writeNativeEvent = Effect.fnUntraced(function* (event: ProviderEvent) {
     if (!nativeEventLogger) {

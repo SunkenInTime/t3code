@@ -1280,7 +1280,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
                 messageId: MessageId.make(`async-answer:${command.requestId}`),
                 role: "user",
                 text: replies.join("\n\n"),
-                attachments: [],
+                attachments: command.attachments ?? [],
               },
             },
           ],
@@ -1301,6 +1301,9 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           requestId: command.requestId,
           answers: command.answers,
+          ...(command.attachments && command.attachments.length > 0
+            ? { attachments: command.attachments }
+            : {}),
           createdAt: command.createdAt,
         },
       };

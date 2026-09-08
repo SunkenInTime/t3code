@@ -233,12 +233,20 @@ describe("OrchestrationEngine", () => {
           await system.dispose();
           system = await createOrchestrationSystem(databasePath);
         }
+        const answerImage = {
+          type: "image" as const,
+          id: "answer-image-1",
+          name: "screenshot.png",
+          mimeType: "image/png",
+          sizeBytes: 6,
+        };
         const response = {
           type: "thread.user-input.respond" as const,
           commandId: CommandId.make("async-response"),
           threadId,
           requestId,
           answers: { "0": "pnpm", "1": "Example" },
+          attachments: [answerImage],
           createdAt: "2026-01-01T00:00:02.000Z",
         };
         await expect(
@@ -259,6 +267,7 @@ describe("OrchestrationEngine", () => {
         expect(userMessages?.[0]?.text).toBe(
           "Which package manager?\npnpm\n\nWhat should it be named?\nExample",
         );
+        expect(userMessages?.[0]?.attachments).toEqual([answerImage]);
         expect(
           after.threads[0]?.activities.find((activity) => activity.kind === "user-input.resolved")
             ?.payload,

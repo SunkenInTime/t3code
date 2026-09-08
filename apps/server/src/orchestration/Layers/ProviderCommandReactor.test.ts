@@ -3709,17 +3709,38 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
+    const answerImage = {
+      type: "image" as const,
+      id: "thread-1-00000000-0000-4000-8000-0000000000aa",
+      name: "screenshot.png",
+      mimeType: "image/png",
+      sizeBytes: 6,
+    };
     await Effect.runPromise(
-      harness.engine.dispatch({
-        type: "thread.user-input.respond",
-        commandId: CommandId.make("cmd-user-input-respond"),
-        threadId: ThreadId.make("thread-1"),
-        requestId: asApprovalRequestId("user-input-request-1"),
-        answers: {
-          sandbox_mode: "workspace-write",
-        },
-        createdAt: now,
-      }),
+      harness.engine
+        .dispatch({
+          type: "thread.user-input.respond",
+          commandId: CommandId.make("cmd-user-input-respond"),
+          threadId: ThreadId.make("thread-1"),
+          requestId: asApprovalRequestId("user-input-request-1"),
+          answers: {
+            sandbox_mode: "workspace-write",
+          },
+          createdAt: now,
+        })
+        .pipe(
+          Effect.andThen(
+            harness.engine.dispatch({
+              type: "thread.user-input.respond",
+              commandId: CommandId.make("cmd-user-input-respond-attachments"),
+              threadId: ThreadId.make("thread-1"),
+              requestId: asApprovalRequestId("user-input-request-2"),
+              answers: { "0": "yes" },
+              attachments: [answerImage],
+              createdAt: now,
+            }),
+          ),
+        ),
     );
 
     await harness.drain();
@@ -3729,6 +3750,13 @@ describe("ProviderCommandReactor", () => {
       answers: {
         sandbox_mode: "workspace-write",
       },
+    });
+    // Attachments ride along untouched; the provider decides how to deliver them.
+    expect(harness.respondToUserInput.mock.calls[1]?.[0]).toEqual({
+      threadId: "thread-1",
+      requestId: "user-input-request-2",
+      answers: { "0": "yes" },
+      attachments: [answerImage],
     });
   });
 

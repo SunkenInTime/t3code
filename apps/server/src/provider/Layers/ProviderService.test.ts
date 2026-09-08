@@ -13,6 +13,7 @@ import type {
   ProviderUploadFeedbackResult,
 } from "@t3tools/contracts";
 import {
+  type ChatAttachment,
   ASSISTANT_CITATION_MAX_TEXT_LENGTH,
   AssistantCitation,
   ApprovalRequestId,
@@ -216,6 +217,7 @@ function makeFakeCodexAdapter(
       _threadId: ThreadId,
       _requestId: string,
       _answers: Record<string, unknown>,
+      _attachments?: ReadonlyArray<ChatAttachment>,
     ): Effect.Effect<void, ProviderAdapterError> => Effect.void,
   );
 
@@ -1651,6 +1653,43 @@ routing.layer("ProviderServiceLive routing", (it) => {
     }),
   );
 
+  it.effect("rejects answer images for providers that cannot steer them", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-claude-answer-images");
+      yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make("claudeAgent"),
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        cwd: fixtureCwd("project"),
+        runtimeMode: "full-access",
+      });
+      routing.claude.respondToUserInput.mockClear();
+
+      const failure = yield* Effect.flip(
+        provider.respondToUserInput({
+          threadId,
+          requestId: asRequestId("req-user-input-claude"),
+          answers: { "0": "yes" },
+          attachments: [
+            {
+              type: "image",
+              id: "thread-claude-answer-images-00000000-0000-4000-8000-0000000000aa",
+              name: "screenshot.png",
+              mimeType: "image/png",
+              sizeBytes: 6,
+            },
+          ],
+        }),
+      );
+
+      assert.instanceOf(failure, ProviderAdapterRequestError);
+      assert.include(failure.detail, "cannot take images");
+      assert.equal(routing.claude.respondToUserInput.mock.calls.length, 0);
+      yield* provider.stopSession({ threadId });
+    }),
+  );
+
   it.effect("routes provider operations and rollback conversation", () =>
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
@@ -1701,6 +1740,24 @@ routing.layer("ProviderServiceLive routing", (it) => {
             sandbox_mode: "workspace-write",
           },
         ],
+      ]);
+
+      const answerImage = {
+        type: "image" as const,
+        id: "thread-1-00000000-0000-4000-8000-0000000000aa",
+        name: "screenshot.png",
+        mimeType: "image/png",
+        sizeBytes: 6,
+      };
+      routing.codex.respondToUserInput.mockClear();
+      yield* provider.respondToUserInput({
+        threadId: session.threadId,
+        requestId: asRequestId("req-user-input-2"),
+        answers: { "0": "yes" },
+        attachments: [answerImage],
+      });
+      assert.deepEqual(routing.codex.respondToUserInput.mock.calls, [
+        [session.threadId, asRequestId("req-user-input-2"), { "0": "yes" }, [answerImage]],
       ]);
 
       yield* provider.rollbackConversation({

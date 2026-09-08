@@ -8,6 +8,7 @@
  * @module ProviderAdapter
  */
 import type {
+  ChatAttachment,
   ApprovalRequestId,
   ProviderApprovalDecision,
   ProviderDriverKind,
@@ -103,12 +104,15 @@ export interface ProviderAdapterShape<TError> {
   ) => Effect.Effect<void, TError>;
 
   /**
-   * Respond to a structured user-input request.
+   * Respond to a structured user-input request. Attachments accompany the
+   * answers; an adapter that cannot deliver them to a running turn must fail
+   * rather than drop them silently.
    */
   readonly respondToUserInput: (
     threadId: ThreadId,
     requestId: ApprovalRequestId,
     answers: ProviderUserInputAnswers,
+    attachments?: ReadonlyArray<ChatAttachment>,
   ) => Effect.Effect<void, TError>;
 
   /**

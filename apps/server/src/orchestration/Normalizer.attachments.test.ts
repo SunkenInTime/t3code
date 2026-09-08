@@ -5,6 +5,7 @@ import * as NodePath from "node:path";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import {
+  ApprovalRequestId,
   type ClientOrchestrationCommand,
   CommandId,
   MessageId,
@@ -48,6 +49,29 @@ function turnStartCommand(input: {
     },
     runtimeMode: "full-access",
     interactionMode: "default",
+    createdAt: "2026-08-01T00:00:00.000Z",
+  };
+}
+
+function userInputRespondCommand(input: {
+  readonly attachments?: ReadonlyArray<{ readonly id: string; readonly sizeBytes: number }>;
+}): ClientOrchestrationCommand {
+  return {
+    type: "thread.user-input.respond",
+    commandId: CommandId.make("command-2"),
+    threadId: ThreadId.make("thread-1"),
+    requestId: ApprovalRequestId.make("request-1"),
+    answers: { "0": "yes" },
+    ...(input.attachments
+      ? {
+          attachments: input.attachments.map((attachment) => ({
+            type: "image" as const,
+            name: "screenshot.png",
+            mimeType: "image/png",
+            ...attachment,
+          })),
+        }
+      : {}),
     createdAt: "2026-08-01T00:00:00.000Z",
   };
 }
@@ -355,6 +379,66 @@ describe("normalizeDispatchCommand attachments", () => {
         },
       }).pipe(Effect.flip);
       expect(mismatchedType.message).toContain("attachment type");
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("claims uploaded images for a question answer", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const bytes = Buffer.from("pixels");
+      const pendingPath = NodePath.join(config.attachmentsDir, `pending-${attachmentUuid}.png`);
+      NodeFS.writeFileSync(pendingPath, bytes);
+
+      const normalized = yield* normalizeDispatchCommand(
+        userInputRespondCommand({
+          attachments: [{ id: `pending-${attachmentUuid}`, sizeBytes: bytes.byteLength }],
+        }),
+      );
+      if (normalized.type !== "thread.user-input.respond") {
+        throw new Error("Expected a thread.user-input.respond command.");
+      }
+
+      const attachment = normalized.attachments?.[0];
+      expect(attachment?.id.startsWith("thread-1-")).toBe(true);
+      expect(
+        NodeFS.readFileSync(NodePath.join(config.attachmentsDir, `${attachment!.id}.png`)),
+      ).toEqual(bytes);
+      expect(NodeFS.existsSync(pendingPath)).toBe(true);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("leaves an answer without attachments untouched", () =>
+    Effect.gen(function* () {
+      const normalized = yield* normalizeDispatchCommand(userInputRespondCommand({}));
+      if (normalized.type !== "thread.user-input.respond") {
+        throw new Error("Expected a thread.user-input.respond command.");
+      }
+      expect("attachments" in normalized).toBe(false);
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.effect("removes a claimed answer copy when the answer fails to dispatch", () =>
+    Effect.gen(function* () {
+      const config = yield* ServerConfig.ServerConfig;
+      const pendingPath = NodePath.join(config.attachmentsDir, `pending-${attachmentUuid}.png`);
+      NodeFS.writeFileSync(pendingPath, Buffer.from("pixels"));
+      const command = userInputRespondCommand({
+        attachments: [{ id: `pending-${attachmentUuid}`, sizeBytes: 6 }],
+      });
+      const normalized = yield* normalizeDispatchCommand(command);
+      if (normalized.type !== "thread.user-input.respond") {
+        throw new Error("Expected a thread.user-input.respond command.");
+      }
+      const claimedPath = NodePath.join(
+        config.attachmentsDir,
+        `${normalized.attachments![0]!.id}.png`,
+      );
+      expect(NodeFS.existsSync(claimedPath)).toBe(true);
+
+      yield* cleanupFailedUploadedAttachments(command, normalized);
+
+      expect(NodeFS.existsSync(claimedPath)).toBe(false);
+      expect(NodeFS.existsSync(pendingPath)).toBe(true);
     }).pipe(Effect.provide(testLayer)),
   );
 });
