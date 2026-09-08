@@ -2457,7 +2457,10 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               // entry and a slow first lookup could never warm the cache. Repeat
               // events share the in-flight lookup, and a burst of new apps is
               // capped rather than allowed to queue fibers without limit.
-              const lookupKey = JSON.stringify(icon.app);
+              const lookupKey =
+                icon.app._tag === "app-id"
+                  ? `app-id:${icon.app.appId}`
+                  : `display-name:${icon.app.displayName}`;
               let lookup = pendingApplicationLookups.get(lookupKey);
               if (!lookup) {
                 if (pendingApplicationLookups.size >= MAX_PENDING_APPLICATION_LOOKUPS) continue;

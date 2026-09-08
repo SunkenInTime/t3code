@@ -1522,10 +1522,8 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       }
       const lookup = vi.spyOn(spawner, "string").mockImplementation((child) =>
         Effect.gen(function* () {
-          const reference = JSON.parse(
-            (child._tag === "StandardCommand" ? child.args.at(-1) : undefined) ?? "{}",
-          ) as { appId?: string };
-          const id = reference.appId ?? "";
+          const reference = child._tag === "StandardCommand" ? (child.args.at(-1) ?? "") : "";
+          const id = [...started.keys()].find((candidate) => reference.includes(candidate)) ?? "";
           yield* Deferred.succeed(started.get(id)!, undefined);
           yield* Deferred.await(gates.get(id)!);
           return "null";
