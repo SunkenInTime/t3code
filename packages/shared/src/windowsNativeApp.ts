@@ -31,10 +31,10 @@ if ($request._tag -eq 'path') {
     $shell = New-Object -ComObject Shell.Application
     $apps = $shell.Namespace('shell:AppsFolder')
     $installed = $apps.Items() | Where-Object {
-      $_.Path -eq $reference -or $_.Name -eq $reference
+      $_.Path -eq $reference -or $_.Name -eq $reference -or $_.ExtendedProperty('System.AppUserModel.ID') -eq $reference
     } | Select-Object -First 1
     if ($installed) {
-      $path = 'shell:AppsFolder\' + $installed.Path
+      $path = if ($installed.IsFileSystem) { $installed.Path } else { 'shell:AppsFolder\' + $installed.Path }
       $name = $installed.Name
     }
   }
