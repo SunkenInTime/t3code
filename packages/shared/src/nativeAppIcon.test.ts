@@ -105,22 +105,32 @@ it.effect("preserves Windows executable names and packaged app IDs as lookup dat
 
 it.effect.skipIf(
   HostProcessPlatform.defaultValue() !== "darwin" && HostProcessPlatform.defaultValue() !== "win32",
-)("renders a native app icon without Electron at desktop and tool-activity sizes", () =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
-    const directory = yield* fs.makeTempDirectoryScoped();
-    const app =
-      HostProcessPlatform.defaultValue() === "darwin"
-        ? ({ _tag: "path", path: "/System/Library/CoreServices/Finder.app" } as const)
-        : ({ _tag: "path", path: `${process.env.SYSTEMROOT}\\System32\\cmd.exe` } as const);
-    for (const size of [64, 128]) {
-      const resolver = yield* makeNativeAppIconResolver(directory, size);
-      const icon = yield* resolver.resolve(app);
-      expect(icon).not.toBeNull();
-      expect(readImageDimensions(yield* fs.readFile(icon!))).toEqual({
-        width: size,
-        height: size,
+)(
+  "renders a native app icon without Electron at desktop and tool-activity sizes",
+  () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const directory = yield* fs.makeTempDirectoryScoped();
+      const app =
+        HostProcessPlatform.defaultValue() === "darwin"
+          ? ({ _tag: "path", path: "/System/Library/CoreServices/Finder.app" } as const)
+          : ({ _tag: "path", path: `${process.env.SYSTEMROOT}\\System32\\cmd.exe` } as const);
+      const byId = yield* makeNativeAppIconResolver(directory);
+      const resolved = yield* byId.resolve({
+        _tag: "app-id",
+        appId: HostProcessPlatform.defaultValue() === "darwin" ? "com.apple.finder" : "cmd.exe",
       });
-    }
-  }).pipe(Effect.provide(NodeServices.layer)),
+      expect(resolved).not.toBeNull();
+      expect(readImageDimensions(yield* fs.readFile(resolved!))).toEqual({ width: 64, height: 64 });
+      for (const size of [64, 128]) {
+        const resolver = yield* makeNativeAppIconResolver(directory, size);
+        const icon = yield* resolver.resolve(app);
+        expect(icon).not.toBeNull();
+        expect(readImageDimensions(yield* fs.readFile(icon!))).toEqual({
+          width: size,
+          height: size,
+        });
+      }
+    }).pipe(Effect.provide(NodeServices.layer)),
+  { timeout: 30_000 },
 );

@@ -1,6 +1,7 @@
 // Keep references in the child environment: PowerShell never evaluates app names as code.
 const prelude = String.raw`
 $ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
 [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
 $request = $env:T3_NATIVE_APP_INPUT | ConvertFrom-Json
 `;
@@ -19,9 +20,13 @@ if ($request._tag -eq 'path') {
   $reference = if ($request._tag -eq 'app-id') { $request.appId } else { $request.displayName }
   $processName = [System.IO.Path]::GetFileNameWithoutExtension($reference)
   $running = Get-Process | Where-Object {
-    $_.ProcessName -eq $processName -or $_.Description -eq $reference
+    $_.ProcessName -eq $processName -or ($request._tag -eq 'display-name' -and $_.Description -eq $reference)
   } | Where-Object { $_.Path } | Select-Object -First 1
   if ($running) { $path = $running.Path }
+  if (!$path -and $reference -notmatch '[/\\:]') {
+    $command = Get-Command -Name ([System.Management.Automation.WildcardPattern]::Escape($reference)) -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command) { $path = $command.Path }
+  }
   if (!$path) {
     $shell = New-Object -ComObject Shell.Application
     $apps = $shell.Namespace('shell:AppsFolder')
@@ -33,10 +38,7 @@ if ($request._tag -eq 'path') {
       $name = $installed.Name
     }
   }
-  if (!$path -and $reference -notmatch '[/\\:]') {
-    $command = Get-Command -Name ([System.Management.Automation.WildcardPattern]::Escape($reference)) -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($command) { $path = $command.Path }
-  }
+
 }
 if (!$path) { 'null'; exit }
 if (!$name) {
@@ -53,8 +55,8 @@ if (!$name) {
 export const windowsIconScript =
   prelude +
   String.raw`
-Add-Type -AssemblyName PresentationCore, WindowsBase
-Add-Type -ReferencedAssemblies PresentationCore, WindowsBase -TypeDefinition @'
+Add-Type -AssemblyName PresentationCore, WindowsBase, System.Xaml
+Add-Type -ReferencedAssemblies PresentationCore, WindowsBase, System.Xaml -TypeDefinition @'
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
