@@ -3,6 +3,8 @@ import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as PlatformError from "effect/PlatformError";
+import * as TestClock from "effect/testing/TestClock";
 import * as Schema from "effect/Schema";
 import * as Sink from "effect/Sink";
 import * as Stream from "effect/Stream";
@@ -20,6 +22,9 @@ const decodeRenderRequest = Schema.decodeUnknownSync(
       size: Schema.Number,
     }),
   ),
+);
+const decodeOptionalRenderRequest = Schema.decodeUnknownSync(
+  Schema.fromJsonString(Schema.Struct({ outputPath: Schema.optional(Schema.String) })),
 );
 const decodeInput = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
 
@@ -101,6 +106,86 @@ it.effect("preserves Windows executable names and packaged app IDs as lookup dat
     }
     expect(references).toHaveLength(2);
   }),
+);
+
+it.effect("retries missing applications and their icons after a minute", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const directory = yield* fs.makeTempDirectoryScoped();
+    let lookups = 0;
+    const spawner = ChildProcessSpawner.make((command) =>
+      Effect.gen(function* () {
+        if (command._tag !== "StandardCommand") return yield* Effect.die("Unexpected pipeline");
+        const input = decodeOptionalRenderRequest(command.options.env!.T3_NATIVE_APP_INPUT!);
+        if (input.outputPath) {
+          yield* fs.writeFileString(input.outputPath, "PNG");
+          return processHandle();
+        }
+        lookups++;
+        return processHandle(
+          lookups === 1 ? "null" : '{"path":"Review.exe","displayName":"Review","version":"1"}',
+        );
+      }),
+    );
+    const resolver = yield* makeNativeAppIconResolver(directory).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(HostProcessPlatform, "win32"),
+    );
+    const resolve = (app: Parameters<typeof resolver.resolve>[0]) =>
+      resolver
+        .resolve(app)
+        .pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+    const app = { _tag: "app-id", appId: "review.exe" } as const;
+    expect(yield* resolve(app)).toBeNull();
+    expect(yield* resolve(app)).toBeNull();
+    expect(lookups).toBe(1);
+    yield* TestClock.adjust("61 seconds");
+    expect(yield* resolve(app)).not.toBeNull();
+    expect(lookups).toBe(2);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
+it.effect("backs off failed renders and retries after a minute", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fs.makeTempDirectoryScoped();
+    const executable = path.join(directory, "Review.exe");
+    yield* fs.writeFileString(executable, "executable");
+    let attempts = 0;
+    const spawner = ChildProcessSpawner.make((command) =>
+      Effect.gen(function* () {
+        attempts++;
+        if (attempts === 1)
+          return yield* Effect.fail(
+            PlatformError.systemError({
+              _tag: "PermissionDenied",
+              module: "ChildProcessSpawner",
+              method: "spawn",
+            }),
+          );
+        if (command._tag !== "StandardCommand") return yield* Effect.die("Unexpected pipeline");
+        const request = decodeRenderRequest(command.options.env!.T3_NATIVE_APP_INPUT!);
+        yield* fs.writeFileString(request.outputPath, "PNG");
+        return processHandle();
+      }),
+    );
+    const resolver = yield* makeNativeAppIconResolver(path.join(directory, "icons")).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(HostProcessPlatform, "win32"),
+    );
+    const resolve = (app: Parameters<typeof resolver.resolve>[0]) =>
+      resolver
+        .resolve(app)
+        .pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+    const app = { _tag: "path", path: executable } as const;
+    expect(yield* resolve(app)).toBeNull();
+    expect(yield* resolve(app)).toBeNull();
+    expect(attempts).toBe(1);
+    yield* TestClock.adjust("61 seconds");
+    expect(yield* resolve(app)).not.toBeNull();
+    expect(attempts).toBe(2);
+  }).pipe(Effect.provide(NodeServices.layer)),
 );
 
 it.effect.skipIf(

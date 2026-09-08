@@ -12,7 +12,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as Semaphore from "effect/Semaphore";
 import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import { HostProcessPlatform } from "./hostProcess.ts";
+import * as HostProcess from "./hostProcess.ts";
 
 import { windowsApplicationScript, windowsIconScript } from "./windowsNativeApp.ts";
 
@@ -151,7 +151,7 @@ const decodeApplication = Schema.decodeUnknownOption(
 /** Each adapter caches names; asset requests cache the same lookup independently. */
 export const makeApplicationResolver = Effect.fn("NativeAppIconResolver.makeApplicationResolver")(
   function* () {
-    const platform = yield* HostProcessPlatform;
+    const platform = yield* HostProcess.HostProcessPlatform;
     const semaphore = yield* Semaphore.make(2);
     const cache = yield* Cache.makeWith(
       (key: string) =>
@@ -170,7 +170,7 @@ export const makeApplicationResolver = Effect.fn("NativeAppIconResolver.makeAppl
       {
         capacity: RESOLUTION_CACHE_MAX_ENTRIES,
         timeToLive: Exit.match({
-          onSuccess: () => RESOLUTION_CACHE_TTL,
+          onSuccess: (value) => (value === null ? Duration.minutes(1) : RESOLUTION_CACHE_TTL),
           onFailure: () => Duration.minutes(1),
         }),
       },
@@ -189,7 +189,7 @@ export const makeNativeAppIconResolver = Effect.fn("NativeAppIconResolver.make")
   const fileSystem = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
   const resolveApplication = yield* makeApplicationResolver();
-  const hostPlatform = yield* HostProcessPlatform;
+  const hostPlatform = yield* HostProcess.HostProcessPlatform;
   const resolutionSemaphore = yield* Semaphore.make(2);
   const resolutionCache: Cache.Cache<
     string,
@@ -250,8 +250,8 @@ export const makeNativeAppIconResolver = Effect.fn("NativeAppIconResolver.make")
     {
       capacity: RESOLUTION_CACHE_MAX_ENTRIES,
       timeToLive: Exit.match({
-        onSuccess: () => RESOLUTION_CACHE_TTL,
-        onFailure: () => Duration.zero,
+        onSuccess: (value) => (value === null ? Duration.minutes(1) : RESOLUTION_CACHE_TTL),
+        onFailure: () => Duration.minutes(1),
       }),
     },
   );

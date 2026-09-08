@@ -21,7 +21,7 @@ import {
   type DesktopSnapShotId,
 } from "@t3tools/contracts";
 import { makeNativeAppIconResolver } from "@t3tools/shared/nativeAppIcon";
-import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import * as HostProcess from "@t3tools/shared/hostProcess";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
@@ -731,7 +731,7 @@ export const make = Effect.gen(function* () {
   const nativeIcons = yield* makeNativeAppIconResolver(
     path.join(environment.stateDir, "native-app-icons"),
     128,
-  ).pipe(Effect.provideService(HostProcessPlatform, environment.platform));
+  ).pipe(Effect.provideService(HostProcess.HostProcessPlatform, environment.platform));
   const linuxAppId = environment.linuxDesktopEntryName.replace(/\.desktop$/, "");
   let shortcutVerified = false;
   const gnomeSetupPaths = {

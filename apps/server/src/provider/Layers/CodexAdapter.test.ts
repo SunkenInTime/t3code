@@ -24,6 +24,7 @@ import { expect, it, vi } from "@effect/vitest";
 
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as Deferred from "effect/Deferred";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -1361,6 +1362,71 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
           lookup.mockRestore();
         }
       }),
+  );
+
+  it.effect("emits native activity with fallback names when name lookup exceeds its budget", () =>
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const entered = yield* Deferred.make<void>();
+      const lookup = vi
+        .spyOn(spawner, "string")
+        .mockReturnValue(Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)));
+      try {
+        const { adapter, runtime } = yield* startLifecycleRuntime();
+        const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+          Effect.forkChild,
+        );
+        for (const [index, surface] of [
+          { kind: "computerUse", app: { kind: "appId", appId: "dev.slow.app" } },
+          { kind: "computerUse" },
+        ].entries()) {
+          yield* runtime.emit({
+            id: asEventId(`evt-native-name-${index}`),
+            kind: "notification",
+            provider: ProviderDriverKind.make("codex"),
+            createdAt: "2026-01-01T00:00:02.000Z",
+            method: "item/completed",
+            threadId: asThreadId("thread-1"),
+            turnId: asTurnId("turn-1"),
+            itemId: asItemId(`native-name-${index}`),
+            payload: {
+              completedAtMs: 1_778_000_002_000,
+              threadId: "thread-1",
+              turnId: "turn-1",
+              item: {
+                type: "mcpToolCall",
+                id: `native-name-${index}`,
+                server: "node_repl",
+                tool: "js",
+                arguments: index === 0 ? { title: "Inspect Review" } : { app: "Review" },
+                durationMs: 12,
+                error: null,
+                result: { _meta: { "codex/toolSurface": surface }, content: [] },
+                status: "completed",
+              },
+            },
+          });
+        }
+        yield* Deferred.await(entered);
+        yield* TestClock.adjust("250 millis");
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+        expect(events.map((event) => event.payload)).toMatchObject([
+          {
+            toolSource: { name: "Computer Use", key: "native-app:dev.slow.app" },
+            toolIcon: { _tag: "native-app", app: { _tag: "app-id", appId: "dev.slow.app" } },
+          },
+          {
+            toolSource: { name: "Review" },
+            toolIcon: {
+              _tag: "native-app",
+              app: { _tag: "display-name", displayName: "Review" },
+            },
+          },
+        ]);
+      } finally {
+        lookup.mockRestore();
+      }
+    }),
   );
 
   it.effect("presents browser and computer-use calls with Codex-style titles and sources", () =>

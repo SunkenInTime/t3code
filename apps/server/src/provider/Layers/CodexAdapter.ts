@@ -2444,7 +2444,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               if (source?.kind !== "computer" || source.name !== "Computer Use") continue;
               const icon = runtimeEvent.payload.toolIcon ?? source.icon;
               if (icon?._tag !== "native-app") continue;
-              const application = yield* resolveApplication(icon.app);
+              // Name enrichment must not hold up the serialized provider event stream.
+              const application = yield* resolveApplication(icon.app).pipe(
+                Effect.timeout("250 millis"),
+                Effect.orElseSucceed(() => null),
+              );
               const displayName = normalizedDisplayName(application?.displayName);
               if (displayName)
                 mappedEvents[index] = {
