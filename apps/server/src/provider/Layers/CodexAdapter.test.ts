@@ -1497,9 +1497,9 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         yield* Deferred.succeed(gate, undefined);
         yield* emit(1);
         const events = Array.from(yield* Fiber.join(eventsFiber));
-        expect(events.map((event) => event.payload.toolSource?.name)).toEqual([
-          "Computer Use",
-          "Warm",
+        expect(events.map((event) => event.payload)).toMatchObject([
+          { toolSource: { name: "Computer Use", key: "native-app:dev.slow-warm.app" } },
+          { toolSource: { name: "Warm", key: "native-app:dev.slow-warm.app" } },
         ]);
         expect(lookup).toHaveBeenCalledTimes(1);
       } finally {
