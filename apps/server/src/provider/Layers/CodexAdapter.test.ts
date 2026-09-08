@@ -1368,9 +1368,17 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const entered = yield* Deferred.make<void>();
+      // Slow lookups outlive the event they were started for, and the adapter is
+      // shared across this suite, so release them instead of leaving them pending.
+      const gate = yield* Deferred.make<void>();
       const lookup = vi
         .spyOn(spawner, "string")
-        .mockReturnValue(Deferred.succeed(entered, undefined).pipe(Effect.andThen(Effect.never)));
+        .mockReturnValue(
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(gate)),
+            Effect.as("null"),
+          ),
+        );
       try {
         const { adapter, runtime } = yield* startLifecycleRuntime();
         const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
@@ -1423,6 +1431,77 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
             },
           },
         ]);
+      } finally {
+        yield* Deferred.succeed(gate, undefined);
+        lookup.mockRestore();
+      }
+    }),
+  );
+
+  it.effect("keeps a slow name lookup running so it enriches later events", () =>
+    Effect.gen(function* () {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const entered = yield* Deferred.make<void>();
+      const gate = yield* Deferred.make<void>();
+      const lookup = vi
+        .spyOn(spawner, "string")
+        .mockReturnValue(
+          Deferred.succeed(entered, undefined).pipe(
+            Effect.andThen(Deferred.await(gate)),
+            Effect.as('{"path":"/Applications/Warm.app","displayName":"Warm","version":"1"}'),
+          ),
+        );
+      try {
+        const { adapter, runtime } = yield* startLifecycleRuntime();
+        const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+          Effect.forkChild,
+        );
+        const emit = (index: number) =>
+          runtime.emit({
+            id: asEventId(`evt-native-warm-${index}`),
+            kind: "notification",
+            provider: ProviderDriverKind.make("codex"),
+            createdAt: "2026-01-01T00:00:02.000Z",
+            method: "item/completed",
+            threadId: asThreadId("thread-1"),
+            turnId: asTurnId("turn-1"),
+            itemId: asItemId(`native-warm-${index}`),
+            payload: {
+              completedAtMs: 1_778_000_002_000,
+              threadId: "thread-1",
+              turnId: "turn-1",
+              item: {
+                type: "mcpToolCall",
+                id: `native-warm-${index}`,
+                server: "node_repl",
+                tool: "js",
+                arguments: {},
+                durationMs: 12,
+                error: null,
+                result: {
+                  _meta: {
+                    "codex/toolSurface": {
+                      kind: "computerUse",
+                      app: { kind: "appId", appId: "dev.slow-warm.app" },
+                    },
+                  },
+                  content: [],
+                },
+                status: "completed",
+              },
+            },
+          });
+        yield* emit(0);
+        yield* Deferred.await(entered);
+        yield* TestClock.adjust("250 millis");
+        yield* Deferred.succeed(gate, undefined);
+        yield* emit(1);
+        const events = Array.from(yield* Fiber.join(eventsFiber));
+        expect(events.map((event) => event.payload.toolSource?.name)).toEqual([
+          "Computer Use",
+          "Warm",
+        ]);
+        expect(lookup).toHaveBeenCalledTimes(1);
       } finally {
         lookup.mockRestore();
       }

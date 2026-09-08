@@ -19,9 +19,10 @@ if ($request._tag -eq 'path') {
 } else {
   $reference = if ($request._tag -eq 'app-id') { $request.appId } else { $request.displayName }
   $processName = [System.IO.Path]::GetFileNameWithoutExtension($reference)
-  $running = Get-Process | Where-Object {
+  # Protected processes refuse module access; skip them instead of aborting the lookup.
+  $running = Get-Process -ErrorAction SilentlyContinue | Where-Object {
     $_.ProcessName -eq $processName -or ($request._tag -eq 'display-name' -and $_.Description -eq $reference)
-  } | Where-Object { $_.Path } | Select-Object -First 1
+  } | Where-Object { $(try { $_.Path } catch { $null }) } | Select-Object -First 1
   if ($running) { $path = $running.Path }
   if (!$path -and $reference -notmatch '[/\\:]') {
     $command = Get-Command -Name ([System.Management.Automation.WildcardPattern]::Escape($reference)) -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1

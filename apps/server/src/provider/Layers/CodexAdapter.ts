@@ -2444,8 +2444,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               if (source?.kind !== "computer" || source.name !== "Computer Use") continue;
               const icon = runtimeEvent.payload.toolIcon ?? source.icon;
               if (icon?._tag !== "native-app") continue;
-              // Name enrichment must not hold up the serialized provider event stream.
-              const application = yield* resolveApplication(icon.app).pipe(
+              // Name enrichment must not hold up the serialized provider event
+              // stream, so only the wait is bounded. The lookup keeps running in
+              // the session scope; interrupting it would evict the pending cache
+              // entry and a slow first lookup could never warm the cache.
+              const lookup = yield* resolveApplication(icon.app).pipe(Effect.forkIn(sessionScope));
+              const application = yield* Fiber.join(lookup).pipe(
                 Effect.timeout("250 millis"),
                 Effect.orElseSucceed(() => null),
               );
