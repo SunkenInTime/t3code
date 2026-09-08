@@ -47,7 +47,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
-import { makeApplicationResolver } from "../../assets/NativeAppIconResolver.ts";
+import { makeApplicationResolver } from "@t3tools/shared/nativeAppIcon";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 
 import {

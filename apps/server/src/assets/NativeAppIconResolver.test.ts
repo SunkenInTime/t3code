@@ -10,6 +10,8 @@ import * as TestClock from "effect/testing/TestClock";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
+import { makeApplicationResolver } from "@t3tools/shared/nativeAppIcon";
+
 import * as ServerConfig from "../config.ts";
 import * as NativeAppIconResolver from "./NativeAppIconResolver.ts";
 
@@ -51,7 +53,7 @@ describe("resolveNativeAppIcon", () => {
               );
         }),
       );
-      const resolve = yield* NativeAppIconResolver.makeApplicationResolver().pipe(
+      const resolve = yield* makeApplicationResolver().pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(HostProcessPlatform, "darwin"),
       );
@@ -124,7 +126,7 @@ describe("resolveNativeAppIcon", () => {
         );
         const app = { _tag: "app-id", appId: "dev.review.app" } as const;
         const program = Effect.gen(function* () {
-          const resolveApplication = yield* NativeAppIconResolver.makeApplicationResolver();
+          const resolveApplication = yield* makeApplicationResolver();
           expect(yield* resolveApplication(app)).toEqual(application);
           expect(yield* resolveApplication(app)).toEqual(application);
           expect(lookups).toBe(1);
@@ -152,7 +154,7 @@ describe("resolveNativeAppIcon", () => {
   it.effect("does not run macOS commands on other hosts", () =>
     Effect.gen(function* () {
       const spawner = ChildProcessSpawner.make(() => Effect.die("unexpected native lookup"));
-      const resolve = yield* NativeAppIconResolver.makeApplicationResolver().pipe(
+      const resolve = yield* makeApplicationResolver().pipe(
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
         Effect.provideService(HostProcessPlatform, "linux"),
       );
