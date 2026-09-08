@@ -20,7 +20,7 @@ import {
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { it, vi } from "@effect/vitest";
+import { expect, it, vi } from "@effect/vitest";
 
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -46,6 +46,8 @@ import {
   type CodexSessionRuntimeShape,
   type CodexThreadSnapshot,
 } from "./CodexSessionRuntime.ts";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
+import { ChildProcessSpawner } from "effect/unstable/process";
 import { makeCodexAdapter } from "./CodexAdapter.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
@@ -582,6 +584,7 @@ const lifecycleLayer = it.layer(
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(providerSessionDirectoryTestLayer),
     Layer.provideMerge(NodeServices.layer),
+    Layer.provideMerge(Layer.succeed(HostProcessPlatform, "darwin")),
   ),
 );
 
@@ -1289,6 +1292,74 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
         },
       });
     }),
+  );
+
+  it.effect(
+    "resolves arbitrary native app names and keeps icons when only an argument names the app",
+    () =>
+      Effect.gen(function* () {
+        const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+        const lookup = vi
+          .spyOn(spawner, "string")
+          .mockReturnValue(
+            Effect.succeed(
+              '{"path":"/Applications/Review.app","displayName":"Review","version":"1"}',
+            ),
+          );
+        try {
+          const { adapter, runtime } = yield* startLifecycleRuntime();
+          const eventsFiber = yield* Stream.runCollect(Stream.take(adapter.streamEvents, 2)).pipe(
+            Effect.forkChild,
+          );
+          for (const [index, surface] of [
+            { kind: "computerUse", app: { kind: "appId", appId: "dev.review.app" } },
+            { kind: "computerUse" },
+          ].entries()) {
+            yield* runtime.emit({
+              id: asEventId(`evt-native-name-${index}`),
+              kind: "notification",
+              provider: ProviderDriverKind.make("codex"),
+              createdAt: "2026-01-01T00:00:02.000Z",
+              method: "item/completed",
+              threadId: asThreadId("thread-1"),
+              turnId: asTurnId("turn-1"),
+              itemId: asItemId(`native-name-${index}`),
+              payload: {
+                completedAtMs: 1_778_000_002_000,
+                threadId: "thread-1",
+                turnId: "turn-1",
+                item: {
+                  type: "mcpToolCall",
+                  id: `native-name-${index}`,
+                  server: "node_repl",
+                  tool: "js",
+                  arguments: index === 0 ? { title: "Inspect Review" } : { app: "Review" },
+                  durationMs: 12,
+                  error: null,
+                  result: { _meta: { "codex/toolSurface": surface }, content: [] },
+                  status: "completed",
+                },
+              },
+            });
+          }
+          const events = Array.from(yield* Fiber.join(eventsFiber));
+          expect(events.map((event) => event.payload)).toMatchObject([
+            {
+              toolSource: { name: "Review", key: "native-app:dev.review.app" },
+              toolIcon: { _tag: "native-app", app: { _tag: "app-id", appId: "dev.review.app" } },
+            },
+            {
+              toolSource: { name: "Review" },
+              toolIcon: {
+                _tag: "native-app",
+                app: { _tag: "display-name", displayName: "Review" },
+              },
+            },
+          ]);
+        } finally {
+          lookup.mockRestore();
+        }
+      }),
   );
 
   it.effect("presents browser and computer-use calls with Codex-style titles and sources", () =>

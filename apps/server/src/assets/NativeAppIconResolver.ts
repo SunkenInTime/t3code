@@ -3,7 +3,6 @@ import type { ToolActivityNativeAppReference } from "@t3tools/contracts";
 import * as Cache from "effect/Cache";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
-import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Exit from "effect/Exit";
@@ -13,6 +12,7 @@ import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Semaphore from "effect/Semaphore";
+import * as Schema from "effect/Schema";
 import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 
@@ -62,153 +62,121 @@ const commandOutput = Effect.fn("NativeAppIconResolver.commandOutput")(function*
     .pipe(Effect.timeout(COMMAND_TIMEOUT));
 });
 
-const plistValue = Effect.fn("NativeAppIconResolver.plistValue")(function* (
-  infoPlistPath: string,
-  key: string,
-) {
-  return yield* commandOutput("/usr/bin/plutil", [
-    "-extract",
-    key,
-    "raw",
-    "-o",
-    "-",
-    infoPlistPath,
-  ]).pipe(
-    Effect.map((value) => value.trim()),
-    Effect.orElseSucceed(() => ""),
-  );
-});
-
-function escapeSpotlightString(value: string): string {
-  return value.replace(/([\\'*?])/gu, "\\$1");
-}
-
-function containsControlCharacter(value: string): boolean {
-  return [...value].some((character) => {
-    const codePoint = character.codePointAt(0) ?? 0;
-    return codePoint <= 31 || codePoint === 127;
-  });
-}
-
-const resolveApplicationPath = Effect.fn("NativeAppIconResolver.resolveApplicationPath")(function* (
-  app: ToolActivityNativeAppReference,
-) {
-  const path = yield* Path.Path;
-  const query =
-    app._tag === "app-id"
-      ? `kMDItemCFBundleIdentifier == '${app.appId}'`
-      : `kMDItemContentType == 'com.apple.application-bundle' && kMDItemDisplayName == '${escapeSpotlightString(app.displayName)}'`;
-  const spotlightOutput = yield* commandOutput("/usr/bin/mdfind", [query]);
-  const candidates = spotlightOutput
-    .split(/\r?\n/u)
-    .map((value) => value.trim())
-    .filter((value) => value.endsWith(".app"));
-  const matchingCandidates =
-    app._tag === "app-id"
-      ? candidates
-      : candidates.filter(
-          (value) =>
-            path.basename(value, ".app").toLocaleLowerCase() ===
-            app.displayName.toLocaleLowerCase(),
-        );
-  const rankedCandidates = matchingCandidates.length > 0 ? matchingCandidates : candidates;
-  let mostRecentlyUsed: { readonly path: string; readonly lastUsed: string } | null = null;
-  for (const candidate of rankedCandidates) {
-    const lastUsed = yield* commandOutput("/usr/bin/mdls", [
-      "-raw",
-      "-name",
-      "kMDItemLastUsedDate",
-      candidate,
-    ]).pipe(
-      Effect.map((value) => value.trim()),
-      Effect.orElseSucceed(() => ""),
-    );
-    if (!mostRecentlyUsed || lastUsed > mostRecentlyUsed.lastUsed) {
-      mostRecentlyUsed = { path: candidate, lastUsed };
+// NSWorkspace can resolve running development apps that Spotlight has not indexed,
+// and renders icons stored in asset catalogs as well as standalone .icns files.
+const applicationScript = `
+ObjC.import('AppKit');
+function run(argv) {
+  var app = JSON.parse(argv[0]);
+  var workspace = $.NSWorkspace.sharedWorkspace;
+  var running = workspace.runningApplications;
+  var url;
+  for (var i = 0; i < running.count; i++) {
+    var candidate = running.objectAtIndex(i);
+    var matches = app._tag === 'app-id'
+      ? ObjC.unwrap(candidate.bundleIdentifier) === app.appId
+      : ObjC.unwrap(candidate.localizedName) === app.displayName;
+    if (matches && candidate.bundleURL && !candidate.bundleURL.isNil()) {
+      url = candidate.bundleURL;
+      break;
     }
   }
-  return mostRecentlyUsed?.path ?? null;
-});
-
-const resolveNativeAppIconUncached = Effect.fn("NativeAppIconResolver.resolveUncached")(function* (
-  app: ToolActivityNativeAppReference,
-) {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const config = yield* ServerConfig.ServerConfig;
-  const appPath = yield* resolveApplicationPath(app);
-  if (!appPath) return null;
-
-  const canonicalAppPath = yield* fileSystem.realPath(appPath);
-  const infoPlistPath = path.join(canonicalAppPath, "Contents", "Info.plist");
-  const resourcesDirectory = path.join(canonicalAppPath, "Contents", "Resources");
-  const iconName =
-    (yield* plistValue(infoPlistPath, "CFBundleIconFile")) ||
-    (yield* plistValue(infoPlistPath, "CFBundleIconName"));
-  if (iconName && path.basename(iconName) !== iconName) return null;
-  const iconFileName = iconName ? (path.extname(iconName) ? iconName : `${iconName}.icns`) : null;
-  const resourceEntries = yield* fileSystem
-    .readDirectory(resourcesDirectory)
-    .pipe(Effect.orElseSucceed(() => []));
-  const sourceIconCandidate =
-    (iconFileName ? yield* existingFile(path.join(resourcesDirectory, iconFileName)) : null) ??
-    (yield* existingFile(path.join(resourcesDirectory, "AppIcon.icns"))) ??
-    (resourceEntries.find((entry) => entry.toLowerCase().endsWith(".icns"))
-      ? yield* existingFile(
-          path.join(
-            resourcesDirectory,
-            resourceEntries.find((entry) => entry.toLowerCase().endsWith(".icns"))!,
-          ),
-        )
-      : null);
-  if (!sourceIconCandidate) return null;
-  const sourceIconPath = yield* fileSystem.realPath(sourceIconCandidate);
-  const relativeSource = path.relative(resourcesDirectory, sourceIconPath);
-  if (
-    relativeSource === ".." ||
-    relativeSource.startsWith(`..${path.sep}`) ||
-    path.isAbsolute(relativeSource)
-  ) {
-    return null;
+  if (!url) {
+    if (app._tag === 'app-id') {
+      url = workspace.URLForApplicationWithBundleIdentifier(app.appId);
+    } else {
+      var appPath = workspace.fullPathForApplication(app.displayName);
+      if (appPath && !appPath.isNil()) url = $.NSURL.fileURLWithPath(appPath);
+    }
   }
+  if (!url || url.isNil()) return 'null';
+  var bundle = $.NSBundle.bundleWithURL(url);
+  if (!bundle || bundle.isNil()) return 'null';
+  var name = bundle.objectForInfoDictionaryKey('CFBundleDisplayName');
+  if (!name || name.isNil()) name = bundle.objectForInfoDictionaryKey('CFBundleName');
+  if (!name || name.isNil()) name = url.lastPathComponent.stringByDeletingPathExtension;
+  var version = bundle.objectForInfoDictionaryKey('CFBundleVersion');
+  return JSON.stringify({
+    path: ObjC.unwrap(url.path),
+    displayName: ObjC.unwrap(name),
+    version: version && !version.isNil() ? ObjC.unwrap(version) : ''
+  });
+}
+`;
 
-  const appVersion =
-    (yield* plistValue(infoPlistPath, "CFBundleVersion")) ||
-    (yield* plistValue(infoPlistPath, "CFBundleShortVersionString"));
-  const cacheKey = NodeCrypto.createHash("sha256")
-    .update(`${canonicalAppPath}\0${appVersion}\0${sourceIconPath}`)
-    .digest("hex");
-  const cacheDirectory = path.join(config.providerStatusCacheDir, "native-app-icons");
-  const cachePath = path.join(cacheDirectory, `${cacheKey}.png`);
-  if (yield* existingFile(cachePath)) return cachePath;
-
-  yield* fileSystem.makeDirectory(cacheDirectory, { recursive: true });
-  const temporaryPath = path.join(
-    cacheDirectory,
-    `.${cacheKey}-${process.pid}-${(yield* Clock.currentTimeMillis).toString(36)}-${NodeCrypto.randomUUID()}.png`,
+const iconScript = `
+ObjC.import('AppKit');
+function run(argv) {
+  var icon = $.NSWorkspace.sharedWorkspace.iconForFile(argv[0]);
+  icon.size = $.NSMakeSize(${ICON_SIZE}, ${ICON_SIZE});
+  var bitmap = $.NSBitmapImageRep.alloc.initWithBitmapDataPlanesPixelsWidePixelsHighBitsPerSampleSamplesPerPixelHasAlphaIsPlanarColorSpaceNameBytesPerRowBitsPerPixel(
+    null, ${ICON_SIZE}, ${ICON_SIZE}, 8, 4, true, false, $.NSDeviceRGBColorSpace, 0, 0
   );
-  yield* commandOutput("/usr/bin/sips", [
-    "-z",
-    String(ICON_SIZE),
-    String(ICON_SIZE),
-    "-s",
-    "format",
-    "png",
-    sourceIconPath,
-    "--out",
-    temporaryPath,
-  ]).pipe(
-    Effect.tap(() => fileSystem.rename(temporaryPath, cachePath)),
-    Effect.ensuring(
-      fileSystem.remove(temporaryPath).pipe(Effect.catchTags({ PlatformError: () => Effect.void })),
+  $.NSGraphicsContext.saveGraphicsState;
+  $.NSGraphicsContext.setCurrentContext($.NSGraphicsContext.graphicsContextWithBitmapImageRep(bitmap));
+  icon.drawInRectFromRectOperationFraction(
+    $.NSMakeRect(0, 0, ${ICON_SIZE}, ${ICON_SIZE}), $.NSZeroRect, $.NSCompositingOperationCopy, 1
+  );
+  $.NSGraphicsContext.restoreGraphicsState;
+  var png = bitmap.representationUsingTypeProperties($.NSBitmapImageFileTypePNG, $({}));
+  if (!png.writeToFileAtomically(argv[1], true)) throw new Error('Could not write application icon');
+}
+`;
+
+const decodeApplication = Schema.decodeUnknownOption(
+  Schema.fromJsonString(
+    Schema.NullOr(
+      Schema.Struct({
+        path: Schema.String,
+        displayName: Schema.String,
+        version: Schema.String,
+      }),
     ),
-  );
-  return yield* existingFile(cachePath);
-});
+  ),
+);
+
+/** Each adapter caches names; asset requests cache the same lookup independently. */
+export const makeApplicationResolver = Effect.fn("NativeAppIconResolver.makeApplicationResolver")(
+  function* () {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+    const platform = yield* HostProcessPlatform;
+    const semaphore = yield* Semaphore.make(2);
+    const cache = yield* Cache.makeWith(
+      (key: string) =>
+        semaphore.withPermits(1)(
+          commandOutput("/usr/bin/osascript", [
+            "-l",
+            "JavaScript",
+            "-e",
+            applicationScript,
+            key,
+          ]).pipe(
+            Effect.map((output) => Option.getOrNull(decodeApplication(output))),
+            Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          ),
+        ),
+      {
+        capacity: RESOLUTION_CACHE_MAX_ENTRIES,
+        timeToLive: Exit.match({
+          onSuccess: () => RESOLUTION_CACHE_TTL,
+          onFailure: () => Duration.zero,
+        }),
+      },
+    );
+    return (app: ToolActivityNativeAppReference) =>
+      platform !== "darwin"
+        ? Effect.succeed(null)
+        : Cache.get(cache, appCacheKey(app)).pipe(Effect.orElseSucceed(() => null));
+  },
+);
 
 /** @public Service construction is part of the canonical Effect module API. */
 export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const config = yield* ServerConfig.ServerConfig;
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+  const resolveApplication = yield* makeApplicationResolver();
   const hostPlatform = yield* HostProcessPlatform;
   const resolutionSemaphore = yield* Semaphore.make(2);
   const resolutionCache: Cache.Cache<
@@ -217,7 +185,42 @@ export const make = Effect.gen(function* () {
     PlatformError.PlatformError | Cause.TimeoutError
   > = yield* Cache.makeWith(
     (key: string) =>
-      resolutionSemaphore.withPermits(1)(resolveNativeAppIconUncached(appFromCacheKey(key))),
+      resolutionSemaphore.withPermits(1)(
+        Effect.gen(function* () {
+          const application = yield* resolveApplication(appFromCacheKey(key));
+          if (!application) return null;
+          const cacheKey = NodeCrypto.createHash("sha256")
+            .update(`${application.path}\0${application.version}`)
+            .digest("hex");
+          const cacheDirectory = path.join(config.providerStatusCacheDir, "native-app-icons");
+          const cachePath = path.join(cacheDirectory, `${cacheKey}.png`);
+          if (yield* existingFile(cachePath)) return cachePath;
+          yield* fileSystem.makeDirectory(cacheDirectory, { recursive: true });
+          const temporaryPath = path.join(
+            cacheDirectory,
+            `.${cacheKey}-${NodeCrypto.randomUUID()}.png`,
+          );
+          yield* commandOutput("/usr/bin/osascript", [
+            "-l",
+            "JavaScript",
+            "-e",
+            iconScript,
+            application.path,
+            temporaryPath,
+          ]).pipe(
+            Effect.tap(() => fileSystem.rename(temporaryPath, cachePath)),
+            Effect.ensuring(
+              fileSystem
+                .remove(temporaryPath)
+                .pipe(Effect.catchTags({ PlatformError: () => Effect.void })),
+            ),
+          );
+          return yield* existingFile(cachePath);
+        }).pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        ),
+      ),
     {
       capacity: RESOLUTION_CACHE_MAX_ENTRIES,
       timeToLive: Exit.match({
@@ -239,10 +242,7 @@ export const make = Effect.gen(function* () {
   const resolveAttempt = Effect.fn("NativeAppIconResolver.resolve")(function* (
     app: ToolActivityNativeAppReference,
   ) {
-    if (
-      hostPlatform !== "darwin" ||
-      (app._tag === "display-name" && containsControlCharacter(app.displayName))
-    ) {
+    if (hostPlatform !== "darwin") {
       return null;
     }
 

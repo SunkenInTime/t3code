@@ -47,6 +47,7 @@ import * as EffectCodexSchema from "effect-codex-app-server/schema";
 
 import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { getCodexServiceTierOptionValue } from "../../codexModelOptions.ts";
+import { makeApplicationResolver } from "../../assets/NativeAppIconResolver.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 
 import {
@@ -384,13 +385,18 @@ function mcpToolPresentation(
     };
   }
   if (surface?.kind === "computerUse") {
-    const app = nativeAppReference(surface.app);
     const args = asUnknownRecord(item.arguments);
     const argumentAppName =
       normalizedDisplayName(args?.appName) ??
       normalizedDisplayName(args?.application) ??
       normalizedDisplayName(typeof args?.app === "string" ? args.app : undefined);
+    const app =
+      nativeAppReference(surface.app) ??
+      (argumentAppName
+        ? ({ _tag: "display-name", displayName: argumentAppName } as const)
+        : undefined);
     const name =
+      normalizedDisplayName(asUnknownRecord(surface.app)?.displayName) ??
       normalizedDisplayName(appContext?.appName) ??
       argumentAppName ??
       (app?._tag === "display-name" ? app.displayName : undefined) ??
@@ -2217,6 +2223,7 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
   codexConfig: CodexSettings,
   options?: CodexAdapterLiveOptions,
 ) {
+  const resolveApplication = yield* makeApplicationResolver();
   const boundInstanceId = options?.instanceId ?? ProviderInstanceId.make("codex");
   const fileSystem = yield* FileSystem.FileSystem;
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -2427,6 +2434,28 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               }
               return runtimeEvent;
             });
+            for (const [index, runtimeEvent] of mappedEvents.entries()) {
+              if (
+                runtimeEvent.type !== "item.started" &&
+                runtimeEvent.type !== "item.updated" &&
+                runtimeEvent.type !== "item.completed"
+              )
+                continue;
+              const source = runtimeEvent.payload.toolSource;
+              if (source?.kind !== "computer" || source.name !== "Computer Use") continue;
+              const icon = runtimeEvent.payload.toolIcon ?? source.icon;
+              if (icon?._tag !== "native-app") continue;
+              const application = yield* resolveApplication(icon.app);
+              const displayName = normalizedDisplayName(application?.displayName);
+              if (displayName)
+                mappedEvents[index] = {
+                  ...runtimeEvent,
+                  payload: {
+                    ...runtimeEvent.payload,
+                    toolSource: { ...source, name: displayName },
+                  },
+                };
+            }
             const runtimeEvents = usageLimitError
               ? [usageLimitError, ...mappedEvents]
               : mappedEvents;
