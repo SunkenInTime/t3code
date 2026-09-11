@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -175,11 +176,8 @@ it.effect("renders a fresh icon when the application changes on disk", () =>
     expect(yield* resolve()).toBe(first);
     expect(renders).toBe(1);
     // An update rewrites the executable; the cached icon must not be reused.
-    yield* fs.utimes(
-      executable,
-      new Date("2030-01-01T00:00:00Z"),
-      new Date("2030-01-01T00:00:00Z"),
-    );
+    const updatedAt = DateTime.toEpochMillis(DateTime.makeUnsafe("2030-01-01T00:00:00Z"));
+    yield* fs.utimes(executable, updatedAt, updatedAt);
     yield* TestClock.adjust("61 minutes");
     const second = yield* resolve();
     expect(second).not.toBeNull();
