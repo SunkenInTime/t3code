@@ -17,6 +17,8 @@ import * as HostProcess from "./hostProcess.ts";
 import { windowsApplicationScript, windowsIconScript } from "./windowsNativeApp.ts";
 
 const COMMAND_TIMEOUT = "5 seconds";
+// Cached PNGs outlive the process. Bump when rendering changes so stale files are not served.
+const ICON_CACHE_FORMAT = "1";
 const RESOLUTION_CACHE_TTL = Duration.hours(1);
 const RESOLUTION_CACHE_MAX_ENTRIES = 256;
 
@@ -109,6 +111,7 @@ function run(argv) {
   if (!name || name.isNil()) name = bundle.objectForInfoDictionaryKey('CFBundleName');
   if (!name || name.isNil()) name = url.lastPathComponent.stringByDeletingPathExtension;
   var version = bundle.objectForInfoDictionaryKey('CFBundleVersion');
+  if (!version || version.isNil()) version = bundle.objectForInfoDictionaryKey('CFBundleShortVersionString');
   return JSON.stringify({
     path: ObjC.unwrap(url.path),
     displayName: ObjC.unwrap(name),
@@ -212,7 +215,7 @@ export const makeNativeAppIconResolver = Effect.fn("NativeAppIconResolver.make")
               : yield* resolveApplication(reference);
           if (!application) return null;
           const cacheKey = NodeCrypto.createHash("sha256")
-            .update(`${application.path}\0${application.version}\0${size}`)
+            .update(`${ICON_CACHE_FORMAT}\0${application.path}\0${application.version}\0${size}`)
             .digest("hex");
           const cachePath = path.join(cacheDirectory, `${cacheKey}.png`);
           if (yield* existingFile(cachePath)) return cachePath;

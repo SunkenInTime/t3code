@@ -145,6 +145,49 @@ it.effect("retries missing applications and their icons after a minute", () =>
   }).pipe(Effect.provide(NodeServices.layer)),
 );
 
+it.effect("renders a fresh icon when the application changes on disk", () =>
+  Effect.gen(function* () {
+    const fs = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const directory = yield* fs.makeTempDirectoryScoped();
+    const executable = path.join(directory, "Review.exe");
+    yield* fs.writeFileString(executable, "executable");
+    let renders = 0;
+    const spawner = ChildProcessSpawner.make((command) =>
+      Effect.gen(function* () {
+        if (command._tag !== "StandardCommand") return yield* Effect.die("Unexpected pipeline");
+        const request = decodeRenderRequest(command.options.env!.T3_NATIVE_APP_INPUT!);
+        renders++;
+        yield* fs.writeFileString(request.outputPath, `PNG ${renders}`);
+        return processHandle();
+      }),
+    );
+    const resolver = yield* makeNativeAppIconResolver(path.join(directory, "icons")).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.provideService(HostProcessPlatform, "win32"),
+    );
+    const resolve = () =>
+      resolver
+        .resolve({ _tag: "path", path: executable })
+        .pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner));
+    const first = yield* resolve();
+    expect(first).not.toBeNull();
+    expect(yield* resolve()).toBe(first);
+    expect(renders).toBe(1);
+    // An update rewrites the executable; the cached icon must not be reused.
+    yield* fs.utimes(
+      executable,
+      new Date("2030-01-01T00:00:00Z"),
+      new Date("2030-01-01T00:00:00Z"),
+    );
+    yield* TestClock.adjust("61 minutes");
+    const second = yield* resolve();
+    expect(second).not.toBeNull();
+    expect(second).not.toBe(first);
+    expect(renders).toBe(2);
+  }).pipe(Effect.provide(NodeServices.layer)),
+);
+
 it.effect("backs off failed renders and retries after a minute", () =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
