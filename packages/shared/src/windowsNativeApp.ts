@@ -35,16 +35,25 @@ if ($request._tag -eq 'path') {
       $_.Path -eq $reference -or $_.Name -eq $reference -or $_.ExtendedProperty('System.AppUserModel.ID') -eq $reference
     } | Select-Object -First 1
     if ($installed) {
-      $path = if ($installed.IsFileSystem) { $installed.Path } else { 'shell:AppsFolder\' + $installed.Path }
       $name = $installed.Name
+      if ($installed.IsFileSystem) {
+        $path = $installed.Path
+      } else {
+        # A packaged app's AppsFolder path is its stable AUMID, so the icon cache
+        # needs the package version to notice updates.
+        $path = 'shell:AppsFolder\' + $installed.Path
+        $family = ($installed.Path -split '!')[0]
+        $package = Get-AppxPackage -Name ($family -replace '_[^_]+$', '') -ErrorAction SilentlyContinue |
+          Where-Object { $_.PackageFamilyName -eq $family } | Select-Object -First 1
+        if ($package) { $version = $package.Version.ToString() }
+      }
     }
   }
-
 }
 if (!$path) { 'null'; exit }
-if (!$name) {
+if ($path -notlike 'shell:*') {
   $file = Get-Item -LiteralPath $path
-  $name = $file.VersionInfo.FileDescription
+  if (!$name) { $name = $file.VersionInfo.FileDescription }
   if (!$name) { $name = $file.BaseName }
   $version = $file.LastWriteTimeUtc.Ticks.ToString()
 }
