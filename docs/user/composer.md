@@ -44,7 +44,10 @@ returns to the remembered selection.
 
 Leaving reasoning level or service tier unset uses the provider's own configuration.
 When no project or remembered selection applies, Codex uses its configured model
-if it is available, including supported reasoning and service-tier defaults.
+if it is available, including its supported reasoning default. Codex's configured
+service tier applies to every model, so the composer shows it for whichever model
+you pick. If T3 Code cannot read the Codex configuration, the service tier shows no
+selection until you choose one.
 
 ## Quote an assistant response
 

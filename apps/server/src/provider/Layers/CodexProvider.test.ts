@@ -1,4 +1,5 @@
 import { assert, it } from "@effect/vitest";
+import type { ServerProviderModel } from "@t3tools/contracts";
 
 import {
   applyCodexConfigModelDefaults,
@@ -274,4 +275,77 @@ it("applies supported Codex options when the configured model is unavailable", (
 
   assert.equal(models[0]?.isDefault, true);
   assert.equal(models[0]?.capabilities?.optionDescriptors?.[0]?.currentValue, "high");
+});
+
+function tieredCodexModel(id: string) {
+  return mapCodexModelCapabilities({
+    additionalSpeedTiers: [],
+    defaultReasoningEffort: "low",
+    defaultServiceTier: null,
+    description: "Test model",
+    displayName: id,
+    hidden: false,
+    id,
+    isDefault: false,
+    model: id,
+    serviceTiers: [{ id: "priority", name: "Fast", description: "Lower latency responses." }],
+    supportedReasoningEfforts: [
+      { description: "Fast", reasoningEffort: "low" },
+      { description: "Thorough", reasoningEffort: "high" },
+    ],
+  });
+}
+
+function serviceTierDescriptor(model: ServerProviderModel | undefined) {
+  const descriptor = model?.capabilities?.optionDescriptors?.find(
+    (candidate) => candidate.id === "serviceTier",
+  );
+  return descriptor?.type === "select" ? descriptor : undefined;
+}
+
+const models = [
+  {
+    slug: "gpt-6-luna",
+    name: "GPT-6 Luna",
+    isCustom: false,
+    capabilities: tieredCodexModel("gpt-6-luna"),
+  },
+  {
+    slug: "gpt-6-astra",
+    name: "GPT-6 Astra",
+    isCustom: false,
+    capabilities: tieredCodexModel("gpt-6-astra"),
+  },
+];
+
+it("applies the global Codex service tier to models other than the configured default", () => {
+  const result = applyCodexConfigModelDefaults(models, {
+    model: "gpt-6-luna",
+    reasoningEffort: "high",
+    serviceTier: "priority",
+  });
+
+  assert.equal(result.find((model) => model.isDefault)?.slug, "gpt-6-luna");
+  const astra = result.find((model) => model.slug === "gpt-6-astra");
+  assert.equal(serviceTierDescriptor(astra)?.currentValue, "priority");
+  assert.deepStrictEqual(
+    serviceTierDescriptor(astra)?.options.find((option) => option.isDefault)?.id,
+    "priority",
+  );
+  // Reasoning effort stays model-specific, so Astra keeps its catalog default.
+  assert.equal(astra?.capabilities?.optionDescriptors?.[0]?.currentValue, "low");
+});
+
+it("leaves the service tier unknown on every model when Codex config cannot be read", () => {
+  const result = applyCodexConfigModelDefaults(models, null);
+
+  for (const model of result) {
+    const descriptor = serviceTierDescriptor(model);
+    assert.equal(descriptor?.currentValue, undefined);
+    assert.equal(
+      descriptor?.options.some((option) => option.isDefault),
+      false,
+    );
+    assert.equal(model.capabilities?.optionDescriptors?.[0]?.currentValue, "low");
+  }
 });

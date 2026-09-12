@@ -293,14 +293,48 @@ function applyConfiguredSelectDefault(
 }
 
 /**
+ * Strip a select's current value and default marker so clients resolve it to
+ * no selection. Used when the effective value cannot be read, where showing
+ * the catalog default would claim a tier Codex may not actually apply.
+ */
+function withUnknownSelectDefault(
+  capabilities: ModelCapabilities | null,
+  optionId: string,
+): ModelCapabilities | null {
+  if (!capabilities) {
+    return capabilities;
+  }
+
+  let matched = false;
+  const optionDescriptors = (capabilities.optionDescriptors ?? []).map((descriptor) => {
+    if (descriptor.type !== "select" || descriptor.id !== optionId) {
+      return descriptor;
+    }
+    matched = true;
+    const { currentValue: _currentValue, ...rest } = descriptor;
+    return {
+      ...rest,
+      options: descriptor.options.map(({ isDefault: _isDefault, ...option }) => option),
+    };
+  });
+
+  return matched ? { ...capabilities, optionDescriptors } : capabilities;
+}
+
+/**
  * Use Codex's effective config for a new thread when it names an available
- * model. Missing config values retain T3's catalog-based fallbacks.
+ * model. Reasoning effort is model-specific, so it only lands on the default
+ * model; the service tier is global in Codex, so every model that supports the
+ * configured tier shows it. Missing config values retain T3's catalog-based
+ * fallbacks. A `null` config means Codex's configuration could not be read,
+ * which leaves the tier unknown rather than presenting catalog Standard for a
+ * tier Codex may silently override.
  */
 export function applyCodexConfigModelDefaults(
   models: ReadonlyArray<ServerProviderModel>,
-  config: CodexConfigModelDefaults,
+  config: CodexConfigModelDefaults | null,
 ): ReadonlyArray<ServerProviderModel> {
-  const configuredModel = config.model?.trim();
+  const configuredModel = config?.model?.trim();
   const configuredModelAvailable =
     configuredModel !== undefined &&
     configuredModel.length > 0 &&
@@ -310,24 +344,15 @@ export function applyCodexConfigModelDefaults(
     : applyPreferredCodexDefaultModel(models);
   const defaultModel = modelsWithDefault.find((model) => model.isDefault)?.slug;
 
-  if (!defaultModel) {
-    return modelsWithDefault;
-  }
-
   return modelsWithDefault.map((model) => {
-    if (model.slug !== defaultModel) {
-      return model;
-    }
     const withReasoning = applyConfiguredSelectDefault(
       model.capabilities,
       "reasoningEffort",
-      config.reasoningEffort,
+      model.slug === defaultModel ? config?.reasoningEffort : undefined,
     );
-    const capabilities = applyConfiguredSelectDefault(
-      withReasoning,
-      "serviceTier",
-      config.serviceTier,
-    );
+    const capabilities = config
+      ? applyConfiguredSelectDefault(withReasoning, "serviceTier", config.serviceTier)
+      : withUnknownSelectDefault(withReasoning, "serviceTier");
     return capabilities === model.capabilities ? model : { ...model, capabilities };
   });
 }
@@ -528,7 +553,7 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
         cwds: [input.cwd],
       }),
       requestAllCodexModels(client),
-      readCodexConfigModelDefaults(client, input.cwd).pipe(Effect.orElseSucceed(() => ({}))),
+      readCodexConfigModelDefaults(client, input.cwd).pipe(Effect.orElseSucceed(() => null)),
       // Usage is an enrichment: a failure or a slow answer degrades to "no
       // usage this probe" rather than costing the account and models.
       client.request("account/rateLimits/read", undefined).pipe(
