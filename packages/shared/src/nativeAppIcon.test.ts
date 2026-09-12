@@ -176,7 +176,8 @@ it.effect("renders a fresh icon when the application changes on disk", () =>
     expect(yield* resolve()).toBe(first);
     expect(renders).toBe(1);
     // An update rewrites the executable; the cached icon must not be reused.
-    const updatedAt = DateTime.toEpochMillis(DateTime.makeUnsafe("2030-01-01T00:00:00Z"));
+    // Numeric utimes values are seconds; milliseconds are rejected on Windows.
+    const updatedAt = DateTime.toEpochMillis(DateTime.makeUnsafe("2030-01-01T00:00:00Z")) / 1000;
     yield* fs.utimes(executable, updatedAt, updatedAt);
     yield* TestClock.adjust("61 minutes");
     const second = yield* resolve();
