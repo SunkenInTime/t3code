@@ -311,10 +311,10 @@ class AgentNotificationsTest {
     assertEquals("1 needs you", card.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
     assertEquals("8 active", card.extras.getString(Notification.EXTRA_SUB_TEXT))
     assertEquals(
-      "Approval $title Project\nWorking Another thread Other project",
+      "Approval $title · Project\nWorking Another thread · Other project",
       card.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString()
     )
-    assertEquals("Approval $title Project", card.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    assertEquals("Approval $title · Project", card.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
     assertEquals(listOf("Approve", "Dismiss"), card.actions.map { it.title.toString() })
     assertEquals(
       "t3code-dev://threads/environment/thread",

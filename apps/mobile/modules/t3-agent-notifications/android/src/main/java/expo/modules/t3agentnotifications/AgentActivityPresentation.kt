@@ -191,9 +191,10 @@ internal class ActivityPresentation(data: Map<String, String>, private val activ
       val color = ContextCompat.getColor(context, status?.color ?: R.color.agent_activity_waiting)
       append(tinted(row.status, color, bold = true))
       append(" ").append(row.title)
+      // Promoted cards drop text color, so the separator has to do the work of the dimming.
       if (trailing.isNotBlank()) {
-        val start = length + 1
-        append(" ").append(trailing)
+        val start = length + 3
+        append(" · ").append(trailing)
         setSpan(
           ForegroundColorSpan(ContextCompat.getColor(context, R.color.agent_activity_waiting)),
           start,
