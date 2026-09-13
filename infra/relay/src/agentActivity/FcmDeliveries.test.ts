@@ -617,6 +617,13 @@ describe("Android delivery routing", () => {
     const data = androidActivityData(aggregate);
     expect(data.activity_title).toBe("3 active agents · 2 need attention");
     expect(data.activity_chip).toBe("Review");
+    expect(data.activity_phase).toBe("waiting_for_approval");
+    expect(data.activity_active_count).toBe("3");
+    expect(data.activity_attention_count).toBe("2");
+    expect(data.activity_since).toBe(String(Date.parse(state.updatedAt)));
+    const input = androidActivityData(aggregateFor([{ ...state, phase: "waiting_for_input" }]));
+    expect(input.activity_phase).toBe("waiting_for_input");
+    expect(input.activity_active_count).toBe("1");
     expect(androidActivityData(aggregateFor([state])).activity_chip).toBe("Active");
     expect(
       androidActivityData(aggregateFor([{ ...state, phase: "completed" }])).activity_chip,
