@@ -12,26 +12,24 @@ import androidx.core.content.ContextCompat
 internal data class ActivityRow(val status: String, val title: String, val project: String)
 
 /**
- * One entry per relay phase. The status label matches the relay's row wording, the
+ * One entry per relay phase. The status label matches the relay's row wording and the
  * tint matches the web sidebar pills and the iOS Live Activity so a thread reads the
- * same on every surface. A null icon means the app's own notification mark.
+ * same on every surface. The icon is always the T3 mark; the chip verb carries the state.
  */
 internal enum class ActivityPhase(
   val status: String,
   val heading: String,
   val chip: String,
   val action: String,
-  val icon: Int?,
   val color: Int
 ) {
-  STARTING("Connecting", "Starting", "Working", "Open", null, R.color.agent_activity_working),
-  RUNNING("Working", "Working", "Working", "Open", null, R.color.agent_activity_working),
+  STARTING("Connecting", "Starting", "Working", "Open", R.color.agent_activity_working),
+  RUNNING("Working", "Working", "Working", "Open", R.color.agent_activity_working),
   APPROVAL(
     "Approval",
     "Approval needed",
     "Approve",
     "Approve",
-    R.drawable.agent_activity_approval,
     R.color.agent_activity_attention
   ),
   INPUT(
@@ -39,7 +37,6 @@ internal enum class ActivityPhase(
     "Question for you",
     "Answer",
     "Answer",
-    R.drawable.agent_activity_input,
     R.color.agent_activity_input
   ),
   STALE(
@@ -47,7 +44,6 @@ internal enum class ActivityPhase(
     "Waiting for an update",
     "Waiting",
     "Open",
-    R.drawable.agent_activity_waiting,
     R.color.agent_activity_waiting
   ),
   COMPLETED(
@@ -55,7 +51,6 @@ internal enum class ActivityPhase(
     "Finished",
     "Done",
     "Open",
-    R.drawable.agent_activity_done,
     R.color.agent_activity_done
   ),
   FAILED(
@@ -63,7 +58,6 @@ internal enum class ActivityPhase(
     "Failed",
     "Failed",
     "Open",
-    R.drawable.agent_activity_failed,
     R.color.agent_activity_failed
   );
 
@@ -142,11 +136,7 @@ internal class ActivityPresentation(data: Map<String, String>, private val activ
 
   fun applyTo(builder: NotificationCompat.Builder, context: Context) {
     val tint = phase?.let { ContextCompat.getColor(context, it.color) }
-    val icon = phase?.icon
-      ?: context.resources.getIdentifier("notification_icon", "drawable", context.packageName)
-        .takeIf { it != 0 }
-      ?: android.R.drawable.ic_dialog_info
-    builder.setSmallIcon(icon)
+    builder.setSmallIcon(R.drawable.agent_activity_mark)
     if (tint != null) builder.setColor(tint)
     // Tint the summary only when it names an outcome or a request; a plain
     // "3 working" stays neutral so the accent keeps meaning something.
