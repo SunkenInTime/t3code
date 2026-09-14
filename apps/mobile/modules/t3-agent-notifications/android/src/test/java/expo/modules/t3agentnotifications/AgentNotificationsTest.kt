@@ -297,14 +297,12 @@ class AgentNotificationsTest {
   fun severalThreadsListEveryRowWithItsStatusAndActionsFollowThePriorityThread() {
     lifecycle.currentState = Lifecycle.State.RESUMED
     val title = "A long thread title that should wrap rather than disappear"
-    val since = System.currentTimeMillis() - 4 * 60 * 1000L
     val data = update("attention", true) + mapOf(
       "activity_line_0" to "Approval	$title	Project",
       "activity_line_1" to "Working	Another thread	Other project",
       "activity_phase" to "waiting_for_approval",
       "activity_active_count" to "8",
       "activity_attention_count" to "1",
-      "activity_since" to since.toString(),
     )
     AgentNotifications.receive(context, data)
     val card = manager.activeNotifications.single().notification
@@ -314,15 +312,16 @@ class AgentNotificationsTest {
       "Approval $title · Project\nWorking Another thread · Other project",
       card.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString()
     )
-    assertEquals("Approval $title · Project", card.extras.getCharSequence(Notification.EXTRA_TEXT).toString())
+    assertEquals(
+      "Approval $title · Project",
+      card.extras.getCharSequence(Notification.EXTRA_TEXT).toString()
+    )
     assertEquals(listOf("Approve", "Dismiss"), card.actions.map { it.title.toString() })
     assertEquals(
       "t3code-dev://threads/environment/thread",
       shadowOf(card.actions[0].actionIntent).savedIntent.dataString
     )
     assertEquals("Approve", card.extras.getString(NotificationCompat.EXTRA_SHORT_CRITICAL_TEXT))
-    assertEquals(since, card.`when`)
-    assertTrue(card.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
 
     AgentNotifications.receive(
       context,
@@ -343,6 +342,29 @@ class AgentNotificationsTest {
   }
 
   @Test
+  fun waitingCardsIgnoreMutableThreadTimestampsEvenAfterRename() {
+    lifecycle.currentState = Lifecycle.State.RESUMED
+    val now = System.currentTimeMillis()
+    for (phase in listOf("waiting_for_approval", "waiting_for_input")) {
+      val status = if (phase == "waiting_for_approval") "Approval" else "Input"
+      for ((title, updatedAt) in listOf("Original" to now - 1200000L, "Renamed" to now)) {
+        AgentNotifications.receive(
+          context,
+          update("waiting", true) + mapOf(
+            "activity_line_0" to "$status\t$title\tProject",
+            "activity_phase" to phase,
+            "activity_since" to updatedAt.toString()
+          )
+        )
+        val card = manager.activeNotifications.single().notification
+        assertEquals(title, card.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+        assertFalse(card.extras.getBoolean(Notification.EXTRA_SHOW_WHEN))
+        assertFalse(card.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
+      }
+    }
+  }
+
+  @Test
   fun aSingleThreadUsesItsTitleAndNeverShowsAProgressBar() {
     lifecycle.currentState = Lifecycle.State.RESUMED
     val data = update("work", true) + mapOf(
@@ -351,12 +373,24 @@ class AgentNotificationsTest {
     )
     AgentNotifications.receive(context, data)
     val working = manager.activeNotifications.single().notification
-    assertEquals("Update dashboard", working.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
-    assertEquals("Working Project", working.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString())
+    assertEquals(
+      "Update dashboard",
+      working.extras.getCharSequence(Notification.EXTRA_TITLE).toString()
+    )
+    assertEquals(
+      "Working Project",
+      working.extras.getCharSequence(Notification.EXTRA_BIG_TEXT).toString()
+    )
     assertEquals(null, working.extras.getString(Notification.EXTRA_SUB_TEXT))
     assertEquals("Working", working.extras.getString(NotificationCompat.EXTRA_SHORT_CRITICAL_TEXT))
     assertFalse(working.extras.getBoolean(Notification.EXTRA_SHOW_CHRONOMETER))
-    for (phase in listOf("waiting_for_approval", "waiting_for_input", "stale", "failed", "completed")) {
+    for (phase in listOf(
+      "waiting_for_approval",
+      "waiting_for_input",
+      "stale",
+      "failed",
+      "completed"
+    )) {
       val active = phase != "failed" && phase != "completed"
       AgentNotifications.receive(
         context,
@@ -430,7 +464,10 @@ class AgentNotificationsTest {
       )
     )
     val finished = manager.activeNotifications.single().notification
-    assertEquals("Finished, 1 failed", finished.extras.getCharSequence(Notification.EXTRA_TITLE).toString())
+    assertEquals(
+      "Finished, 1 failed",
+      finished.extras.getCharSequence(Notification.EXTRA_TITLE).toString()
+    )
     assertEquals("Project · 2 threads", finished.extras.getString(Notification.EXTRA_SUB_TEXT))
   }
 

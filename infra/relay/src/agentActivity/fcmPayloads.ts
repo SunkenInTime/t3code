@@ -46,8 +46,6 @@ export function androidActivityData(aggregate: RelayAgentActivityAggregateState 
     activity_phase: hero?.phase ?? "",
     activity_active_count: String(activeCount),
     activity_attention_count: String(attentionCount),
-    // When the priority thread started waiting on the user; the card shows it as a chronometer.
-    activity_since: hero ? String(Math.max(0, Date.parse(hero.updatedAt) || 0)) : "0",
     activity_body: hero
       ? `${hero.status}: ${clean(hero.threadTitle)} · ${clean(hero.projectTitle)}`
       : "",

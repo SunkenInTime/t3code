@@ -106,16 +106,16 @@ internal class ActivityPresentation(data: Map<String, String>, private val activ
   private val attentionCount = data["activity_attention_count"]?.toIntOrNull()?.coerceAtLeast(0)
     ?: rows.count { ActivityPhase.forStatus(it.status)?.needsUser == true }
   private val failedCount = rows.count { it.status == ActivityPhase.FAILED.status }
-  val threadCount = activeCount + rows.count { ActivityPhase.forStatus(it.status)?.finished == true }
+  val threadCount =
+    activeCount + rows.count { ActivityPhase.forStatus(it.status)?.finished == true }
   private val singleProject = rows.map { it.project }.distinct().size == 1
   private val legacyBody = (0..4).mapNotNull { data["activity_line_$it"]?.take(300) }
     .takeIf { it.isNotEmpty() }?.joinToString("\n")
     ?: data["activity_body"].orEmpty().take(240)
-  /** Epoch millis the priority thread entered its phase; drives the waiting chronometer. */
-  val since = data["activity_since"]?.toLongOrNull()?.takeIf { it > 0 }
 
   val summary = when {
-    hero == null -> data["activity_title"]?.takeIf { it.isNotBlank() }?.take(120) ?: "Agent activity"
+    hero == null -> data["activity_title"]?.takeIf { it.isNotBlank() }?.take(120)
+      ?: "Agent activity"
     rows.size == 1 -> hero.title
     attentionCount == 1 -> "1 needs you"
     attentionCount > 1 -> "$attentionCount need you"
@@ -128,7 +128,8 @@ internal class ActivityPresentation(data: Map<String, String>, private val activ
   val chip = when {
     !active -> null
     phase == null -> data["activity_chip"]?.takeIf { it.isNotBlank() }?.take(7) ?: "Active"
-    phase == ActivityPhase.RUNNING && activeCount > 1 -> "${if (activeCount > 9) "9+" else activeCount} live"
+    phase == ActivityPhase.RUNNING && activeCount > 1 ->
+      "${if (activeCount > 9) "9+" else activeCount} live"
     else -> phase.chip
   }
 
@@ -166,13 +167,9 @@ internal class ActivityPresentation(data: Map<String, String>, private val activ
     val lineBreak = body.indexOf('\n')
     val firstLine = if (lineBreak >= 0) body.subSequence(0, lineBreak) else body
     builder.setContentText(firstLine).setStyle(NotificationCompat.BigTextStyle().bigText(body))
-    // How long the agent has been blocked on you. System UI owns the ticking, so
-    // there is nothing to repaint and no push needed to keep it current.
-    if (active && phase?.needsUser == true && since != null) {
-      builder.setWhen(since).setShowWhen(true).setUsesChronometer(true)
-    } else {
-      builder.setShowWhen(false).setUsesChronometer(false)
-    }
+    // Thread update timestamps can change while an approval remains pending.
+    // Leave the timer hidden until the payload has a stable phase-entry timestamp.
+    builder.setShowWhen(false).setUsesChronometer(false)
   }
 
   private fun statusLine(context: Context, row: ActivityRow, trailing: String): CharSequence =
