@@ -57,6 +57,7 @@ import {
   type HomeListItem,
 } from "../home/homeListItems";
 import { buildHomeProjectScopes, buildHomeThreadGroups } from "../home/homeThreadList";
+import { useProjectScopeFaviconUrls } from "../home/use-project-scope-favicon-urls";
 import { SwipeableScrollGateProvider, useSwipeableScrollGate } from "../home/thread-swipe-actions";
 import { usePendingTaskListActions } from "../home/usePendingTaskListActions";
 import { useThreadListActions } from "../home/useThreadListActions";
@@ -232,14 +233,16 @@ function ThreadNavigationSidebarPane(
       }),
     [options.projectGroupingMode, options.selectedEnvironmentId, projects],
   );
+  const projectFaviconUrls = useProjectScopeFaviconUrls(projectScopes);
   const projectFilterOptions = useMemo(
     () =>
-      projectScopes.map((scope) => ({
+      projectScopes.map((scope, index) => ({
         key: scope.key,
         label: scope.title,
         representative: scope.representative,
+        faviconUrl: projectFaviconUrls[index] ?? null,
       })),
-    [projectScopes],
+    [projectFaviconUrls, projectScopes],
   );
   const projectTitleByProjectKey = useMemo(
     () =>

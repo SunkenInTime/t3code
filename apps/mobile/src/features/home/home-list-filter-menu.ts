@@ -12,11 +12,14 @@ export interface HomeListFilterMenuEnvironment {
 export interface HomeListFilterMenuProject {
   readonly key: string;
   readonly label: string;
-  /** Project whose favicon stands for the scope (scopes can group several). */
+  /** Project whose favicon stands for the scope (scopes can group several).
+      The Android menu renders it with `ProjectFavicon`. */
   readonly representative?: Pick<
     EnvironmentProject,
     "environmentId" | "workspaceRoot" | "faviconPath"
   >;
+  /** Resolved favicon URL for the native iOS menus, null when there is none. */
+  readonly faviconUrl?: string | null;
 }
 
 type HomeListFilterMenuAction = {
@@ -24,6 +27,8 @@ type HomeListFilterMenuAction = {
   readonly title: string;
   readonly subtitle?: string;
   readonly state?: "on" | "off";
+  /** Bitmap icon URL; native menu builders turn it into an image source. */
+  readonly imageUri?: string;
   readonly onPress: () => void;
 };
 
@@ -95,6 +100,7 @@ export function buildHomeListFilterMenu(props: {
           type: "action" as const,
           title: project.label,
           state: props.selectedProjectKey === project.key ? ("on" as const) : ("off" as const),
+          ...(project.faviconUrl ? { imageUri: project.faviconUrl } : {}),
           onPress: () => props.onProjectChange(project.key),
         })),
       ],

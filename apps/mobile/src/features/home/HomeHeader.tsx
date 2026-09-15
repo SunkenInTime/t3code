@@ -21,6 +21,7 @@ import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
 import {
   createNativeMailSearchToolbarItem,
   NATIVE_MAIL_SEARCH_TOOLBAR_SUPPORTED,
+  toNativeMailSearchToolbarMenu,
 } from "../layout/native-mail-search-toolbar";
 import type { HomeProjectSortOrder } from "./homeThreadList";
 import { WorkspaceConnectionTitle } from "./WorkspaceConnectionTitle";
@@ -377,7 +378,7 @@ function IosHomeHeader(props: HomeHeaderProps) {
                   createNativeMailSearchToolbarItem({
                     composeButtonId: "home-new-task",
                     composeSystemImageName: "square.and.pencil",
-                    filterMenu,
+                    filterMenu: toNativeMailSearchToolbarMenu(filterMenu),
                     filterButtonId: "home-filter",
                     filterSystemImageName: hasCustomListOptions
                       ? "line.3.horizontal.decrease.circle.fill"
@@ -454,6 +455,7 @@ function IosHomeHeader(props: HomeHeaderProps) {
                 {props.projects.map((project) => (
                   <NativeHeaderToolbar.MenuAction
                     key={project.key}
+                    imageUri={project.faviconUrl ?? undefined}
                     isOn={props.selectedProjectKey === project.key}
                     onPress={() => props.onProjectChange(project.key)}
                   >
