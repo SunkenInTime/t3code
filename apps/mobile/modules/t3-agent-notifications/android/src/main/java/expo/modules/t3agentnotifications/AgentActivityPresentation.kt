@@ -152,17 +152,7 @@ internal class ActivityPresentation(data: Map<String, String>, private val activ
         ).joinToString(" · ")
       )
     }
-    val body = when {
-      hero == null -> legacyBody
-      // The title already names the thread; the body only needs its status and project.
-      rows.size == 1 -> statusLine(context, hero.copy(title = hero.project), "")
-      else -> SpannableStringBuilder().apply {
-        rows.forEachIndexed { index, row ->
-          if (index > 0) append("\n")
-          append(statusLine(context, row, row.project.takeUnless { singleProject }.orEmpty()))
-        }
-      }
-    }
+    val body = body(context)
     // The collapsed card gets the priority row; the expanded card gets them all.
     val lineBreak = body.indexOf('\n')
     val firstLine = if (lineBreak >= 0) body.subSequence(0, lineBreak) else body
@@ -170,6 +160,18 @@ internal class ActivityPresentation(data: Map<String, String>, private val activ
     // Thread update timestamps can change while an approval remains pending.
     // Leave the timer hidden until the payload has a stable phase-entry timestamp.
     builder.setShowWhen(false).setUsesChronometer(false)
+  }
+
+  private fun body(context: Context): CharSequence = when {
+    hero == null -> legacyBody
+    // The title already names the thread; the body only needs its status and project.
+    rows.size == 1 -> statusLine(context, hero.copy(title = hero.project), "")
+    else -> SpannableStringBuilder().apply {
+      rows.forEachIndexed { index, row ->
+        if (index > 0) append("\n")
+        append(statusLine(context, row, row.project.takeUnless { singleProject }.orEmpty()))
+      }
+    }
   }
 
   private fun statusLine(context: Context, row: ActivityRow, trailing: String): CharSequence =
@@ -180,7 +182,7 @@ internal class ActivityPresentation(data: Map<String, String>, private val activ
       append(" ").append(row.title)
       // Promoted cards drop text color, so the separator has to do the work of the dimming.
       if (trailing.isNotBlank()) {
-        val start = length + 3
+        val start = length
         append(" · ").append(trailing)
         setSpan(
           ForegroundColorSpan(ContextCompat.getColor(context, R.color.agent_activity_waiting)),
