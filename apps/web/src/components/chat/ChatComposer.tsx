@@ -5752,8 +5752,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           return;
         }
         void (async () => {
+          const targetKey = composerDraftTargetKeyRef.current;
           for (const folder of folders) {
             const path = await resolveDroppedFolderPath(folder);
+            if (composerDraftTargetKeyRef.current !== targetKey) return;
             if (path === null) {
               toastManager.add({
                 type: "error",
