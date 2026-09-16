@@ -2,6 +2,11 @@ export interface WorkspaceFileDragEvent {
   readonly dataTransfer: {
     readonly types: ReadonlyArray<string>;
     readonly files: Iterable<File>;
+    readonly items?: Iterable<{
+      readonly kind: string;
+      getAsFile(): File | null;
+      webkitGetAsEntry(): { readonly isDirectory: boolean } | null;
+    }>;
     dropEffect: string;
   };
   readonly relatedTarget: EventTarget | null;
@@ -22,6 +27,18 @@ function isFileDrag(event: WorkspaceFileDragEvent): boolean {
 
 function movedWithinDropTarget(event: WorkspaceFileDragEvent): boolean {
   return event.relatedTarget !== null && event.currentTarget.contains(event.relatedTarget as Node);
+}
+
+function droppedFiles(dataTransfer: WorkspaceFileDragEvent["dataTransfer"]): File[] {
+  if (dataTransfer.items === undefined) return Array.from(dataTransfer.files);
+
+  const files: File[] = [];
+  for (const item of dataTransfer.items) {
+    if (item.kind !== "file" || item.webkitGetAsEntry()?.isDirectory === true) continue;
+    const file = item.getAsFile();
+    if (file !== null) files.push(file);
+  }
+  return files;
 }
 
 export function makeWorkspaceFileDropHandlers(host: WorkspaceFileDropHost) {
@@ -48,7 +65,7 @@ export function makeWorkspaceFileDropHandlers(host: WorkspaceFileDropHost) {
       if (!isFileDrag(event)) return;
       event.preventDefault();
       host.setDragActive(false);
-      host.addFiles(Array.from(event.dataTransfer.files));
+      host.addFiles(droppedFiles(event.dataTransfer));
     },
   };
 }

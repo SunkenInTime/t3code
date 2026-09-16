@@ -8,6 +8,7 @@ import {
 function makeDragEvent(options?: {
   types?: string[];
   files?: File[];
+  items?: NonNullable<WorkspaceFileDragEvent["dataTransfer"]["items"]>;
   movedWithinTarget?: boolean;
 }) {
   const preventDefault = vi.fn();
@@ -16,6 +17,7 @@ function makeDragEvent(options?: {
       types: options?.types ?? ["Files"],
       files: options?.files ?? [],
       dropEffect: "none",
+      ...(options?.items === undefined ? {} : { items: options.items }),
     },
     relatedTarget: options?.movedWithinTarget ? ({} as EventTarget) : null,
     currentTarget: {
@@ -74,5 +76,43 @@ describe("makeWorkspaceFileDropHandlers", () => {
 
     expect(setDragActive).toHaveBeenCalledWith(false);
     expect(addFiles).toHaveBeenCalledWith([file]);
+  });
+
+  it("skips dropped directories in mixed drops", () => {
+    const file = new File(["contents"], "example.txt", { type: "text/plain" });
+    const directory = {
+      kind: "file",
+      getAsFile: () => null,
+      webkitGetAsEntry: () => ({ isDirectory: true }),
+    };
+    const { host, addFiles } = makeHost();
+    const { event } = makeDragEvent({
+      items: [
+        directory,
+        {
+          kind: "file",
+          getAsFile: () => file,
+          webkitGetAsEntry: () => ({ isDirectory: false }),
+        },
+      ],
+    });
+
+    makeWorkspaceFileDropHandlers(host).onDrop(event);
+
+    expect(addFiles).toHaveBeenCalledWith([file]);
+  });
+
+  it("passes an empty list when a drop only contains a directory", () => {
+    const directory = {
+      kind: "file",
+      getAsFile: () => null,
+      webkitGetAsEntry: () => ({ isDirectory: true }),
+    };
+    const { host, addFiles } = makeHost();
+    const { event } = makeDragEvent({ items: [directory] });
+
+    makeWorkspaceFileDropHandlers(host).onDrop(event);
+
+    expect(addFiles).toHaveBeenCalledWith([]);
   });
 });
