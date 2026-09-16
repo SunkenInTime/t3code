@@ -782,27 +782,6 @@ export const layer: Layer.Layer<
                 }),
             ),
           );
-          yield* checkpointService
-            .captureBaseline({
-              scope: input.checkpointScope,
-              ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
-            })
-            .pipe(
-              Effect.mapError(
-                (cause) =>
-                  new RunExecutionStartError({
-                    commandId: input.commandId,
-                    runId: input.run.id,
-                    cause,
-                  }),
-              ),
-            );
-          if (
-            input.shouldStartProviderTurn !== undefined &&
-            !(yield* input.shouldStartProviderTurn())
-          ) {
-            return;
-          }
           // Startup failure and stream shutdown can report the same attempt.
           const refreshAfterTurn = yield* Effect.cached(
             finalizationObserver.refreshAfterTurn(input.appThread.projectId).pipe(
@@ -885,6 +864,72 @@ export const layer: Layer.Layer<
             ReadonlySet<OrchestrationV2TurnItem["id"]>
           >(new Set(inheritedBackgroundTurnItemsById.keys()));
           const openRunOwnedSubagents = yield* Ref.make(emptyOpenRunOwnedSubagentProjection());
+          const baselineCaptured = yield* checkpointService
+            .captureBaseline({
+              scope: input.checkpointScope,
+              ordinalWithinScope: Math.max(0, input.run.ordinal - 1),
+            })
+            .pipe(
+              Effect.as(true),
+              Effect.catchCause((cause) =>
+                Effect.gen(function* () {
+                  yield* Effect.logError(
+                    "orchestration V2 checkpoint baseline capture failed before provider start",
+                    { runId: input.run.id, cause },
+                  );
+                  const providerThread = yield* Ref.get(latestProviderThread);
+                  const latestItemOrdinal = yield* Ref.get(latestTurnItemOrdinal);
+                  const openSubagents = yield* Ref.get(openRunOwnedSubagents);
+                  const detail = makeProviderFailure({ cause: Cause.squash(cause) });
+                  yield* writeFinalRunEvents({
+                    run: input.run,
+                    rootNode: input.rootNode,
+                    checkpointScope: input.checkpointScope,
+                    providerThread,
+                    attempt: input.attempt,
+                    ...(input.shouldFinalizeRun === undefined
+                      ? {}
+                      : { shouldFinalizeRun: input.shouldFinalizeRun }),
+                    ...(input.hasUnpairedRunInterruptRequest === undefined
+                      ? {}
+                      : {
+                          hasUnpairedRunInterruptRequest: input.hasUnpairedRunInterruptRequest,
+                        }),
+                    openRunOwnedSubagents: openSubagents,
+                    terminal: makeFailedTerminalEvent(
+                      makeProviderFailure({
+                        message: `Checkpoint capture failed before the provider started. ${detail.message}`,
+                        code: detail.code,
+                        class: "unknown",
+                        retryable: true,
+                      }),
+                      latestItemOrdinal + 1,
+                    ),
+                    failureItemPersisted: false,
+                    refreshAfterTurn,
+                  });
+                }).pipe(
+                  Effect.mapError(
+                    (writeCause) =>
+                      new RunExecutionStartError({
+                        commandId: input.commandId,
+                        runId: input.run.id,
+                        cause: { baseline: cause, write: writeCause },
+                      }),
+                  ),
+                  Effect.as(false),
+                ),
+              ),
+            );
+          if (!baselineCaptured) {
+            return;
+          }
+          if (
+            input.shouldStartProviderTurn !== undefined &&
+            !(yield* input.shouldStartProviderTurn())
+          ) {
+            return;
+          }
           const finalizeRootRun = (terminal: ProviderTerminalEvent) =>
             Effect.gen(function* () {
               if (yield* Ref.get(rootRunFinalized)) {
