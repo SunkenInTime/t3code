@@ -5727,7 +5727,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         });
         if (target === "local") {
           for (const folder of folders) {
-            const path = window.desktopBridge?.getPathForFile(folder);
+            const path = window.desktopBridge?.getPathForFile?.(folder);
             if (typeof path === "string" && path.length > 0) {
               insertComposerTextAtEnd(serializeComposerFileLink(path), {
                 ensureLeadingBoundary: true,
