@@ -19,6 +19,7 @@ export interface WorkspaceFileDragEvent {
 export interface WorkspaceFileDropHost {
   setDragActive(active: boolean): void;
   addFiles(files: File[]): void;
+  addFolders(folders: File[]): void;
 }
 
 function isFileDrag(event: WorkspaceFileDragEvent): boolean {
@@ -29,16 +30,26 @@ function movedWithinDropTarget(event: WorkspaceFileDragEvent): boolean {
   return event.relatedTarget !== null && event.currentTarget.contains(event.relatedTarget as Node);
 }
 
-function droppedFiles(dataTransfer: WorkspaceFileDragEvent["dataTransfer"]): File[] {
-  if (dataTransfer.items === undefined) return Array.from(dataTransfer.files);
+function splitDroppedItems(dataTransfer: WorkspaceFileDragEvent["dataTransfer"]): {
+  files: File[];
+  folders: File[];
+} {
+  if (dataTransfer.items === undefined)
+    return { files: Array.from(dataTransfer.files), folders: [] };
 
   const files: File[] = [];
+  const folders: File[] = [];
   for (const item of dataTransfer.items) {
-    if (item.kind !== "file" || item.webkitGetAsEntry()?.isDirectory === true) continue;
+    if (item.kind !== "file") continue;
     const file = item.getAsFile();
-    if (file !== null) files.push(file);
+    if (file === null) continue;
+    if (item.webkitGetAsEntry()?.isDirectory === true) {
+      folders.push(file);
+    } else {
+      files.push(file);
+    }
   }
-  return files;
+  return { files, folders };
 }
 
 export function makeWorkspaceFileDropHandlers(host: WorkspaceFileDropHost) {
@@ -65,7 +76,9 @@ export function makeWorkspaceFileDropHandlers(host: WorkspaceFileDropHost) {
       if (!isFileDrag(event)) return;
       event.preventDefault();
       host.setDragActive(false);
-      host.addFiles(droppedFiles(event.dataTransfer));
+      const { files, folders } = splitDroppedItems(event.dataTransfer);
+      if (files.length > 0) host.addFiles(files);
+      if (folders.length > 0) host.addFolders(folders);
     },
   };
 }

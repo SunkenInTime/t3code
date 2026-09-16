@@ -31,8 +31,9 @@ function makeDragEvent(options?: {
 function makeHost() {
   const setDragActive = vi.fn();
   const addFiles = vi.fn();
-  const host = { setDragActive, addFiles } satisfies WorkspaceFileDropHost;
-  return { host, setDragActive, addFiles };
+  const addFolders = vi.fn();
+  const host = { setDragActive, addFiles, addFolders } satisfies WorkspaceFileDropHost;
+  return { host, setDragActive, addFiles, addFolders };
 }
 
 describe("makeWorkspaceFileDropHandlers", () => {
@@ -78,14 +79,15 @@ describe("makeWorkspaceFileDropHandlers", () => {
     expect(addFiles).toHaveBeenCalledWith([file]);
   });
 
-  it("skips dropped directories in mixed drops", () => {
+  it("routes mixed drops to files and folders", () => {
     const file = new File(["contents"], "example.txt", { type: "text/plain" });
+    const folder = new File([], "project", { type: "" });
     const directory = {
       kind: "file",
-      getAsFile: () => null,
+      getAsFile: () => folder,
       webkitGetAsEntry: () => ({ isDirectory: true }),
     };
-    const { host, addFiles } = makeHost();
+    const { host, addFiles, addFolders } = makeHost();
     const { event } = makeDragEvent({
       items: [
         directory,
@@ -100,19 +102,33 @@ describe("makeWorkspaceFileDropHandlers", () => {
     makeWorkspaceFileDropHandlers(host).onDrop(event);
 
     expect(addFiles).toHaveBeenCalledWith([file]);
+    expect(addFolders).toHaveBeenCalledWith([folder]);
   });
 
-  it("passes an empty list when a drop only contains a directory", () => {
+  it("routes a folder-only drop without attaching files", () => {
+    const folder = new File([], "project", { type: "" });
     const directory = {
       kind: "file",
-      getAsFile: () => null,
+      getAsFile: () => folder,
       webkitGetAsEntry: () => ({ isDirectory: true }),
     };
-    const { host, addFiles } = makeHost();
+    const { host, addFiles, addFolders } = makeHost();
     const { event } = makeDragEvent({ items: [directory] });
 
     makeWorkspaceFileDropHandlers(host).onDrop(event);
 
-    expect(addFiles).toHaveBeenCalledWith([]);
+    expect(addFiles).not.toHaveBeenCalled();
+    expect(addFolders).toHaveBeenCalledWith([folder]);
+  });
+
+  it("uses files when the browser does not expose drag items", () => {
+    const file = new File(["contents"], "example.txt", { type: "text/plain" });
+    const { host, addFiles, addFolders } = makeHost();
+    const { event } = makeDragEvent({ files: [file] });
+
+    makeWorkspaceFileDropHandlers(host).onDrop(event);
+
+    expect(addFiles).toHaveBeenCalledWith([file]);
+    expect(addFolders).not.toHaveBeenCalled();
   });
 });
