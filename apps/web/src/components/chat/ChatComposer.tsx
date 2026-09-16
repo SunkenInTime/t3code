@@ -5746,8 +5746,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         if (target === "remote") {
           toastManager.add({
             type: "error",
-            title: "Folder drops aren't supported on remote environments",
-            description: "Type the folder path with @ instead.",
+            title: "Folders can't be dropped into remote environments",
           });
           return;
         }
