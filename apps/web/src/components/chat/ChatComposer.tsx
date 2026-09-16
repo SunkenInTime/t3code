@@ -49,7 +49,7 @@ import {
   wouldTextPasteExceedLimit,
 } from "@t3tools/client-runtime/text-paste";
 import { serializeComposerFileLink } from "@t3tools/shared/composerTrigger";
-import { folderDropTarget, matchDroppedFolderEntry } from "./folderDrop";
+import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 import { createModelSelection, normalizeModelSlug } from "@t3tools/shared/model";
 import { USAGE_LIMITS_COMMAND } from "@t3tools/shared/usageLimits";
 import {
@@ -234,7 +234,6 @@ import { encodeComposerContextFragment } from "@t3tools/shared/composerContextCl
 import type { ComposerContextClipboardFragment, ComposerContextRecord } from "@t3tools/contracts";
 import { resolveAssetUrl } from "~/assets/assetUrls";
 import { assetEnvironment } from "~/state/assets";
-import { projectEnvironment } from "~/state/projects";
 import { readPreparedConnection } from "~/state/session";
 import { useAtomQueryRunner } from "~/state/use-atom-query-runner";
 import {
@@ -1531,9 +1530,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     onFileOpen,
   } = props;
   const primaryEnvironmentId = usePrimaryEnvironmentId();
-  const searchProjectEntries = useAtomQueryRunner(projectEnvironment.searchEntries, {
-    reportFailure: false,
-  });
   const activeTasksProgress = props.threadSyncPhase === null ? props.activeTasksProgress : null;
   const activeTaskSteps = props.threadSyncPhase === null ? props.activeTaskSteps : null;
   // ------------------------------------------------------------------
@@ -5690,22 +5686,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsComposerModelPickerOpen(true);
   }, [composerControlsHidden, setIsComposerFocused, setIsComposerScrollCollapsed]);
 
-  const resolveDroppedFolderPath = useCallback(
-    async (folder: File): Promise<string | null> => {
-      const nativePath = window.desktopBridge?.getPathForFile?.(folder);
-      if (typeof nativePath === "string" && nativePath.length > 0) return nativePath;
-      if (gitCwd === null) return null;
-      const result = await searchProjectEntries({
-        environmentId,
-        input: { cwd: gitCwd, query: folder.name, limit: 50, kind: "directory" },
-      });
-      return result._tag === "Success"
-        ? matchDroppedFolderEntry(folder.name, result.value.entries)
-        : null;
-    },
-    [environmentId, gitCwd, searchProjectEntries],
-  );
-
   useImperativeHandle(
     composerRef,
     () => ({
@@ -5750,25 +5730,21 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           });
           return;
         }
-        void (async () => {
-          const targetKey = composerDraftTargetKeyRef.current;
-          for (const folder of folders) {
-            const path = await resolveDroppedFolderPath(folder);
-            if (composerDraftTargetKeyRef.current !== targetKey) return;
-            if (path === null) {
-              toastManager.add({
-                type: "error",
-                title: `Couldn't find "${folder.name}" in this project`,
-                description: "Type the folder path with @ instead.",
-              });
-              continue;
-            }
-            insertComposerTextAtEnd(`${serializeComposerFileLink(path)} `, {
-              ensureLeadingBoundary: true,
+        for (const folder of folders) {
+          const path = resolveDroppedFolderPath(folder, window.desktopBridge?.getPathForFile);
+          if (path === null) {
+            toastManager.add({
+              type: "error",
+              title: `Couldn't get the path of "${folder.name}"`,
+              description: "Type the folder path with @ instead.",
             });
+            continue;
           }
-          focusComposer();
-        })();
+          insertComposerTextAtEnd(`${serializeComposerFileLink(path)} `, {
+            ensureLeadingBoundary: true,
+          });
+        }
+        focusComposer();
       },
       hasPendingAttachments: () =>
         (pendingImageCompressionsRef.current.get(attachmentTargetKey) ?? 0) > 0,
@@ -5927,10 +5903,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       composerReviewComments,
       focusComposer,
       environmentId,
-      gitCwd,
       primaryEnvironmentId,
-      resolveDroppedFolderPath,
-      searchProjectEntries,
       isConnecting,
       isComposerApprovalState,
       isChoiceOnlyPendingQuestion,

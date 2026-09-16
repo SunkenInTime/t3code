@@ -1,4 +1,4 @@
-import type { EnvironmentId, ProjectEntry } from "@t3tools/contracts";
+import type { EnvironmentId } from "@t3tools/contracts";
 
 export function folderDropTarget(input: {
   localEnvironmentDisabled: boolean;
@@ -15,18 +15,10 @@ export function folderDropTarget(input: {
   return "local";
 }
 
-/** Project-relative path of the one directory entry named like the dropped folder, or null when none/ambiguous. */
-export function matchDroppedFolderEntry(
-  folderName: string,
-  entries: ReadonlyArray<ProjectEntry>,
+export function resolveDroppedFolderPath(
+  folder: File,
+  getPathForFile: ((file: File) => string) | undefined,
 ): string | null {
-  const matches = entries.filter(
-    (entry) =>
-      entry.kind === "directory" &&
-      entry.path
-        .replace(/[\\/]+$/, "")
-        .split(/[\\/]/)
-        .pop() === folderName,
-  );
-  return matches.length === 1 ? (matches[0]?.path ?? null) : null;
+  const path = getPathForFile?.(folder);
+  return typeof path === "string" && path.length > 0 ? path : null;
 }

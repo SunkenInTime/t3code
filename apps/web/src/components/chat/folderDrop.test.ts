@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@effect/vitest";
-import { EnvironmentId, type ProjectEntry } from "@t3tools/contracts";
-import { folderDropTarget, matchDroppedFolderEntry } from "./folderDrop";
+import { EnvironmentId } from "@t3tools/contracts";
+import { folderDropTarget, resolveDroppedFolderPath } from "./folderDrop";
 
 const environmentId = EnvironmentId.make("environment-1");
 
@@ -46,30 +46,21 @@ describe("folderDropTarget", () => {
   });
 });
 
-describe("matchDroppedFolderEntry", () => {
-  it("returns the path for a unique directory match", () => {
-    const entries: ReadonlyArray<ProjectEntry> = [
-      { path: "packages/contracts", kind: "directory" },
-      { path: "src/contracts.ts", kind: "file" },
-    ];
-    expect(matchDroppedFolderEntry("contracts", entries)).toBe("packages/contracts");
+describe("resolveDroppedFolderPath", () => {
+  it("returns the native path when the bridge provides it", () => {
+    const folder = new File([], "contracts");
+    expect(resolveDroppedFolderPath(folder, () => "/tmp/project/contracts")).toBe(
+      "/tmp/project/contracts",
+    );
   });
 
-  it("returns null when there is no match", () => {
-    const entries: ReadonlyArray<ProjectEntry> = [{ path: "packages/shared", kind: "directory" }];
-    expect(matchDroppedFolderEntry("contracts", entries)).toBeNull();
+  it("returns null for an outside-folder drop even when the folder name matches a project directory", () => {
+    const folder = new File([], "contracts");
+    expect(resolveDroppedFolderPath(folder, undefined)).toBeNull();
   });
 
-  it("returns null when directory matches are ambiguous", () => {
-    const entries: ReadonlyArray<ProjectEntry> = [
-      { path: "packages/contracts", kind: "directory" },
-      { path: "vendor/contracts", kind: "directory" },
-    ];
-    expect(matchDroppedFolderEntry("contracts", entries)).toBeNull();
-  });
-
-  it("ignores files with the matching name", () => {
-    const entries: ReadonlyArray<ProjectEntry> = [{ path: "src/contracts", kind: "file" }];
-    expect(matchDroppedFolderEntry("contracts", entries)).toBeNull();
+  it("returns null when the bridge returns an empty path", () => {
+    const folder = new File([], "contracts");
+    expect(resolveDroppedFolderPath(folder, () => "")).toBeNull();
   });
 });
