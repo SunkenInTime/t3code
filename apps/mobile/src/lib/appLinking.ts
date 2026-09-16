@@ -4,7 +4,7 @@
  * the launcher, not app navigation. Without this filter it falls through
  * to the NotFound wildcard route on every dev launch.
  * expo-sharing uses a private lifecycle URL only to wake the app. The
- * persisted share inbox below owns navigation once the payload is durable.
+ * persisted share inbox in App.tsx owns navigation once the payload is durable.
  * A scheme-only URL, as sent by iOS dictation keyboards returning to the app,
  * only wakes the app and must not reset navigation to Home.
  */
