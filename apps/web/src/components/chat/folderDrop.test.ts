@@ -27,6 +27,28 @@ describe("folderDropTarget", () => {
     ).toBe("remote");
   });
 
+  it("targets remote when the thread lives on another environment", () => {
+    expect(
+      folderDropTarget({
+        isElectron: true,
+        localEnvironmentDisabled: false,
+        environmentId: EnvironmentId.make("environment-2"),
+        primaryEnvironmentId: environmentId,
+      }),
+    ).toBe("remote");
+  });
+
+  it("targets remote when no primary environment is known", () => {
+    expect(
+      folderDropTarget({
+        isElectron: true,
+        localEnvironmentDisabled: false,
+        environmentId,
+        primaryEnvironmentId: null,
+      }),
+    ).toBe("remote");
+  });
+
   it("targets browser outside Electron", () => {
     expect(
       folderDropTarget({
