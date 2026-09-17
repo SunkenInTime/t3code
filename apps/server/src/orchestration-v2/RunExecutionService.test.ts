@@ -664,7 +664,7 @@ it.effect("refreshes MCP credential liveness before calling the provider", () =>
   }).pipe(Effect.provide(RunExecutionTestLayer)),
 );
 
-it.effect("fails the run when checkpoint baseline capture fails before the provider starts", () =>
+it.effect("starts the provider when checkpoint baseline capture fails", () =>
   Effect.gen(function* () {
     const threadId = ThreadId.make("thread:run-execution-baseline-failure");
     const runId = RunId.make("run:run-execution-baseline-failure");
@@ -742,7 +742,7 @@ it.effect("fails the run when checkpoint baseline capture fails before the provi
         providerTurnOrdinal: 1,
         message: {
           messageId: MessageId.make("message:run-execution-baseline-failure"),
-          text: "Fail before the provider starts.",
+          text: "Start the provider without a baseline.",
           attachments: [],
           createdBy: "user",
           creationSource: "web",
@@ -762,37 +762,21 @@ it.effect("fails the run when checkpoint baseline capture fails before the provi
       });
     }).pipe(Effect.provide(testLayer));
 
-    assert.equal(yield* Ref.get(providerStarts), 0);
+    assert.equal(yield* Ref.get(providerStarts), 1);
 
-    const recorded = yield* Ref.get(writes);
-    assert.isAbove(recorded.length, 0);
-    for (const write of recorded) {
-      assert.deepEqual(write.effects, []);
-    }
-    const events = recorded.flatMap((write) => [...write.events]);
-
-    const runUpdated = events.find((event) => event.type === "run.updated");
-    assert.isDefined(runUpdated);
-    assert.equal(runUpdated!.payload.status, "failed");
-
-    const attemptUpdated = events.find((event) => event.type === "run-attempt.updated");
-    assert.isDefined(attemptUpdated);
-    assert.equal(attemptUpdated!.payload.status, "failed");
-
-    const nodeUpdated = events.find((event) => event.type === "node.updated");
-    assert.isDefined(nodeUpdated);
-    assert.equal(nodeUpdated!.payload.status, "failed");
-
+    const events = (yield* Ref.get(writes)).flatMap((write) => [...write.events]);
+    const failedEvent = events.find(
+      (event) =>
+        (event.type === "run.updated" ||
+          event.type === "run-attempt.updated" ||
+          event.type === "node.updated") &&
+        event.payload.status === "failed",
+    );
+    assert.isUndefined(failedEvent);
     const errorItem = events.find(
       (event) => event.type === "turn-item.updated" && event.payload.type === "error",
     );
-    assert.isDefined(errorItem);
-    if (errorItem?.type === "turn-item.updated" && errorItem.payload.type === "error") {
-      assert.include(
-        errorItem.payload.failure.message,
-        "Checkpoint capture failed before the provider started",
-      );
-    }
+    assert.isUndefined(errorItem);
   }),
 );
 
