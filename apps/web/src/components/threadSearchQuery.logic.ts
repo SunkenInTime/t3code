@@ -71,7 +71,7 @@ function localDayRange(year: number, monthIndex: number, day: number): SearchDat
   };
 }
 
-export function resolveSearchDateToken(rawValue: string, now: Date): SearchDateToken | null {
+function resolveSearchDateToken(rawValue: string, now: Date): SearchDateToken | null {
   const value = rawValue.toLowerCase();
   const relative = /^(\d{1,4})([dw])$/.exec(value);
   if (relative) {
