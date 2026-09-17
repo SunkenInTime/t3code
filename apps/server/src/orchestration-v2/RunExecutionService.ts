@@ -793,7 +793,7 @@ export const layer: Layer.Layer<
                   ? Effect.failCause(cause)
                   : Effect.logWarning(
                       "orchestration V2 checkpoint baseline capture failed; starting provider without a baseline",
-                      { runId: input.run.id, cause },
+                      { runId: input.run.id },
                     ),
               ),
               Effect.mapError(
