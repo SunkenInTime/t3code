@@ -89,7 +89,13 @@ import { sourceControlEnvironment } from "../state/sourceControl";
 import { useAtomCommand } from "../state/use-atom-command";
 import { useAtomQueryRunner } from "../state/use-atom-query-runner";
 import { useEnvironments, usePrimaryEnvironmentId } from "../state/environments";
-import { useProjects, useServerConfigs, useThreadShells, waitForProject } from "../state/entities";
+import {
+  useProjects,
+  useServerConfigs,
+  useThreadShells,
+  waitForProject,
+  waitForThreadShell,
+} from "../state/entities";
 import { useThreadSearch } from "../state/queries";
 import { resolveThreadActionProjectRef, startNewThreadFromContext } from "../lib/chatThreadActions";
 import {
@@ -1342,11 +1348,25 @@ function OpenCommandPaletteDialog(props: {
           // directly falls through to a new-thread draft. Restore the thread
           // first, then open it like any live hit.
           if (thread.archivedAt !== null) {
-            const unarchiveResult = await unarchiveThread(
-              scopeThreadRef(thread.environmentId, thread.id),
-            );
+            const threadRef = scopeThreadRef(thread.environmentId, thread.id);
+            const unarchiveResult = await unarchiveThread(threadRef);
             if (unarchiveResult._tag !== "Success") {
               const error = squashAtomCommandFailure(unarchiveResult);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Failed to restore archived thread",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+              return;
+            }
+            // The restore round-trips through the shell stream before the
+            // thread page can resolve it; navigating early lands on a
+            // "missing" render state that redirects away.
+            try {
+              await waitForThreadShell(threadRef);
+            } catch (error) {
               toastManager.add(
                 stackedThreadToast({
                   type: "error",
