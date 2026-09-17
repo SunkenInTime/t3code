@@ -25,7 +25,9 @@ export function buildLinkedThreadActionItems(
   input: CommandPaletteLinkedThreads & {
     query: string;
     icon: ReactNode;
-    runThread: (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) => Promise<void>;
+    runThread: (
+      thread: Pick<SidebarThreadSummary, "archivedAt" | "environmentId" | "id">,
+    ) => Promise<void>;
   },
 ): CommandPaletteActionItem[] {
   return input.threads.map((thread) => ({
@@ -35,7 +37,12 @@ export function buildLinkedThreadActionItems(
     description: thread.archivedAt === null ? "Linked thread" : "Archived thread",
     searchTerms: [input.query, thread.title],
     icon: input.icon,
-    run: () => input.runThread({ environmentId: input.environmentId, id: thread.id }),
+    run: () =>
+      input.runThread({
+        archivedAt: thread.archivedAt,
+        environmentId: input.environmentId,
+        id: thread.id,
+      }),
   }));
 }
 
@@ -261,7 +268,9 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   /** Optional rich description (e.g. favicon + workspace icons). Falls back to text. */
   renderDescription?: (thread: TThread, meta: { projectTitle: string | undefined }) => ReactNode;
   getContentMatch?: (thread: TThread) => CommandPaletteThreadContentMatch | undefined;
-  runThread: (thread: Pick<SidebarThreadSummary, "environmentId" | "id">) => Promise<void>;
+  runThread: (
+    thread: Pick<SidebarThreadSummary, "archivedAt" | "environmentId" | "id">,
+  ) => Promise<void>;
   limit?: number;
   /** Keep archived threads (search corpora); the default drops them so the
       recents list never surfaces archived rows. */

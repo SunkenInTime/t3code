@@ -75,6 +75,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { isDesktopLocalConnectionTarget } from "../connection/desktopLocal";
 import { useDesktopLocalBootstraps } from "../connection/useDesktopLocalBootstraps";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useThreadActions } from "../hooks/useThreadActions";
 import { useOpenPanelPullRequestUrl } from "../hooks/useOpenPanelPullRequestUrl";
 import { writeTextToClipboard } from "../hooks/useCopyToClipboard";
 import { useClientSettings } from "../hooks/useSettings";
@@ -668,6 +669,7 @@ function OpenCommandPaletteDialog(props: {
   const availableSettingsSearchItems = useAvailableSettingsSearchItems();
   const { activeDraftThread, activeThread, defaultProjectRef, handleNewThread } =
     useHandleNewThread();
+  const { unarchiveThread } = useThreadActions();
   const projects = useProjects();
   const referenceThreadRef =
     pathname === "/pull-requests"
@@ -1336,6 +1338,25 @@ function OpenCommandPaletteDialog(props: {
             : undefined;
         },
         runThread: async (thread) => {
+          // Archived hits aren't in the live shell store, so navigating
+          // directly falls through to a new-thread draft. Restore the thread
+          // first, then open it like any live hit.
+          if (thread.archivedAt !== null) {
+            const unarchiveResult = await unarchiveThread(
+              scopeThreadRef(thread.environmentId, thread.id),
+            );
+            if (unarchiveResult._tag !== "Success") {
+              const error = squashAtomCommandFailure(unarchiveResult);
+              toastManager.add(
+                stackedThreadToast({
+                  type: "error",
+                  title: "Failed to restore archived thread",
+                  description: error instanceof Error ? error.message : "An error occurred.",
+                }),
+              );
+              return;
+            }
+          }
           await navigate({
             to: "/$environmentId/$threadId",
             params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
@@ -1346,6 +1367,7 @@ function OpenCommandPaletteDialog(props: {
       activeThreadId,
       clientSettings.sidebarThreadSortOrder,
       navigate,
+      unarchiveThread,
       projectByKey,
       projectEnvironmentLocationById,
       projectTitleById,
@@ -2553,7 +2575,8 @@ function OpenCommandPaletteDialog(props: {
   // string with a pill behind each recognized operator token, translating
   // with the input's scrollLeft. Root command mode only — browse and
   // submenu queries have no operators.
-  const showOperatorPills = !isSubmenu && !isBrowsing && addProjectCloneFlow === null;
+  const showOperatorPills =
+    !isSubmenu && !isBrowsing && addProjectCloneFlow === null && !query.startsWith(">");
   const searchInputRef = useRef<HTMLInputElement>(null);
   const operatorPillHighlightRef = useRef<HTMLDivElement>(null);
   const syncOperatorPillScroll = useCallback(() => {
@@ -2581,27 +2604,32 @@ function OpenCommandPaletteDialog(props: {
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 px-[var(--command-shell-inset)] py-1.5"
       >
-        <div className="flex h-9.5 items-center overflow-hidden pe-[calc(--spacing(3)-1px)] ps-9 text-base sm:h-8.5 sm:ps-[calc(var(--command-shell-inset)+1.5rem)] sm:text-sm">
-          <div ref={operatorPillHighlightRef} className="shrink-0 whitespace-pre text-foreground">
-            {(() => {
-              // Segments tile the query, so each one's character offset is a
-              // stable, data-derived key even when texts repeat.
-              let offset = 0;
-              return operatorQuerySegments.map((segment) => {
-                const key = `${offset}:${segment.text}`;
-                offset += segment.text.length;
-                return segment.isOperator ? (
-                  <span
-                    key={key}
-                    className="rounded-xs bg-message-action text-message-action-foreground shadow-[0_0_0_2px] shadow-message-action"
-                  >
-                    {segment.text}
-                  </span>
-                ) : (
-                  <span key={key}>{segment.text}</span>
-                );
-              });
-            })()}
+        <div className="flex h-9.5 items-center pe-[calc(--spacing(3)-1px)] ps-9 text-base sm:h-8.5 sm:ps-[calc(var(--command-shell-inset)+1.5rem)] sm:text-sm">
+          {/* Clip starts where the input text starts: the row's ps-9 (search
+              icon zone) stays outside the scroll translation window so
+              scrolled-back text can't paint over the icon. */}
+          <div className="min-w-0 flex-1 overflow-hidden">
+            <div ref={operatorPillHighlightRef} className="shrink-0 whitespace-pre text-foreground">
+              {(() => {
+                // Segments tile the query, so each one's character offset is a
+                // stable, data-derived key even when texts repeat.
+                let offset = 0;
+                return operatorQuerySegments.map((segment) => {
+                  const key = `${offset}:${segment.text}`;
+                  offset += segment.text.length;
+                  return segment.isOperator ? (
+                    <span
+                      key={key}
+                      className="rounded-xs bg-message-action text-message-action-foreground shadow-[0_0_0_2px] shadow-message-action"
+                    >
+                      {segment.text}
+                    </span>
+                  ) : (
+                    <span key={key}>{segment.text}</span>
+                  );
+                });
+              })()}
+            </div>
           </div>
         </div>
       </div>
