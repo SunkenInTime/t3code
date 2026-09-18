@@ -2628,7 +2628,7 @@ function OpenCommandPaletteDialog(props: {
           {/* Clip starts where the input text starts: the row's ps-9 (search
               icon zone) stays outside the scroll translation window so
               scrolled-back text can't paint over the icon. */}
-          <div className="min-w-0 flex-1 overflow-hidden">
+          <div className="-ms-1 -my-1 min-w-0 flex-1 overflow-hidden ps-1 py-1">
             <div ref={operatorPillHighlightRef} className="shrink-0 whitespace-pre text-foreground">
               {(() => {
                 // Segments tile the query, so each one's character offset is a
@@ -2637,15 +2637,18 @@ function OpenCommandPaletteDialog(props: {
                 return operatorQuerySegments.map((segment) => {
                   const key = `${offset}:${segment.text}`;
                   offset += segment.text.length;
-                  return segment.isOperator ? (
+                  if (!segment.isOperator) return <span key={key}>{segment.text}</span>;
+                  const keywordEnd = segment.text.indexOf(":") + 1;
+                  return (
                     <span
                       key={key}
-                      className="rounded-xs bg-message-action text-message-action-foreground shadow-[0_0_0_2px] shadow-message-action"
+                      className="rounded-xs bg-foreground/8 shadow-[0_0_0_1.5px] shadow-foreground/8"
                     >
-                      {segment.text}
+                      <span className="text-muted-foreground">
+                        {segment.text.slice(0, keywordEnd)}
+                      </span>
+                      {segment.text.slice(keywordEnd)}
                     </span>
-                  ) : (
-                    <span key={key}>{segment.text}</span>
                   );
                 });
               })()}
