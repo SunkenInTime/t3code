@@ -8,23 +8,53 @@
  * unescape, and the text keeps its length so source offsets stay valid.
  */
 
-const WINDOWS_DRIVE_DESTINATION_PATTERN = /\]\(\s*(?:<([A-Za-z]:\\[^>\n]*)>|([A-Za-z]:\\[^\s)]*))/g;
-const INLINE_CODE_PATTERN = /(`+)[^`][\s\S]*?\1(?!`)/g;
-const CODE_FENCE_PATTERN = /^ {0,3}(`{3,}|~{3,})/;
+const DESTINATION_START_PATTERN = /\]\(\s*(<?)([A-Za-z]:\\)/g;
+// A code span opens and closes with backtick runs of the same length. A run
+// next to another backtick is part of a longer run, and a backslash before a
+// run escapes its first backtick, so neither can delimit a span.
+const INLINE_CODE_PATTERN = /(?<![`\\])(`+)[^`][\s\S]*?(?<![`\\])\1(?!`)/g;
+// A fence can sit inside block quotes and list items; the container prefixes
+// come first, then up to three spaces, then the fence run.
+const CODE_FENCE_PATTERN = /^(?:(?: {0,3}(?:>|[-+*]|\d{1,9}[.)])(?: |$))*) {0,3}(`{3,}|~{3,})(.*)$/;
+
+/** Length of a bare destination starting at `start`, honoring balanced parentheses. */
+function bareDestinationLength(text: string, start: number): number {
+  let depth = 0;
+  let index = start;
+  while (index < text.length) {
+    const char = text[index];
+    if (char === " " || char === "\t" || char === "\n" || char === "\r") break;
+    if (char === "(") depth += 1;
+    else if (char === ")") {
+      if (depth === 0) break;
+      depth -= 1;
+    }
+    index += 1;
+  }
+  return index - start;
+}
 
 function normalizeDestinations(segment: string): string {
   if (!segment.includes(":\\")) return segment;
-  return segment.replace(
-    WINDOWS_DRIVE_DESTINATION_PATTERN,
-    (match, angle?: string, bare?: string) => {
-      const destination = angle ?? bare;
-      if (destination === undefined) return match;
-      const normalized = destination.replaceAll("\\", "/");
-      return angle === undefined
-        ? match.slice(0, match.length - destination.length) + normalized
-        : match.slice(0, match.length - destination.length - 1) + normalized + ">";
-    },
-  );
+  let result = "";
+  let cursor = 0;
+  for (const match of segment.matchAll(DESTINATION_START_PATTERN)) {
+    const angle = match[1] === "<";
+    const start = match.index + match[0].length - 3;
+    if (start < cursor) continue;
+    const length = angle
+      ? (() => {
+          const end = segment.indexOf(">", start);
+          const lineEnd = segment.indexOf("\n", start);
+          return end < 0 || (lineEnd >= 0 && lineEnd < end) ? -1 : end - start;
+        })()
+      : bareDestinationLength(segment, start);
+    if (length < 0) continue;
+    result += segment.slice(cursor, start);
+    result += segment.slice(start, start + length).replaceAll("\\", "/");
+    cursor = start + length;
+  }
+  return result + segment.slice(cursor);
 }
 
 function normalizeOutsideInlineCode(segment: string): string {
@@ -59,9 +89,12 @@ export function normalizeWindowsMarkdownDestinations(markdown: string): string {
   };
 
   for (const line of lines) {
-    const fence = CODE_FENCE_PATTERN.exec(line)?.[1];
+    const match = CODE_FENCE_PATTERN.exec(line);
+    const fence = match?.[1];
+    const info = match?.[2] ?? "";
     if (openFence === null) {
-      if (fence !== undefined) {
+      // A backtick fence cannot carry a backtick in its info string.
+      if (fence !== undefined && !(fence[0] === "`" && info.includes("`"))) {
         flushProse();
         openFence = fence;
         output.push(line);
@@ -75,7 +108,7 @@ export function normalizeWindowsMarkdownDestinations(markdown: string): string {
       fence !== undefined &&
       fence[0] === openFence[0] &&
       fence.length >= openFence.length &&
-      line.trim() === fence
+      info.trim() === ""
     ) {
       openFence = null;
     }

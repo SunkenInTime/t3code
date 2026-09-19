@@ -74,6 +74,56 @@ describe("normalizeWindowsMarkdownDestinations", () => {
     );
   });
 
+  it.each([
+    [
+      String.raw`[x](C:\repo\(old)\.t3\shot.png) and [y](C:\a\(b(c))\.d\e.md)`,
+      "[x](C:/repo/(old)/.t3/shot.png) and [y](C:/a/(b(c))/.d/e.md)",
+    ],
+    [String.raw`[x](C:\a\.b\x.md)) trailing`, "[x](C:/a/.b/x.md)) trailing"],
+  ])("honors balanced parentheses in bare destinations: %s", (markdown, expected) => {
+    expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(expected);
+  });
+
+  it("does not treat mismatched or escaped backtick runs as code spans", () => {
+    expect(normalizeWindowsMarkdownDestinations("`a [x](C:\\a\\.b\\x.md) ``")).toBe(
+      "`a [x](C:/a/.b/x.md) ``",
+    );
+    expect(normalizeWindowsMarkdownDestinations("\\`not code [x](C:\\a\\.b\\x.md)\\`")).toBe(
+      "\\`not code [x](C:/a/.b/x.md)\\`",
+    );
+    expect(normalizeWindowsMarkdownDestinations("``a ` b [x](C:\\a\\.b\\x.md)``")).toBe(
+      "``a ` b [x](C:\\a\\.b\\x.md)``",
+    );
+  });
+
+  it("leaves fenced code nested in block quotes and list items as written", () => {
+    const markdown = [
+      "> ```",
+      String.raw`> [x](C:\a\.b\x.md)`,
+      "> ```",
+      "",
+      "- item",
+      "",
+      "  ```",
+      String.raw`  [y](C:\a\.b\y.md)`,
+      "  ```",
+      "",
+      String.raw`[z](C:\a\.b\z.md)`,
+    ].join("\n");
+    expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(
+      markdown.replace(String.raw`[z](C:\a\.b\z.md)`, "[z](C:/a/.b/z.md)"),
+    );
+  });
+
+  it("does not open a backtick fence whose info string holds a backtick", () => {
+    const markdown = ["```js`x", String.raw`[x](C:\a\.b\x.md)`].join("\n");
+    expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(
+      ["```js`x", "[x](C:/a/.b/x.md)"].join("\n"),
+    );
+    const tilde = ["~~~js`x", String.raw`[x](C:\a\.b\x.md)`].join("\n");
+    expect(normalizeWindowsMarkdownDestinations(tilde)).toBe(tilde);
+  });
+
   it("keeps rewriting after an unterminated fence ends the document", () => {
     const markdown = [String.raw`![a](C:\a\.b\a.png)`, "```", String.raw`![b](C:\a\.b\b.png)`].join(
       "\n",
