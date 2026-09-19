@@ -11,7 +11,7 @@
 // Inline destinations after `](` and reference definitions such as `[id]: C:\...`.
 // A definition, like a fence, can sit inside block quotes and list items.
 const DESTINATION_START_PATTERN =
-  /(?:\]\(\s*|^(?:(?: {0,3}(?:>|[-+*]|\d{1,9}[.)])(?: |$))*) {0,3}\[(?:[^\]\\\n]|\\.)+\]:[ \t]*(?:\n[ \t]*)?)(<?)([A-Za-z]:\\)/gm;
+  /(?:\]\(\s*|^(?:(?: {0,3}(?:> ?|(?:[-+*]|\d{1,9}[.)])(?: |$)))*) {0,3}\[(?:[^\]\\\n]|\\.)+\]:[ \t]*(?:\n[ \t]*)?)(<?)([A-Za-z]:\\)/gm;
 // A backslash before a parenthesis is an escape the parser needs; rewriting it
 // would leave the parenthesis unbalanced and break the link entirely.
 const SEPARATOR_PATTERN = /\\(?![()])/g;
@@ -22,7 +22,8 @@ const SEPARATOR_PATTERN = /\\(?![()])/g;
 const INLINE_CODE_PATTERN = /(?<![`\\])(`+)[^`][\s\S]*?(?<!`)\1(?!`)/g;
 // A fence can sit inside block quotes and list items; the container prefixes
 // come first, then up to three spaces, then the fence run.
-const CODE_FENCE_PATTERN = /^(?:(?: {0,3}(?:>|[-+*]|\d{1,9}[.)])(?: |$))*) {0,3}(`{3,}|~{3,})(.*)$/;
+const CODE_FENCE_PATTERN =
+  /^(?:(?: {0,3}(?:> ?|(?:[-+*]|\d{1,9}[.)])(?: |$)))*) {0,3}(`{3,}|~{3,})(.*)$/;
 
 /**
  * Length of a bare destination starting at `start`, honoring balanced

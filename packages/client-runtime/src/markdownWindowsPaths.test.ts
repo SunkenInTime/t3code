@@ -116,6 +116,7 @@ describe("normalizeWindowsMarkdownDestinations", () => {
       String.raw`[a\]]:`,
       String.raw`C:\repo\.t3\x.png`,
       String.raw`> [q]: C:\repo\.t3\q.png`,
+      String.raw`>[r]: C:\repo\.t3\r.png`,
       String.raw`- [l]: C:\repo\.t3\l.png`,
       String.raw`not a definition [n]: C:\repo\.claude\x.md`,
     ].join("\n");
@@ -128,6 +129,7 @@ describe("normalizeWindowsMarkdownDestinations", () => {
         String.raw`[a\]]:`,
         "C:/repo/.t3/x.png",
         "> [q]: C:/repo/.t3/q.png",
+        ">[r]: C:/repo/.t3/r.png",
         "- [l]: C:/repo/.t3/l.png",
         String.raw`not a definition [n]: C:\repo\.claude\x.md`,
       ].join("\n"),
