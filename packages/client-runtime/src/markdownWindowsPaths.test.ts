@@ -164,6 +164,18 @@ describe("normalizeWindowsMarkdownDestinations", () => {
     expect(normalizeWindowsMarkdownDestinations(tilde)).toBe(tilde);
   });
 
+  it("closes an unterminated fence when its block quote ends", () => {
+    const markdown = [
+      "> ```",
+      String.raw`> [x](C:\a\.b\x.md)`,
+      "",
+      String.raw`[y](C:\a\.b\y.md)`,
+    ].join("\n");
+    expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(
+      ["> ```", String.raw`> [x](C:\a\.b\x.md)`, "", "[y](C:/a/.b/y.md)"].join("\n"),
+    );
+  });
+
   it("keeps rewriting after an unterminated fence ends the document", () => {
     const markdown = [String.raw`![a](C:\a\.b\a.png)`, "```", String.raw`![b](C:\a\.b\b.png)`].join(
       "\n",

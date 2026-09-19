@@ -133,6 +133,8 @@ export function normalizeWindowsMarkdownDestinations(markdown: string): string {
     prose = [];
   };
 
+  let fenceInQuote = false;
+
   for (const line of lines) {
     const match = CODE_FENCE_PATTERN.exec(line);
     const fence = match?.[1];
@@ -142,10 +144,17 @@ export function normalizeWindowsMarkdownDestinations(markdown: string): string {
       if (fence !== undefined && !(fence[0] === "`" && info.includes("`"))) {
         flushProse();
         openFence = fence;
+        fenceInQuote = /^ {0,3}>/.test(line);
         output.push(line);
       } else {
         prose.push(line);
       }
+      continue;
+    }
+    // A fence opened inside a block quote ends with the quote.
+    if (fenceInQuote && !/^ {0,3}>/.test(line)) {
+      openFence = null;
+      prose.push(line);
       continue;
     }
     output.push(line);
