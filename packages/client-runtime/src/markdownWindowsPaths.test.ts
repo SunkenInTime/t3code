@@ -94,6 +94,29 @@ describe("normalizeWindowsMarkdownDestinations", () => {
     expect(normalizeWindowsMarkdownDestinations("``a ` b [x](C:\\a\\.b\\x.md)``")).toBe(
       "``a ` b [x](C:\\a\\.b\\x.md)``",
     );
+    // Escapes are inert inside a code span, so a backslash before the closer still closes it.
+    expect(
+      normalizeWindowsMarkdownDestinations("`[x](C:\\a\\.b\\x.md)\\` and [y](C:\\a\\.b\\y.md)"),
+    ).toBe("`[x](C:\\a\\.b\\x.md)\\` and [y](C:/a/.b/y.md)");
+  });
+
+  it("rewrites reference-style link and image definitions", () => {
+    const markdown = [
+      "![shot][asset] and [notes][n]",
+      "",
+      String.raw`[asset]: C:\repo\.t3\shot.png "Shot"`,
+      String.raw`   [n]: <C:\repo\.claude\notes.md>`,
+      String.raw`not a definition [n]: C:\repo\.claude\x.md`,
+    ].join("\n");
+    expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(
+      [
+        "![shot][asset] and [notes][n]",
+        "",
+        '[asset]: C:/repo/.t3/shot.png "Shot"',
+        "   [n]: <C:/repo/.claude/notes.md>",
+        String.raw`not a definition [n]: C:\repo\.claude\x.md`,
+      ].join("\n"),
+    );
   });
 
   it("leaves fenced code nested in block quotes and list items as written", () => {

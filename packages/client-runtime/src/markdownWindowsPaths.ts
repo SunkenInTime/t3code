@@ -8,11 +8,13 @@
  * unescape, and the text keeps its length so source offsets stay valid.
  */
 
-const DESTINATION_START_PATTERN = /\]\(\s*(<?)([A-Za-z]:\\)/g;
+// Inline destinations after `](` and reference definitions such as `[id]: C:\...`.
+const DESTINATION_START_PATTERN = /(?:\]\(\s*|^ {0,3}\[[^\]\n]+\]:[ \t]*)(<?)([A-Za-z]:\\)/gm;
 // A code span opens and closes with backtick runs of the same length. A run
-// next to another backtick is part of a longer run, and a backslash before a
-// run escapes its first backtick, so neither can delimit a span.
-const INLINE_CODE_PATTERN = /(?<![`\\])(`+)[^`][\s\S]*?(?<![`\\])\1(?!`)/g;
+// next to another backtick is part of a longer run, and a backslash before the
+// opening run escapes its first backtick. Escapes are inert inside a span, so
+// a backslash before the closing run does not.
+const INLINE_CODE_PATTERN = /(?<![`\\])(`+)[^`][\s\S]*?(?<!`)\1(?!`)/g;
 // A fence can sit inside block quotes and list items; the container prefixes
 // come first, then up to three spaces, then the fence run.
 const CODE_FENCE_PATTERN = /^(?:(?: {0,3}(?:>|[-+*]|\d{1,9}[.)])(?: |$))*) {0,3}(`{3,}|~{3,})(.*)$/;
