@@ -2614,7 +2614,7 @@ function OpenCommandPaletteDialog(props: {
   };
   const operatorChips =
     showOperatorChips && tokenizedQuery.operators.length > 0 ? (
-      <div className="me-1.5 flex min-w-0 shrink items-center gap-1">
+      <div className="me-1.5 flex shrink-0 items-center gap-1">
         {(() => {
           // Repeated tokens (in:a in:a) are legal, so each chip's key pairs
           // the token with its occurrence count — data-derived like the old
@@ -2634,11 +2634,11 @@ function OpenCommandPaletteDialog(props: {
             return (
               <span
                 key={chipKey}
-                className="inline-flex h-6 min-w-0 items-center gap-1 rounded-md bg-muted ps-1.5 pe-0.5 text-xs sm:h-5.5"
+                className="inline-flex h-6 min-w-0 items-center gap-1 rounded-md bg-foreground/10 ps-1.5 pe-0.5 text-xs sm:h-5.5"
               >
                 {project ? <ProjectFavicon project={project} className="size-3.5" /> : null}
                 <span className="text-muted-foreground">{keyword}:</span>
-                <span className="truncate font-medium text-foreground">{value}</span>
+                <span className="max-w-40 truncate font-medium text-foreground">{value}</span>
                 <button
                   type="button"
                   aria-label={`Remove ${keyword} filter`}
@@ -3043,7 +3043,9 @@ function OpenCommandPaletteDialog(props: {
                   hasHighlightedBrowseItem,
                 })
               : undefined,
-        placeholder: inputPlaceholder,
+        // The chips already narrow the input; the long root placeholder would
+        // clip mid-word next to them.
+        placeholder: operatorChips === undefined ? inputPlaceholder : "Search threads",
         wrapperClassName: isSubmenu
           ? "[&_[data-slot=autocomplete-start-addon]]:pointer-events-auto"
           : undefined,

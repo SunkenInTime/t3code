@@ -134,7 +134,7 @@ function CommandInput({
   }
   return (
     <div className={cn("px-[var(--command-shell-inset)] py-1.5", wrapperClassName)}>
-      <div className="flex min-w-0 items-center">
+      <div className="flex min-w-0 items-center overflow-hidden">
         {/* Same left edge as the addon's icon in the no-chips layout
             (shell inset + 2px) so the icon does not move. */}
         <div
@@ -146,7 +146,10 @@ function CommandInput({
         {leading}
         <AutocompleteInput
           autoFocus
-          className={cn(inputClassName, "min-w-24 flex-1 *:data-[slot=autocomplete-input]:ps-0!")}
+          className={cn(
+            inputClassName,
+            "*:data-[slot=autocomplete-input]:ps-0! sm:*:data-[slot=autocomplete-input]:ps-0!",
+          )}
           placeholder={placeholder}
           size="lg"
           {...props}
