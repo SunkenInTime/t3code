@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
   applyProjectSuggestionToQuery,
+  composeThreadSearchQuery,
+  describeSearchOperator,
   filterProjectSuggestions,
   getTrailingProjectOperatorToken,
   hasThreadSearchOperators,
@@ -8,6 +10,7 @@ import {
   parseThreadSearchQuery,
   resolveProjectFilterKeys,
   segmentThreadSearchQuery,
+  tokenizeThreadSearchQuery,
 } from "./threadSearchQuery.logic";
 
 // Local-time construction on purpose: the day operators resolve against the
@@ -292,5 +295,61 @@ describe("segmentThreadSearchQuery", () => {
     expect(segmentThreadSearchQuery("re: meeting", now)).toEqual([
       { text: "re: meeting", isOperator: false },
     ]);
+  });
+});
+
+describe("tokenizeThreadSearchQuery", () => {
+  const now = new Date(2026, 8, 19, 12);
+
+  it("commits operators once whitespace follows them", () => {
+    expect(tokenizeThreadSearchQuery('in:"My Project" after:7d fix', now)).toEqual({
+      operators: ['in:"My Project"', "after:7d"],
+      text: "fix",
+    });
+    expect(tokenizeThreadSearchQuery("in:atlas ", now)).toEqual({
+      operators: ["in:atlas"],
+      text: "",
+    });
+  });
+
+  it("keeps a trailing operator editable while it is still being typed", () => {
+    expect(tokenizeThreadSearchQuery("in:atlas agent:co", now)).toEqual({
+      operators: ["in:atlas"],
+      text: "agent:co",
+    });
+    expect(tokenizeThreadSearchQuery("in:", now)).toEqual({ operators: [], text: "in:" });
+  });
+
+  it("leaves valueless and unparseable operators as text", () => {
+    expect(tokenizeThreadSearchQuery("in: fix", now)).toEqual({ operators: [], text: "in: fix" });
+    expect(tokenizeThreadSearchQuery("before:banana fix", now)).toEqual({
+      operators: [],
+      text: "before:banana fix",
+    });
+  });
+
+  it("pulls operators typed mid-text out and preserves trailing whitespace", () => {
+    expect(tokenizeThreadSearchQuery("fix in:atlas later ", now)).toEqual({
+      operators: ["in:atlas"],
+      text: "fix later ",
+    });
+  });
+
+  it("round-trips through composeThreadSearchQuery", () => {
+    const composed = composeThreadSearchQuery(["in:atlas", "on:today"], "fix ");
+    expect(composed).toBe("in:atlas on:today fix ");
+    expect(tokenizeThreadSearchQuery(composed, now)).toEqual({
+      operators: ["in:atlas", "on:today"],
+      text: "fix ",
+    });
+    expect(composeThreadSearchQuery([], "fix")).toBe("fix");
+  });
+
+  it("describes operator tokens without quotes", () => {
+    expect(describeSearchOperator('In:"My Project"')).toEqual({
+      keyword: "in",
+      value: "My Project",
+    });
+    expect(describeSearchOperator("after:7d")).toEqual({ keyword: "after", value: "7d" });
   });
 });

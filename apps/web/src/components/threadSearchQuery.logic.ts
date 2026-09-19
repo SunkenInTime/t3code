@@ -317,6 +317,56 @@ export function applyProjectSuggestionToQuery(
   return `${query.slice(0, token.start)}${filter}`;
 }
 
+export interface TokenizedThreadSearchQuery {
+  /** Committed operator tokens, verbatim (quotes included), in query order. */
+  readonly operators: readonly string[];
+  /** Everything else, as the user should see it in the text input. */
+  readonly text: string;
+}
+
+/**
+ * Splits the query into committed operator chips and editable text. An
+ * operator commits once whitespace follows it (the user finished the token);
+ * a trailing operator is still being typed and stays in the text so the
+ * autocomplete can complete it. `composeThreadSearchQuery` is the inverse and
+ * the pair is a fixed point: tokenizing a composed query yields the same
+ * chips and text, so the palette can keep one canonical query string.
+ */
+export function tokenizeThreadSearchQuery(query: string, now: Date): TokenizedThreadSearchQuery {
+  const segments = segmentThreadSearchQuery(query, now);
+  const operators: string[] = [];
+  let text = "";
+  let afterOperator = false;
+  segments.forEach((segment, index) => {
+    // A valueless `in: ` is nothing to filter by; leave it as text.
+    if (
+      segment.isOperator &&
+      index < segments.length - 1 &&
+      describeSearchOperator(segment.text).value.trim().length > 0
+    ) {
+      operators.push(segment.text);
+      afterOperator = true;
+      return;
+    }
+    text += afterOperator ? segment.text.trimStart() : segment.text;
+    afterOperator = false;
+  });
+  return { operators, text };
+}
+
+export function composeThreadSearchQuery(operators: readonly string[], text: string): string {
+  return operators.map((operator) => `${operator} `).join("") + text;
+}
+
+/** Keyword and unquoted value of an operator token, for chip display. */
+export function describeSearchOperator(token: string): { keyword: string; value: string } {
+  const separator = token.indexOf(":");
+  return {
+    keyword: token.slice(0, separator).toLowerCase(),
+    value: unquoteSearchValue(token.slice(separator + 1)),
+  };
+}
+
 export interface ThreadSearchQuerySegment {
   readonly text: string;
   readonly isOperator: boolean;

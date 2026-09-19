@@ -57,6 +57,7 @@ import {
   SettingsIcon,
   SquarePenIcon,
   TextSearchIcon,
+  XIcon,
 } from "lucide-react";
 import {
   useCallback,
@@ -113,13 +114,15 @@ import { onOpenCommandPalette } from "../commandPaletteBus";
 import { useArchivedThreadSnapshots } from "../lib/archivedThreadsState";
 import {
   applyProjectSuggestionToQuery,
+  composeThreadSearchQuery,
+  describeSearchOperator,
   filterProjectSuggestions,
   getTrailingProjectOperatorToken,
   hasThreadSearchOperators,
   matchesParsedThreadSearch,
   parseThreadSearchQuery,
   resolveProjectFilterKeys,
-  segmentThreadSearchQuery,
+  tokenizeThreadSearchQuery,
 } from "./threadSearchQuery.logic";
 import { isPreviewFocused } from "../lib/previewFocus";
 import { isTerminalFocused } from "../lib/terminalFocus";
@@ -2590,73 +2593,67 @@ function OpenCommandPaletteDialog(props: {
     getCommandPaletteInputPlaceholder(paletteMode);
   const isSubmenu = paletteMode === "submenu" || paletteMode === "submenu-browse";
 
-  // Discord-style operator pills: the input's own text goes transparent (the
-  // caret stays visible) and a metric-identical backdrop renders the same
-  // string with a pill behind each recognized operator token, translating
-  // with the input's scrollLeft. Root command mode only — browse and
-  // submenu queries have no operators.
-  const showOperatorPills =
+  // Discord-style operator chips: committed operator tokens render as
+  // removable chips ahead of the input while the canonical query string
+  // keeps them prefixed, so every downstream consumer stays unchanged.
+  // Root command mode only — browse, submenu, and > queries have no
+  // operators.
+  const showOperatorChips =
     !isSubmenu && !isBrowsing && addProjectCloneFlow === null && !query.startsWith(">");
-  const searchInputRef = useRef<HTMLInputElement>(null);
-  const operatorPillHighlightRef = useRef<HTMLDivElement>(null);
-  const syncOperatorPillScroll = useCallback(() => {
-    const highlight = operatorPillHighlightRef.current;
-    const input = searchInputRef.current;
-    if (highlight === null || input === null) return;
-    highlight.style.transform = `translateX(${-input.scrollLeft}px)`;
-  }, []);
-  useLayoutEffect(() => {
-    // Typing at the end of an overflowing query scrolls the input after the
-    // change event; re-sync once the new value has laid out.
-    syncOperatorPillScroll();
-  }, [query, syncOperatorPillScroll]);
-  const operatorQuerySegments = useMemo(
-    () => (showOperatorPills ? segmentThreadSearchQuery(query, new Date()) : []),
-    [query, showOperatorPills],
+  const tokenizedQuery = useMemo(
+    () =>
+      showOperatorChips
+        ? tokenizeThreadSearchQuery(query, new Date())
+        : { operators: [], text: query },
+    [query, showOperatorChips],
   );
-  const operatorPillBackdrop =
-    showOperatorPills && operatorQuerySegments.length > 0 ? (
-      // Mirrors CommandInput's metrics exactly: the outer div reproduces the
-      // shell inset, the row reproduces the lg input's height and start
-      // padding, and the text run carries no padding of its own — the pill
-      // look comes from a layout-neutral shadow halo.
-      <div
-        aria-hidden="true"
-        className="pointer-events-none absolute inset-0 px-[var(--command-shell-inset)] py-1.5"
-      >
-        <div className="flex h-9.5 items-center pe-[calc(--spacing(3)-1px)] ps-9 text-base sm:h-8.5 sm:ps-[calc(var(--command-shell-inset)+1.5rem)] sm:text-sm">
-          {/* Clip starts where the input text starts: the row's ps-9 (search
-              icon zone) stays outside the scroll translation window so
-              scrolled-back text can't paint over the icon. */}
-          <div className="-ms-1 -my-1 min-w-0 flex-1 overflow-hidden ps-1 py-1">
-            <div ref={operatorPillHighlightRef} className="shrink-0 whitespace-pre text-foreground">
-              {(() => {
-                // Segments tile the query, so each one's character offset is a
-                // stable, data-derived key even when texts repeat.
-                let offset = 0;
-                return operatorQuerySegments.map((segment) => {
-                  const key = `${offset}:${segment.text}`;
-                  offset += segment.text.length;
-                  if (!segment.isOperator) return <span key={key}>{segment.text}</span>;
-                  const keywordEnd = segment.text.indexOf(":") + 1;
-                  return (
-                    <span
-                      key={key}
-                      className="rounded-xs bg-foreground/15 shadow-[0_0_0_1.5px] shadow-foreground/15"
-                    >
-                      <span className="text-muted-foreground">
-                        {segment.text.slice(0, keywordEnd)}
-                      </span>
-                      {segment.text.slice(keywordEnd)}
-                    </span>
-                  );
-                });
-              })()}
-            </div>
-          </div>
-        </div>
+  const removeOperatorChip = (index: number) => {
+    handleQueryChange(
+      composeThreadSearchQuery(tokenizedQuery.operators.toSpliced(index, 1), tokenizedQuery.text),
+    );
+  };
+  const operatorChips =
+    showOperatorChips && tokenizedQuery.operators.length > 0 ? (
+      <div className="me-1.5 flex min-w-0 shrink items-center gap-1">
+        {(() => {
+          // Repeated tokens (in:a in:a) are legal, so each chip's key pairs
+          // the token with its occurrence count — data-derived like the old
+          // segment offsets, and stable when a chip is removed.
+          const occurrences = new Map<string, number>();
+          return tokenizedQuery.operators.map((token, index) => {
+            const occurrence = occurrences.get(token) ?? 0;
+            occurrences.set(token, occurrence + 1);
+            const chipKey = `${token}#${occurrence}`;
+            const { keyword, value } = describeSearchOperator(token);
+            const project =
+              keyword === "in"
+                ? projectGroups.find(
+                    (group) => group.displayName.toLowerCase() === value.toLowerCase(),
+                  )
+                : undefined;
+            return (
+              <span
+                key={chipKey}
+                className="inline-flex h-6 min-w-0 items-center gap-1 rounded-md bg-muted ps-1.5 pe-0.5 text-xs sm:h-5.5"
+              >
+                {project ? <ProjectFavicon project={project} className="size-3.5" /> : null}
+                <span className="text-muted-foreground">{keyword}:</span>
+                <span className="truncate font-medium text-foreground">{value}</span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${keyword} filter`}
+                  className="inline-flex size-4 shrink-0 cursor-pointer items-center justify-center rounded-sm text-muted-foreground hover:bg-foreground/10 hover:text-foreground"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={() => removeOperatorChip(index)}
+                >
+                  <XIcon className="size-3" />
+                </button>
+              </span>
+            );
+          });
+        })()}
       </div>
-    ) : null;
+    ) : undefined;
   const hasHighlightedBrowseItem = highlightedItemValue?.startsWith("browse:") ?? false;
   const canSubmitBrowsePath =
     isBrowsing &&
@@ -2732,6 +2729,19 @@ function OpenCommandPaletteDialog(props: {
   }
 
   function handleKeyDown(event: KeyboardEvent<HTMLInputElement>): void {
+    // Backspace at the start of the text removes the last operator chip,
+    // mirroring tokenized inputs (Discord, Gmail).
+    if (
+      showOperatorChips &&
+      event.key === "Backspace" &&
+      tokenizedQuery.operators.length > 0 &&
+      event.currentTarget.selectionStart === 0 &&
+      event.currentTarget.selectionEnd === 0
+    ) {
+      event.preventDefault();
+      removeOperatorChip(tokenizedQuery.operators.length - 1);
+      return;
+    }
     const command = resolveShortcutCommand(event, keybindings, {
       platform: navigator.platform,
       context: { modelPickerOpen: false },
@@ -3020,15 +3030,11 @@ function OpenCommandPaletteDialog(props: {
       footerActionLabel={footerActionLabel}
       footerTrailing={footerTrailing}
       inputAccessory={inputAccessory}
-      inputBackdrop={operatorPillBackdrop}
       inputProps={{
-        ref: (node: HTMLInputElement | null) => {
-          searchInputRef.current = node;
-        },
-        onScroll: syncOperatorPillScroll,
+        leading: operatorChips,
         // The submit button is absolutely positioned over the field, so the
         // inner input must reserve enough room for the full action label.
-        className: cn(
+        className:
           addProjectCloneFlow?.step === "repository"
             ? "*:data-[slot=autocomplete-input]:pe-32!"
             : isBrowsing
@@ -3037,11 +3043,6 @@ function OpenCommandPaletteDialog(props: {
                   hasHighlightedBrowseItem,
                 })
               : undefined,
-          // Glyphs render in the pill backdrop; the input keeps the caret
-          // and selection. Only while the backdrop is actually mounted.
-          operatorPillBackdrop !== null &&
-            "*:data-[slot=autocomplete-input]:text-transparent! *:data-[slot=autocomplete-input]:caret-foreground",
-        ),
         placeholder: inputPlaceholder,
         wrapperClassName: isSubmenu
           ? "[&_[data-slot=autocomplete-start-addon]]:pointer-events-auto"
@@ -3068,10 +3069,14 @@ function OpenCommandPaletteDialog(props: {
       onItemHighlighted={(value) => {
         setHighlightedItemValue(typeof value === "string" ? value : null);
       }}
-      onValueChange={handleQueryChange}
+      onValueChange={(text) => {
+        handleQueryChange(
+          showOperatorChips ? composeThreadSearchQuery(tokenizedQuery.operators, text) : text,
+        );
+      }}
       panelClassName="max-h-[min(28rem,70vh)]"
       showBackHint={isSubmenu}
-      value={query}
+      value={tokenizedQuery.text}
     >
       {remoteProjectContext ? (
         <div className="p-2 pb-0">
