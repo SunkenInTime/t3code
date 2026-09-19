@@ -75,11 +75,18 @@ describe("normalizeWindowsMarkdownDestinations", () => {
   });
 
   it.each([
+    // Not a link as written: the parser reads `\(` as an escape and stops at `)`.
+    // Reading every backslash as a separator repairs it.
     [
-      String.raw`[x](C:\repo\(old)\.t3\shot.png) and [y](C:\a\(b(c))\.d\e.md)`,
-      "[x](C:/repo/(old)/.t3/shot.png) and [y](C:/a/(b(c))/.d/e.md)",
+      String.raw`[x](C:\repo\(old)\.t3\shot.png) and [y](C:\a\(b)(c)\.d\e.md)`,
+      "[x](C:/repo/(old)/.t3/shot.png) and [y](C:/a/(b)(c)/.d/e.md)",
     ],
     [String.raw`[x](C:\a\.b\x.md)) trailing`, "[x](C:/a/.b/x.md)) trailing"],
+    // A link as written keeps its escaped parenthesis so it still parses.
+    [
+      String.raw`[x](C:\a\(foo.png) and [y](C:\a\.b\)x.md "t")`,
+      String.raw`[x](C:/a\(foo.png) and [y](C:/a/.b\)x.md "t")`,
+    ],
   ])("honors balanced parentheses in bare destinations: %s", (markdown, expected) => {
     expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(expected);
   });
@@ -106,6 +113,8 @@ describe("normalizeWindowsMarkdownDestinations", () => {
       "",
       String.raw`[asset]: C:\repo\.t3\shot.png "Shot"`,
       String.raw`   [n]: <C:\repo\.claude\notes.md>`,
+      String.raw`[a\]]:`,
+      String.raw`C:\repo\.t3\x.png`,
       String.raw`not a definition [n]: C:\repo\.claude\x.md`,
     ].join("\n");
     expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(
@@ -114,6 +123,8 @@ describe("normalizeWindowsMarkdownDestinations", () => {
         "",
         '[asset]: C:/repo/.t3/shot.png "Shot"',
         "   [n]: <C:/repo/.claude/notes.md>",
+        String.raw`[a\]]:`,
+        "C:/repo/.t3/x.png",
         String.raw`not a definition [n]: C:\repo\.claude\x.md`,
       ].join("\n"),
     );

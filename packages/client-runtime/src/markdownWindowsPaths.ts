@@ -9,7 +9,11 @@
  */
 
 // Inline destinations after `](` and reference definitions such as `[id]: C:\...`.
-const DESTINATION_START_PATTERN = /(?:\]\(\s*|^ {0,3}\[[^\]\n]+\]:[ \t]*)(<?)([A-Za-z]:\\)/gm;
+const DESTINATION_START_PATTERN =
+  /(?:\]\(\s*|^ {0,3}\[(?:[^\]\\\n]|\\.)+\]:[ \t]*(?:\n[ \t]*)?)(<?)([A-Za-z]:\\)/gm;
+// A backslash before a parenthesis is an escape the parser needs; rewriting it
+// would leave the parenthesis unbalanced and break the link entirely.
+const SEPARATOR_PATTERN = /\\(?![()])/g;
 // A code span opens and closes with backtick runs of the same length. A run
 // next to another backtick is part of a longer run, and a backslash before the
 // opening run escapes its first backtick. Escapes are inert inside a span, so
@@ -19,13 +23,25 @@ const INLINE_CODE_PATTERN = /(?<![`\\])(`+)[^`][\s\S]*?(?<!`)\1(?!`)/g;
 // come first, then up to three spaces, then the fence run.
 const CODE_FENCE_PATTERN = /^(?:(?: {0,3}(?:>|[-+*]|\d{1,9}[.)])(?: |$))*) {0,3}(`{3,}|~{3,})(.*)$/;
 
-/** Length of a bare destination starting at `start`, honoring balanced parentheses. */
-function bareDestinationLength(text: string, start: number): number {
+/**
+ * Length of a bare destination starting at `start`, honoring balanced
+ * parentheses. With `escapes` on, a backslash before a parenthesis hides it
+ * from the balance, which is how the parser reads the text as written.
+ */
+function bareDestination(
+  text: string,
+  start: number,
+  escapes: boolean,
+): { readonly length: number; readonly balanced: boolean } {
   let depth = 0;
   let index = start;
   while (index < text.length) {
     const char = text[index];
     if (char === " " || char === "\t" || char === "\n" || char === "\r") break;
+    if (escapes && char === "\\" && (text[index + 1] === "(" || text[index + 1] === ")")) {
+      index += 2;
+      continue;
+    }
     if (char === "(") depth += 1;
     else if (char === ")") {
       if (depth === 0) break;
@@ -33,7 +49,7 @@ function bareDestinationLength(text: string, start: number): number {
     }
     index += 1;
   }
-  return index - start;
+  return { length: index - start, balanced: depth === 0 };
 }
 
 function normalizeDestinations(segment: string): string {
@@ -44,16 +60,41 @@ function normalizeDestinations(segment: string): string {
     const angle = match[1] === "<";
     const start = match.index + match[0].length - 3;
     if (start < cursor) continue;
-    const length = angle
-      ? (() => {
-          const end = segment.indexOf(">", start);
-          const lineEnd = segment.indexOf("\n", start);
-          return end < 0 || (lineEnd >= 0 && lineEnd < end) ? -1 : end - start;
-        })()
-      : bareDestinationLength(segment, start);
-    if (length < 0) continue;
+    let length: number;
+    let separators = SEPARATOR_PATTERN;
+    if (angle) {
+      const end = segment.indexOf(">", start);
+      const lineEnd = segment.indexOf("\n", start);
+      if (end < 0 || (lineEnd >= 0 && lineEnd < end)) continue;
+      length = end - start;
+    } else {
+      // A backslash before a parenthesis is a separator when reading it that
+      // way still yields a balanced destination that the link can close after,
+      // which repairs `\(old)\` segments the parser would otherwise cut short.
+      // Otherwise it stays an escape, so a link that renders today keeps
+      // rendering with the same extent.
+      const escaped = bareDestination(segment, start, true);
+      const literal = bareDestination(segment, start, false);
+      const afterLiteral = segment[start + literal.length];
+      const afterEscapedClose = segment[start + escaped.length + 1];
+      // The escaped reading is bogus when the `)` it stops at is followed by
+      // more path text, since that `)` cannot be the link's own closer.
+      const escapedCutShort =
+        segment[start + escaped.length] === ")" &&
+        afterEscapedClose !== undefined &&
+        afterEscapedClose !== ")" &&
+        !/\s/.test(afterEscapedClose);
+      const useLiteral =
+        literal.balanced &&
+        (literal.length === escaped.length ||
+          (escapedCutShort &&
+            afterLiteral !== undefined &&
+            (afterLiteral === ")" || /\s/.test(afterLiteral))));
+      length = useLiteral ? literal.length : escaped.length;
+      if (useLiteral) separators = /\\/g;
+    }
     result += segment.slice(cursor, start);
-    result += segment.slice(start, start + length).replaceAll("\\", "/");
+    result += segment.slice(start, start + length).replace(separators, "/");
     cursor = start + length;
   }
   return result + segment.slice(cursor);
