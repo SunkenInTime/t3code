@@ -115,6 +115,8 @@ describe("normalizeWindowsMarkdownDestinations", () => {
       String.raw`   [n]: <C:\repo\.claude\notes.md>`,
       String.raw`[a\]]:`,
       String.raw`C:\repo\.t3\x.png`,
+      String.raw`> [q]: C:\repo\.t3\q.png`,
+      String.raw`- [l]: C:\repo\.t3\l.png`,
       String.raw`not a definition [n]: C:\repo\.claude\x.md`,
     ].join("\n");
     expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(
@@ -125,6 +127,8 @@ describe("normalizeWindowsMarkdownDestinations", () => {
         "   [n]: <C:/repo/.claude/notes.md>",
         String.raw`[a\]]:`,
         "C:/repo/.t3/x.png",
+        "> [q]: C:/repo/.t3/q.png",
+        "- [l]: C:/repo/.t3/l.png",
         String.raw`not a definition [n]: C:\repo\.claude\x.md`,
       ].join("\n"),
     );
