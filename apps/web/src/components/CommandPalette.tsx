@@ -2642,7 +2642,7 @@ function OpenCommandPaletteDialog(props: {
                   return (
                     <span
                       key={key}
-                      className="rounded-xs bg-foreground/8 shadow-[0_0_0_1.5px] shadow-foreground/8"
+                      className="rounded-xs bg-foreground/15 shadow-[0_0_0_1.5px] shadow-foreground/15"
                     >
                       <span className="text-muted-foreground">
                         {segment.text.slice(0, keywordEnd)}
