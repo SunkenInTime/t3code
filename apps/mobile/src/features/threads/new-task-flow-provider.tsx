@@ -98,6 +98,7 @@ import { useLegacyPlanModeState } from "./use-legacy-plan-mode-enabled";
 import {
   resolveNewTaskBranchWorktreePath,
   resolveNewTaskLocalWorkspaceSelection,
+  shouldAutoSelectWorktreeBaseBranch,
 } from "./new-task-context-presentation";
 import { resolveEnvironmentProjectMatch } from "./new-task-project-selection";
 import { resolveProjectThreadCreationBranch } from "./projectThreadCreationValidation";
@@ -873,9 +874,14 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
 
   useEffect(() => {
     if (
-      !defaultWorkspaceModeSettled ||
-      workspaceMode !== "worktree" ||
-      selectedBranchName !== null
+      !shouldAutoSelectWorktreeBaseBranch({
+        defaultWorkspaceModeSettled,
+        workspaceMode,
+        selectedBranchName,
+        liveWorkspaceSelection: selectedProjectDraftKey
+          ? getComposerDraftSnapshot(selectedProjectDraftKey).workspaceSelection
+          : undefined,
+      })
     ) {
       return;
     }
@@ -894,6 +900,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
     defaultWorkspaceModeSettled,
     selectBranch,
     selectedBranchName,
+    selectedProjectDraftKey,
     workspaceMode,
   ]);
 

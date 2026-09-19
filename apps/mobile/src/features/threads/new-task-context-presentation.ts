@@ -74,6 +74,31 @@ export function resolveNewTaskBranchLabel(input: {
   return `From ${baseRef}`;
 }
 
+/**
+ * Whether the worktree default still needs a base branch. Reads the draft's
+ * live selection rather than the rendered one: the route that carries a
+ * thread's branch writes its local selection in the same commit this effect
+ * runs, and a stale worktree/null view of the draft must not overwrite it.
+ */
+export function shouldAutoSelectWorktreeBaseBranch(input: {
+  readonly defaultWorkspaceModeSettled: boolean;
+  readonly workspaceMode: WorkspaceMode;
+  readonly selectedBranchName: string | null;
+  readonly liveWorkspaceSelection:
+    | { readonly mode: WorkspaceMode; readonly branch: string | null }
+    | undefined;
+}): boolean {
+  if (
+    !input.defaultWorkspaceModeSettled ||
+    input.workspaceMode !== "worktree" ||
+    input.selectedBranchName !== null
+  ) {
+    return false;
+  }
+  const live = input.liveWorkspaceSelection;
+  return live === undefined || (live.mode === "worktree" && live.branch === null);
+}
+
 export function shouldCheckoutNewTaskBranch(input: {
   readonly branchIsCurrent: boolean;
   readonly branchWorktreePath: string | null | undefined;
