@@ -25,7 +25,8 @@ const INLINE_CODE_PATTERN =
   /(?<!`)(?<!(?<!\\)(?:\\\\)*\\)(`+)[^`](?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
 // A fence can sit inside block quotes and list items at any nesting depth, so
 // any indentation is accepted before the fence run. A fence-looking line that
-// is really indented code is code either way, so protecting it costs nothing.
+// is really indented code is code either way; the loop below ends it where
+// the indented block ends.
 const CODE_FENCE_PATTERN =
   /^(?:(?: {0,3}(?:> ?|(?:[-+*]|\d{1,9}[.)])(?: |$)))*)\s*(`{3,}|~{3,})(.*)$/;
 
@@ -140,6 +141,7 @@ export function normalizeWindowsMarkdownDestinations(markdown: string): string {
   };
 
   let fenceInQuote = false;
+  let fenceColumn = 0;
 
   for (const line of lines) {
     const match = CODE_FENCE_PATTERN.exec(line);
@@ -151,14 +153,21 @@ export function normalizeWindowsMarkdownDestinations(markdown: string): string {
         flushProse();
         openFence = fence;
         fenceInQuote = /^ {0,3}>/.test(line);
+        fenceColumn = line.indexOf(fence);
         output.push(line);
       } else {
         prose.push(line);
       }
       continue;
     }
-    // A fence opened inside a block quote ends with the quote.
-    if (fenceInQuote && !/^ {0,3}>/.test(line)) {
+    // A fence opened inside a block quote ends with the quote, and an indented
+    // fence ends with its list item or indented code block: the first non-blank
+    // line that sits left of the fence run is outside that container.
+    const indent = line.length - line.trimStart().length;
+    if (
+      (fenceInQuote && !/^ {0,3}>/.test(line)) ||
+      (!fenceInQuote && fenceColumn > 0 && indent < fenceColumn && line.trim() !== "")
+    ) {
       openFence = null;
       prose.push(line);
       continue;

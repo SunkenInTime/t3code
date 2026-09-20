@@ -188,6 +188,31 @@ describe("normalizeWindowsMarkdownDestinations", () => {
     );
   });
 
+  it("ends an indented fence-looking block where its indentation ends", () => {
+    const markdown = [
+      "    ~~~",
+      "",
+      String.raw`![shot](C:\Users\dara\.t3\shot.png)`,
+      "",
+      "- [ ] Review",
+    ].join("\n");
+    expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(
+      markdown.replace(String.raw`(C:\Users\dara\.t3\shot.png)`, "(C:/Users/dara/.t3/shot.png)"),
+    );
+  });
+
+  it("closes an unterminated fence when its list item ends", () => {
+    const markdown = [
+      "- ```markdown",
+      "  example",
+      "",
+      String.raw`![shot](C:\Users\dara\.t3\shot.png)`,
+    ].join("\n");
+    expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(
+      markdown.replace(String.raw`(C:\Users\dara\.t3\shot.png)`, "(C:/Users/dara/.t3/shot.png)"),
+    );
+  });
+
   it("does not let a code span cross a blank line", () => {
     const markdown = [
       "An unmatched ` here.",
