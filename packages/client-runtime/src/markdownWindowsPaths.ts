@@ -153,7 +153,11 @@ export function normalizeWindowsMarkdownDestinations(markdown: string): string {
         flushProse();
         openFence = fence;
         fenceInQuote = /^ {0,3}>/.test(line);
-        fenceColumn = line.indexOf(fence);
+        // Only a fence inside a list item or an indented block has a container
+        // to end; an ordinary fence may sit up to three spaces in and still
+        // hold unindented content.
+        const column = line.indexOf(fence);
+        fenceColumn = column >= 4 || /^ {0,3}(?:[-+*]|\d{1,9}[.)]) /.test(line) ? column : 0;
         output.push(line);
       } else {
         prose.push(line);

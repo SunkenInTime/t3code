@@ -201,6 +201,11 @@ describe("normalizeWindowsMarkdownDestinations", () => {
     );
   });
 
+  it("keeps a slightly indented top-level fence open over unindented content", () => {
+    const markdown = ["  ```", String.raw`[x](C:\a\.b\x.md)`, "  ```"].join("\n");
+    expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(markdown);
+  });
+
   it("closes an unterminated fence when its list item ends", () => {
     const markdown = [
       "- ```markdown",
