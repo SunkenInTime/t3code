@@ -105,6 +105,10 @@ describe("normalizeWindowsMarkdownDestinations", () => {
     expect(normalizeWindowsMarkdownDestinations("``a ` b [x](C:\\a\\.b\\x.md)``")).toBe(
       "``a ` b [x](C:\\a\\.b\\x.md)``",
     );
+    // Two backslashes are an escaped backslash, so the backtick after them still opens a span.
+    expect(
+      normalizeWindowsMarkdownDestinations("\\\\`[x](C:\\a\\.b\\x.md)` and [y](C:\\a\\.b\\y.md)"),
+    ).toBe("\\\\`[x](C:\\a\\.b\\x.md)` and [y](C:/a/.b/y.md)");
     // Escapes are inert inside a code span, so a backslash before the closer still closes it.
     expect(
       normalizeWindowsMarkdownDestinations("`[x](C:\\a\\.b\\x.md)\\` and [y](C:\\a\\.b\\y.md)"),

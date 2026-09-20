@@ -17,10 +17,12 @@ const DESTINATION_START_PATTERN =
 const SEPARATOR_PATTERN = /\\(?![()])/g;
 // A code span opens and closes with backtick runs of the same length. A run
 // next to another backtick is part of a longer run, and a backslash before the
-// opening run escapes its first backtick. Escapes are inert inside a span, so
-// a backslash before the closing run does not. A span cannot cross a blank
-// line, since that ends the paragraph.
-const INLINE_CODE_PATTERN = /(?<![`\\])(`+)[^`](?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
+// opening run escapes its first backtick, unless that backslash is itself
+// escaped, so only an odd run of backslashes counts. Escapes are inert inside
+// a span, so a backslash before the closing run does not. A span cannot cross
+// a blank line, since that ends the paragraph.
+const INLINE_CODE_PATTERN =
+  /(?<!`)(?<!(?<!\\)(?:\\\\)*\\)(`+)[^`](?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
 // A fence can sit inside block quotes and list items at any nesting depth, so
 // any indentation is accepted before the fence run. A fence-looking line that
 // is really indented code is code either way, so protecting it costs nothing.
