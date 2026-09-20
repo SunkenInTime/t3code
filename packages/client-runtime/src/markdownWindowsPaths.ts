@@ -11,19 +11,21 @@
 // Inline destinations after `](` and reference definitions such as `[id]: C:\...`.
 // A definition, like a fence, can sit inside block quotes and list items.
 const DESTINATION_START_PATTERN =
-  /(?:\]\(\s*|^(?:(?: {0,3}(?:> ?|(?:[-+*]|\d{1,9}[.)])(?: |$)))*) {0,3}\[(?:[^\]\\\n]|\\.)+\]:[ \t]*(?:\n[ \t]*)?)(<?)([A-Za-z]:\\)/gm;
+  /(?:\]\(\s*|^(?:(?: {0,3}(?:> ?|(?:[-+*]|\d{1,9}[.)])(?: |$)))*) {0,3}\[(?:[^\]\\\n]|\\.)+\]:[ \t]*(?:\n[ \t]*)?)(<?)([A-Za-z]:[\\/])/gm;
 // A backslash before a parenthesis is an escape the parser needs; rewriting it
 // would leave the parenthesis unbalanced and break the link entirely.
 const SEPARATOR_PATTERN = /\\(?![()])/g;
 // A code span opens and closes with backtick runs of the same length. A run
 // next to another backtick is part of a longer run, and a backslash before the
 // opening run escapes its first backtick. Escapes are inert inside a span, so
-// a backslash before the closing run does not.
-const INLINE_CODE_PATTERN = /(?<![`\\])(`+)[^`][\s\S]*?(?<!`)\1(?!`)/g;
-// A fence can sit inside block quotes and list items; the container prefixes
-// come first, then up to three spaces, then the fence run.
+// a backslash before the closing run does not. A span cannot cross a blank
+// line, since that ends the paragraph.
+const INLINE_CODE_PATTERN = /(?<![`\\])(`+)[^`](?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
+// A fence can sit inside block quotes and list items at any nesting depth, so
+// any indentation is accepted before the fence run. A fence-looking line that
+// is really indented code is code either way, so protecting it costs nothing.
 const CODE_FENCE_PATTERN =
-  /^(?:(?: {0,3}(?:> ?|(?:[-+*]|\d{1,9}[.)])(?: |$)))*) {0,3}(`{3,}|~{3,})(.*)$/;
+  /^(?:(?: {0,3}(?:> ?|(?:[-+*]|\d{1,9}[.)])(?: |$)))*)\s*(`{3,}|~{3,})(.*)$/;
 
 /**
  * Length of a bare destination starting at `start`, honoring balanced
@@ -55,7 +57,7 @@ function bareDestination(
 }
 
 function normalizeDestinations(segment: string): string {
-  if (!segment.includes(":\\")) return segment;
+  if (!segment.includes("\\")) return segment;
   let result = "";
   let cursor = 0;
   for (const match of segment.matchAll(DESTINATION_START_PATTERN)) {
@@ -69,6 +71,8 @@ function normalizeDestinations(segment: string): string {
       const lineEnd = segment.indexOf("\n", start);
       if (end < 0 || (lineEnd >= 0 && lineEnd < end)) continue;
       length = end - start;
+      // Parentheses need no escaping inside angle brackets.
+      separators = /\\/g;
     } else {
       // A backslash before a parenthesis is a separator when reading it that
       // way still yields a balanced destination that the link can close after,
@@ -120,7 +124,7 @@ function normalizeOutsideInlineCode(segment: string): string {
  * the input.
  */
 export function normalizeWindowsMarkdownDestinations(markdown: string): string {
-  if (!markdown.includes(":\\")) return markdown;
+  if (!markdown.includes("\\")) return markdown;
 
   const lines = markdown.split("\n");
   const output: string[] = [];

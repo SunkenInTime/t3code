@@ -16,6 +16,10 @@ describe("normalizeWindowsMarkdownDestinations", () => {
       String.raw`![shot](<C:\Users\dara\my dir\.t3\shot.png>)`,
       "![shot](<C:/Users/dara/my dir/.t3/shot.png>)",
     ],
+    // Parentheses need no escaping inside angle brackets.
+    [String.raw`![shot](<C:\repo\(old)\.t3\shot.png>)`, "![shot](<C:/repo/(old)/.t3/shot.png>)"],
+    // A forward-slash root with a backslash suffix still needs the suffix fixed.
+    [String.raw`![shot](C:/repo\.t3\shot.png)`, "![shot](C:/repo/.t3/shot.png)"],
     [
       String.raw`![shot](C:\Users\dara\.t3\shot.png "Title")`,
       '![shot](C:/Users/dara/.t3/shot.png "Title")',
@@ -162,6 +166,35 @@ describe("normalizeWindowsMarkdownDestinations", () => {
     );
     const tilde = ["~~~js`x", String.raw`[x](C:\a\.b\x.md)`].join("\n");
     expect(normalizeWindowsMarkdownDestinations(tilde)).toBe(tilde);
+  });
+
+  it("leaves a fence indented under a nested list item as written", () => {
+    const markdown = [
+      "- item",
+      "  - example",
+      "",
+      "      ~~~markdown",
+      String.raw`      ![shot](C:\Users\dara\.t3\shot.png)`,
+      "      ~~~",
+      "",
+      String.raw`![y](C:\a\.b\y.md)`,
+    ].join("\n");
+    expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(
+      markdown.replace(String.raw`[y](C:\a\.b\y.md)`, "[y](C:/a/.b/y.md)"),
+    );
+  });
+
+  it("does not let a code span cross a blank line", () => {
+    const markdown = [
+      "An unmatched ` here.",
+      "",
+      String.raw`![shot](C:\Users\dara\.t3\shot.png)`,
+      "",
+      "Another ` here.",
+    ].join("\n");
+    expect(normalizeWindowsMarkdownDestinations(markdown)).toBe(
+      markdown.replace(String.raw`(C:\Users\dara\.t3\shot.png)`, "(C:/Users/dara/.t3/shot.png)"),
+    );
   });
 
   it("closes an unterminated fence when its block quote ends", () => {
