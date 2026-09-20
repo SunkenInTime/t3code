@@ -87,11 +87,11 @@ function normalizeDestinations(segment: string): string {
       const afterLiteral = segment[start + literal.length];
       const afterEscapedClose = segment[start + escaped.length + 1];
       // The escaped reading is bogus when the `)` it stops at is followed by
-      // more path text, since that `)` cannot be the link's own closer.
+      // more path text or another `)`, since that `)` cannot then be the
+      // link's own closer.
       const escapedCutShort =
         segment[start + escaped.length] === ")" &&
         afterEscapedClose !== undefined &&
-        afterEscapedClose !== ")" &&
         !/\s/.test(afterEscapedClose);
       const useLiteral =
         literal.balanced &&

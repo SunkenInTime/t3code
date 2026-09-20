@@ -86,6 +86,8 @@ describe("normalizeWindowsMarkdownDestinations", () => {
       "[x](C:/repo/(old)/.t3/shot.png) and [y](C:/a/(b)(c)/.d/e.md)",
     ],
     [String.raw`[x](C:\a\.b\x.md)) trailing`, "[x](C:/a/.b/x.md)) trailing"],
+    // A path ending in a parenthesized segment closes right before the link's own `)`.
+    [String.raw`[x](C:\repo\(old))`, "[x](C:/repo/(old))"],
     // A link as written keeps its escaped parenthesis so it still parses.
     [
       String.raw`[x](C:\a\(foo.png) and [y](C:\a\.b\)x.md "t")`,
