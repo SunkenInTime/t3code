@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { projectMonogram, resolveProjectIconGlyph } from "./projectIcon";
+import { countGlyphs, projectMonogram, resolveProjectIconGlyph } from "./projectIcon";
 
 describe("resolveProjectIconGlyph", () => {
   it("returns null without an override so the favicon path is used", () => {
@@ -22,6 +22,14 @@ describe("resolveProjectIconGlyph", () => {
     expect(
       resolveProjectIconGlyph({ kind: "lucide", name: "rocket", color: "violet" }, "nebula"),
     ).toEqual({ kind: "monogram", text: "NA", color: "violet" });
+  });
+});
+
+describe("countGlyphs", () => {
+  it("folds combining marks into their base character", () => {
+    expect(countGlyphs("e\u0301")).toBe(1);
+    expect(countGlyphs("\u0915\u093F")).toBe(1);
+    expect(countGlyphs("M7")).toBe(2);
   });
 });
 

@@ -4,9 +4,12 @@ export type ProjectIconGlyph =
   | { readonly kind: "emoji"; readonly emoji: string }
   | { readonly kind: "monogram"; readonly text: string; readonly color: ProjectIconColor };
 
-/** Code point count; Hermes has no Intl.Segmenter, and monogram text is at most two glyphs. */
+/**
+ * Visible glyph count for sizing monogram text. Hermes has no Intl.Segmenter, so combining
+ * marks are folded into their base character instead of full grapheme segmentation.
+ */
 export function countGlyphs(text: string): number {
-  return Array.from(text).length;
+  return Array.from(text.replace(/\p{M}/gu, "")).length;
 }
 
 /** Mirrors the automatic monogram web derives from a project name when it has no favicon. */
