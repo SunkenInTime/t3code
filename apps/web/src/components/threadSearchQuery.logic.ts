@@ -252,26 +252,48 @@ export function resolveProjectFilterKeys(
   return keys;
 }
 
-export interface TrailingProjectOperatorToken {
-  /** Index in the query where the trailing in: token starts. */
+export interface TrailingOperatorToken {
+  /** Index in the query where the trailing operator token starts. */
   readonly start: number;
   /** The unquoted partial value typed so far (may be empty). */
   readonly partialValue: string;
 }
 
-/** Detects an in-progress trailing `in:` token — the caret is still inside
-    it, so the project autocomplete should be open. Trailing whitespace (or a
+/** Detects an in-progress trailing `<keyword>:` token — the caret is still
+    inside it, so the autocomplete should be open. Trailing whitespace (or a
     different trailing token) means the operator is committed and this
     returns null. */
-export function getTrailingProjectOperatorToken(
+export function getTrailingOperatorToken(
   query: string,
-): TrailingProjectOperatorToken | null {
-  const match = /(^|\s)(in:("[^"]*"?|[^\s"]*))$/i.exec(query);
+  keyword: "in" | "agent",
+): TrailingOperatorToken | null {
+  const match = new RegExp(`(^|\\s)(${keyword}:("[^"]*"?|[^\\s"]*))$`, "i").exec(query);
   if (!match) return null;
   return {
     start: match.index + match[1]!.length,
-    partialValue: unquoteSearchValue(match[2]!.slice("in:".length)),
+    partialValue: unquoteSearchValue(match[2]!.slice(`${keyword}:`.length)),
   };
+}
+
+export const SEARCH_OPERATOR_HINTS: readonly {
+  keyword: "in" | "agent" | "before" | "after" | "on";
+  description: string;
+}[] = [
+  { keyword: "in", description: "Filter by project" },
+  { keyword: "agent", description: "Filter by agent" },
+  { keyword: "before", description: "Updated before a date (2026-01-31, 7d)" },
+  { keyword: "after", description: "Updated after a date (2026-01-31, 2w)" },
+  { keyword: "on", description: "Updated on a day (2026-01-31, today, yesterday)" },
+];
+
+/** A trailing bare word the user may be turning into an operator — no
+    colon, so committed and in-progress `keyword:` tokens never match. */
+export function getTrailingKeywordPrefix(
+  query: string,
+): { readonly start: number; readonly prefix: string } | null {
+  const match = /(^|\s)([a-z]+)$/i.exec(query);
+  if (!match) return null;
+  return { start: match.index + match[1]!.length, prefix: match[2]! };
 }
 
 /** Ranks project groups for the in: autocomplete: name prefix, then name
@@ -304,15 +326,19 @@ export function filterProjectSuggestions<
   return ranked.toSorted((left, right) => left.rank - right.rank).map((entry) => entry.group);
 }
 
-/** Applies a picked project suggestion: replaces the in-progress trailing
-    in: token — or, absent one, the whole query — with a quoted, committed
-    filter plus a trailing space so typing continues naturally. */
-export function applyProjectSuggestionToQuery(
+/** Applies a picked suggestion: replaces the in-progress trailing operator
+    token — or, absent one, the whole query — with a committed filter plus a
+    trailing space so typing continues naturally. Values with whitespace are
+    quoted; bare otherwise. */
+export function applyOperatorSuggestionToQuery(
   query: string,
-  token: TrailingProjectOperatorToken | null,
-  projectName: string,
+  token: TrailingOperatorToken | null,
+  keyword: "in" | "agent",
+  value: string,
 ): string {
-  const filter = `in:"${projectName.replaceAll('"', "")}" `;
+  const unquoted = value.replaceAll('"', "");
+  const rendered = /\s/.test(unquoted) ? `"${unquoted}"` : unquoted;
+  const filter = `${keyword}:${rendered} `;
   if (token === null) return filter;
   return `${query.slice(0, token.start)}${filter}`;
 }

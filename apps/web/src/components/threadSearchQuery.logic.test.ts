@@ -1,10 +1,11 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
-  applyProjectSuggestionToQuery,
+  applyOperatorSuggestionToQuery,
   composeThreadSearchQuery,
   describeSearchOperator,
   filterProjectSuggestions,
-  getTrailingProjectOperatorToken,
+  getTrailingKeywordPrefix,
+  getTrailingOperatorToken,
   hasThreadSearchOperators,
   matchesParsedThreadSearch,
   parseThreadSearchQuery,
@@ -197,35 +198,57 @@ describe("resolveProjectFilterKeys", () => {
   });
 });
 
-describe("thread search project autocomplete", () => {
+describe("thread search operator autocomplete", () => {
   it("detects a trailing partial in: token", () => {
-    expect(getTrailingProjectOperatorToken("fix in:ica")).toEqual({
+    expect(getTrailingOperatorToken("fix in:ica", "in")).toEqual({
       start: 4,
       partialValue: "ica",
     });
-    expect(getTrailingProjectOperatorToken("in:")).toEqual({ start: 0, partialValue: "" });
+    expect(getTrailingOperatorToken("in:", "in")).toEqual({ start: 0, partialValue: "" });
+  });
+
+  it("detects a trailing partial agent: token", () => {
+    expect(getTrailingOperatorToken("fix agent:cla", "agent")).toEqual({
+      start: 4,
+      partialValue: "cla",
+    });
+    expect(getTrailingOperatorToken("agent:", "agent")).toEqual({ start: 0, partialValue: "" });
+    // A keyword only matches its own tokens.
+    expect(getTrailingOperatorToken("fix agent:cla", "in")).toBeNull();
   });
 
   it("detects an unterminated quoted value", () => {
-    expect(getTrailingProjectOperatorToken('in:"my pro')).toEqual({
+    expect(getTrailingOperatorToken('in:"my pro', "in")).toEqual({
       start: 0,
       partialValue: "my pro",
     });
   });
 
   it("returns null once the operator is committed or absent", () => {
-    expect(getTrailingProjectOperatorToken("in:icarus ")).toBeNull();
-    expect(getTrailingProjectOperatorToken("fix in:alpha beta")).toBeNull();
-    expect(getTrailingProjectOperatorToken("fix")).toBeNull();
+    expect(getTrailingOperatorToken("in:icarus ", "in")).toBeNull();
+    expect(getTrailingOperatorToken("fix in:alpha beta", "in")).toBeNull();
+    expect(getTrailingOperatorToken("fix", "in")).toBeNull();
   });
 
-  it("replaces the trailing token with a quoted committed filter", () => {
-    const token = getTrailingProjectOperatorToken("fix in:ica");
-    expect(applyProjectSuggestionToQuery("fix in:ica", token, "Icarus")).toBe('fix in:"Icarus" ');
+  it("replaces the trailing token with a committed filter", () => {
+    const token = getTrailingOperatorToken("fix in:ica", "in");
+    expect(applyOperatorSuggestionToQuery("fix in:ica", token, "in", "Atlas")).toBe(
+      "fix in:Atlas ",
+    );
+  });
+
+  it("quotes values containing whitespace only", () => {
+    const token = getTrailingOperatorToken("fix in:ica", "in");
+    expect(applyOperatorSuggestionToQuery("fix in:ica", token, "in", "My Project")).toBe(
+      'fix in:"My Project" ',
+    );
   });
 
   it("replaces the whole query when no trailing token exists", () => {
-    expect(applyProjectSuggestionToQuery("icarus", null, "Icarus")).toBe('in:"Icarus" ');
+    expect(applyOperatorSuggestionToQuery("icarus", null, "in", "Atlas")).toBe("in:Atlas ");
+    expect(applyOperatorSuggestionToQuery("icarus", null, "agent", "Claude Code")).toBe(
+      'agent:"Claude Code" ',
+    );
   });
 
   it("ranks suggestions: name prefix, then name substring, then path", () => {
@@ -260,6 +283,19 @@ describe("thread search project autocomplete", () => {
       { displayName: "Beta", workspaceRoot: "/b" },
     ];
     expect(filterProjectSuggestions(groups, "")).toEqual(groups);
+  });
+});
+
+describe("getTrailingKeywordPrefix", () => {
+  it("detects a bare trailing word", () => {
+    expect(getTrailingKeywordPrefix("ag")).toEqual({ start: 0, prefix: "ag" });
+    expect(getTrailingKeywordPrefix("foo bar")).toEqual({ start: 4, prefix: "bar" });
+  });
+
+  it("returns null for operator tokens, trailing whitespace, and empty queries", () => {
+    expect(getTrailingKeywordPrefix("in:At")).toBeNull();
+    expect(getTrailingKeywordPrefix("foo ")).toBeNull();
+    expect(getTrailingKeywordPrefix("")).toBeNull();
   });
 });
 

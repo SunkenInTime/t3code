@@ -113,15 +113,17 @@ import {
 import { onOpenCommandPalette } from "../commandPaletteBus";
 import { useArchivedThreadSnapshots } from "../lib/archivedThreadsState";
 import {
-  applyProjectSuggestionToQuery,
+  applyOperatorSuggestionToQuery,
   composeThreadSearchQuery,
   describeSearchOperator,
   filterProjectSuggestions,
-  getTrailingProjectOperatorToken,
+  getTrailingKeywordPrefix,
+  getTrailingOperatorToken,
   hasThreadSearchOperators,
   matchesParsedThreadSearch,
   parseThreadSearchQuery,
   resolveProjectFilterKeys,
+  SEARCH_OPERATOR_HINTS,
   tokenizeThreadSearchQuery,
 } from "./threadSearchQuery.logic";
 import { isPreviewFocused } from "../lib/previewFocus";
@@ -178,6 +180,7 @@ import { CommandPaletteContent } from "./CommandPaletteContent";
 import { CommandPaletteResults } from "./CommandPaletteResults";
 import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon, ForgejoIcon } from "./Icons";
 import { EnvironmentMachineIcon } from "./EnvironmentMachineIcon";
+import { PROVIDER_ICON_BY_PROVIDER } from "./chat/providerIconUtils";
 import { ProjectFavicon } from "./ProjectFavicon";
 import { ProjectFilePicker } from "./files/ProjectFilePicker";
 import { openLinkPullRequestDialog } from "./pullRequest/LinkPullRequestDialog";
@@ -743,6 +746,27 @@ function OpenCommandPaletteDialog(props: {
     }
     return map;
   }, [environments, primaryEnvironmentId, providers]);
+  // Deduped by display name across environments — the agent: chip icon and
+  // the agent: autocomplete both render one entry per named provider.
+  const providerSuggestions = useMemo(() => {
+    const seen = new Set<string>();
+    const suggestions: {
+      displayName: string;
+      instanceId: string;
+      driverKind: ProviderInstanceEntry["driverKind"];
+    }[] = [];
+    for (const entry of providerEntryByEnvironmentAndInstanceId.values()) {
+      const key = entry.displayName.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      suggestions.push({
+        displayName: entry.displayName,
+        instanceId: entry.instanceId,
+        driverKind: entry.driverKind,
+      });
+    }
+    return suggestions;
+  }, [providerEntryByEnvironmentAndInstanceId]);
   const [viewStack, setViewStack] = useState<CommandPaletteView[]>([]);
   const currentView = viewStack.at(-1) ?? null;
   const environmentIds = useMemo(
@@ -2095,11 +2119,11 @@ function OpenCommandPaletteDialog(props: {
           : threadSearchItems,
     });
 
-  // While the caret sits inside an in: token, project completions lead the
-  // list: Enter commits the filter into the query (palette stays open)
+  // While the caret sits inside an operator's value token, completions lead
+  // the list: Enter commits the filter into the query (palette stays open)
   // instead of navigating.
   const trailingProjectOperatorToken =
-    currentView === null && !isActionsOnly ? getTrailingProjectOperatorToken(query) : null;
+    currentView === null && !isActionsOnly ? getTrailingOperatorToken(query, "in") : null;
   const projectFilterSuggestionItems = useMemo((): CommandPaletteActionItem[] => {
     if (trailingProjectOperatorToken === null) return [];
     return filterProjectSuggestions(projectGroups, trailingProjectOperatorToken.partialValue)
@@ -2114,9 +2138,10 @@ function OpenCommandPaletteDialog(props: {
         keepOpen: true,
         run: async () => {
           handleQueryChange(
-            applyProjectSuggestionToQuery(
+            applyOperatorSuggestionToQuery(
               query,
-              getTrailingProjectOperatorToken(query),
+              getTrailingOperatorToken(query, "in"),
+              "in",
               group.displayName,
             ),
           );
@@ -2127,17 +2152,108 @@ function OpenCommandPaletteDialog(props: {
     // observable difference.
   }, [projectGroups, query, trailingProjectOperatorToken]);
 
-  const filteredGroups =
-    projectFilterSuggestionItems.length > 0
+  const trailingAgentOperatorToken =
+    currentView === null && !isActionsOnly ? getTrailingOperatorToken(query, "agent") : null;
+  const agentFilterSuggestionItems = useMemo((): CommandPaletteActionItem[] => {
+    if (trailingAgentOperatorToken === null) return [];
+    const partial = trailingAgentOperatorToken.partialValue.trim().toLowerCase();
+    const ranked = providerSuggestions
+      .flatMap((entry) => {
+        if (partial.length === 0) return [{ entry, rank: 0 }];
+        const name = entry.displayName.toLowerCase();
+        const id = entry.instanceId.toLowerCase();
+        const rank =
+          name.startsWith(partial) || id.startsWith(partial)
+            ? 0
+            : name.includes(partial) || id.includes(partial)
+              ? 1
+              : null;
+        return rank === null ? [] : [{ entry, rank }];
+      })
+      .toSorted((left, right) => left.rank - right.rank)
+      .map(({ entry }) => entry)
+      .slice(0, 8);
+    return ranked.map((entry) => {
+      const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[entry.driverKind];
+      const description =
+        entry.instanceId.toLowerCase() === entry.displayName.toLowerCase()
+          ? undefined
+          : entry.instanceId;
+      return {
+        kind: "action" as const,
+        value: `filter-agent:${entry.instanceId}`,
+        searchTerms: [],
+        title: entry.displayName,
+        ...(description === undefined ? {} : { description }),
+        icon: ProviderIcon ? <ProviderIcon className={ITEM_ICON_CLASS} /> : null,
+        keepOpen: true,
+        run: async () => {
+          handleQueryChange(
+            applyOperatorSuggestionToQuery(
+              query,
+              getTrailingOperatorToken(query, "agent"),
+              "agent",
+              entry.displayName,
+            ),
+          );
+        },
+      };
+    });
+    // See projectFilterSuggestionItems: handleQueryChange stays out of deps.
+  }, [providerSuggestions, query, trailingAgentOperatorToken]);
+
+  // A bare trailing word (no colon) may be the start of an operator — offer
+  // the keyword catalog, trailing so Enter still targets real results.
+  const trailingKeywordPrefix =
+    currentView === null && !isActionsOnly ? getTrailingKeywordPrefix(query) : null;
+  const searchOperatorHintItems = useMemo((): CommandPaletteActionItem[] => {
+    if (trailingKeywordPrefix === null) return [];
+    const prefix = trailingKeywordPrefix.prefix.toLowerCase();
+    return SEARCH_OPERATOR_HINTS.filter((hint) => hint.keyword.startsWith(prefix)).map((hint) => ({
+      kind: "action" as const,
+      value: `filter-hint:${hint.keyword}`,
+      searchTerms: [],
+      title: `${hint.keyword}:`,
+      description: hint.description,
+      icon: <TextSearchIcon className={ITEM_ICON_CLASS} />,
+      keepOpen: true,
+      run: async () => {
+        handleQueryChange(`${query.slice(0, trailingKeywordPrefix.start)}${hint.keyword}:`);
+      },
+    }));
+    // See projectFilterSuggestionItems: handleQueryChange stays out of deps.
+  }, [query, trailingKeywordPrefix]);
+
+  const filteredGroups: CommandPaletteGroup[] = [
+    ...(projectFilterSuggestionItems.length > 0
       ? [
           {
             value: "project-filter-suggestions",
             label: "Filter by project",
             items: projectFilterSuggestionItems,
           },
-          ...baseFilteredGroups,
         ]
-      : baseFilteredGroups;
+      : []),
+    ...(agentFilterSuggestionItems.length > 0
+      ? [
+          {
+            value: "agent-filter-suggestions",
+            label: "Filter by agent",
+            items: agentFilterSuggestionItems,
+          },
+        ]
+      : []),
+    ...baseFilteredGroups,
+    ...(searchOperatorHintItems.length > 0
+      ? [
+          {
+            value: "search-operator-hints",
+            label: "Search filters",
+            items: searchOperatorHintItems,
+          },
+        ]
+      : []),
+  ];
 
   const handleAddProjectForEnvironment = useCallback(
     async (input: {
@@ -2631,13 +2747,29 @@ function OpenCommandPaletteDialog(props: {
                     (group) => group.displayName.toLowerCase() === value.toLowerCase(),
                   )
                 : undefined;
+            const providerEntry =
+              keyword === "agent"
+                ? providerSuggestions.find(
+                    (entry) =>
+                      entry.displayName.toLowerCase() === value.toLowerCase() ||
+                      entry.instanceId.toLowerCase() === value.toLowerCase(),
+                  )
+                : undefined;
+            const ChipIcon =
+              providerEntry === undefined
+                ? null
+                : (PROVIDER_ICON_BY_PROVIDER[providerEntry.driverKind] ?? null);
             return (
               <span
                 key={chipKey}
                 className="inline-flex h-6 min-w-0 items-center gap-1 rounded-md bg-foreground/10 ps-1.5 pe-0.5 text-xs sm:h-5.5"
               >
-                {project ? <ProjectFavicon project={project} className="size-3.5" /> : null}
                 <span className="text-muted-foreground">{keyword}:</span>
+                {project ? (
+                  <ProjectFavicon project={project} className="size-3.5" />
+                ) : ChipIcon !== null ? (
+                  <ChipIcon className="size-3.5" />
+                ) : null}
                 <span className="max-w-40 truncate font-medium text-foreground">{value}</span>
                 <button
                   type="button"
