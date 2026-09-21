@@ -39,6 +39,7 @@ describe("projectMonogram", () => {
     ["silver-orchard", "SO"],
     ["m7-forge", "M7"],
     ["t3code", "T3"],
+    ["𠀀京都", "𠀀都"],
     ["  ", "PR"],
   ])("derives %s -> %s", (title, expected) => {
     expect(projectMonogram(title)).toBe(expected);
