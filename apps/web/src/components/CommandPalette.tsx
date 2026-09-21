@@ -746,8 +746,8 @@ function OpenCommandPaletteDialog(props: {
     }
     return map;
   }, [environments, primaryEnvironmentId, providers]);
-  // Deduped by display name across environments — the agent: chip icon and
-  // the agent: autocomplete both render one entry per named provider.
+  // Deduped by display name across environments — the provider: chip icon and
+  // the provider: autocomplete both render one entry per named provider.
   const providerSuggestions = useMemo(() => {
     const seen = new Set<string>();
     const suggestions: {
@@ -776,7 +776,7 @@ function OpenCommandPaletteDialog(props: {
         .map((environment) => environment.environmentId),
     [environments],
   );
-  // Discord-style operators (in:, agent:, before:/after:/on:) apply only to
+  // Discord-style operators (in:, provider:, before:/after:/on:) apply only to
   // the root search — submenus and > queries keep their own semantics.
   // Non-null only when the query actually carries operator criteria.
   const parsedOperatorQuery = useMemo(() => {
@@ -1445,7 +1445,7 @@ function OpenCommandPaletteDialog(props: {
   );
   // The search corpus: live threads first, archived history after. With
   // operator criteria the corpus is narrowed thread-by-thread (project keys
-  // for in:, agent/date via the matcher) BEFORE items are built; residual
+  // for in:, provider/date via the matcher) BEFORE items are built; residual
   // text then ranks against titles, project names, and content snippets in
   // filterCommandPaletteGroups like any other query.
   const threadSearchItems = useMemo(() => {
@@ -2152,11 +2152,11 @@ function OpenCommandPaletteDialog(props: {
     // observable difference.
   }, [projectGroups, query, trailingProjectOperatorToken]);
 
-  const trailingAgentOperatorToken =
-    currentView === null && !isActionsOnly ? getTrailingOperatorToken(query, "agent") : null;
-  const agentFilterSuggestionItems = useMemo((): CommandPaletteActionItem[] => {
-    if (trailingAgentOperatorToken === null) return [];
-    const partial = trailingAgentOperatorToken.partialValue.trim().toLowerCase();
+  const trailingProviderOperatorToken =
+    currentView === null && !isActionsOnly ? getTrailingOperatorToken(query, "provider") : null;
+  const providerFilterSuggestionItems = useMemo((): CommandPaletteActionItem[] => {
+    if (trailingProviderOperatorToken === null) return [];
+    const partial = trailingProviderOperatorToken.partialValue.trim().toLowerCase();
     const ranked = providerSuggestions
       .flatMap((entry) => {
         if (partial.length === 0) return [{ entry, rank: 0 }];
@@ -2181,7 +2181,7 @@ function OpenCommandPaletteDialog(props: {
           : entry.instanceId;
       return {
         kind: "action" as const,
-        value: `filter-agent:${entry.instanceId}`,
+        value: `filter-provider:${entry.instanceId}`,
         searchTerms: [],
         title: entry.displayName,
         ...(description === undefined ? {} : { description }),
@@ -2191,8 +2191,8 @@ function OpenCommandPaletteDialog(props: {
           handleQueryChange(
             applyOperatorSuggestionToQuery(
               query,
-              getTrailingOperatorToken(query, "agent"),
-              "agent",
+              getTrailingOperatorToken(query, "provider"),
+              "provider",
               entry.displayName,
             ),
           );
@@ -2200,7 +2200,7 @@ function OpenCommandPaletteDialog(props: {
       };
     });
     // See projectFilterSuggestionItems: handleQueryChange stays out of deps.
-  }, [providerSuggestions, query, trailingAgentOperatorToken]);
+  }, [providerSuggestions, query, trailingProviderOperatorToken]);
 
   // A bare trailing word (no colon) may be the start of an operator — offer
   // the keyword catalog, trailing so Enter still targets real results.
@@ -2234,12 +2234,12 @@ function OpenCommandPaletteDialog(props: {
           },
         ]
       : []),
-    ...(agentFilterSuggestionItems.length > 0
+    ...(providerFilterSuggestionItems.length > 0
       ? [
           {
-            value: "agent-filter-suggestions",
-            label: "Filter by agent",
-            items: agentFilterSuggestionItems,
+            value: "provider-filter-suggestions",
+            label: "Filter by provider",
+            items: providerFilterSuggestionItems,
           },
         ]
       : []),
@@ -2748,7 +2748,7 @@ function OpenCommandPaletteDialog(props: {
                   )
                 : undefined;
             const providerEntry =
-              keyword === "agent"
+              keyword === "provider"
                 ? providerSuggestions.find(
                     (entry) =>
                       entry.displayName.toLowerCase() === value.toLowerCase() ||

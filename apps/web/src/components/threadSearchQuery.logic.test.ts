@@ -25,7 +25,7 @@ describe("parseThreadSearchQuery", () => {
     expect(parsed).toEqual({
       text: "fix bug",
       projectQueries: [],
-      agentQueries: [],
+      providerQueries: [],
       updatedStartMs: null,
       updatedEndMs: null,
     });
@@ -39,9 +39,9 @@ describe("parseThreadSearchQuery", () => {
     expect(hasThreadSearchOperators(parsed)).toBe(true);
   });
 
-  it("extracts agent: values", () => {
-    const parsed = parseThreadSearchQuery("agent:Claude retry", now);
-    expect(parsed.agentQueries).toEqual(["claude"]);
+  it("extracts provider: values", () => {
+    const parsed = parseThreadSearchQuery("provider:Claude retry", now);
+    expect(parsed.providerQueries).toEqual(["claude"]);
     expect(parsed.text).toBe("retry");
   });
 
@@ -115,8 +115,8 @@ describe("matchesParsedThreadSearch", () => {
     );
   });
 
-  it("filters by agent against provider name and instance id", () => {
-    const parsed = parseThreadSearchQuery("agent:claude", now);
+  it("filters by provider against provider name and instance id", () => {
+    const parsed = parseThreadSearchQuery("provider:claude", now);
     expect(
       matchesParsedThreadSearch(makeThread({ providerName: "claude", instanceId: "cc" }), parsed),
     ).toBe(true);
@@ -142,7 +142,7 @@ describe("matchesParsedThreadSearch", () => {
   });
 
   it("ANDs operators together", () => {
-    const parsed = parseThreadSearchQuery("agent:claude fix", now);
+    const parsed = parseThreadSearchQuery("provider:claude fix", now);
     expect(
       matchesParsedThreadSearch(
         makeThread({ title: "Fix search", providerName: "claude", instanceId: "cc" }),
@@ -207,14 +207,17 @@ describe("thread search operator autocomplete", () => {
     expect(getTrailingOperatorToken("in:", "in")).toEqual({ start: 0, partialValue: "" });
   });
 
-  it("detects a trailing partial agent: token", () => {
-    expect(getTrailingOperatorToken("fix agent:cla", "agent")).toEqual({
+  it("detects a trailing partial provider: token", () => {
+    expect(getTrailingOperatorToken("fix provider:cla", "provider")).toEqual({
       start: 4,
       partialValue: "cla",
     });
-    expect(getTrailingOperatorToken("agent:", "agent")).toEqual({ start: 0, partialValue: "" });
+    expect(getTrailingOperatorToken("provider:", "provider")).toEqual({
+      start: 0,
+      partialValue: "",
+    });
     // A keyword only matches its own tokens.
-    expect(getTrailingOperatorToken("fix agent:cla", "in")).toBeNull();
+    expect(getTrailingOperatorToken("fix provider:cla", "in")).toBeNull();
   });
 
   it("detects an unterminated quoted value", () => {
@@ -246,8 +249,8 @@ describe("thread search operator autocomplete", () => {
 
   it("replaces the whole query when no trailing token exists", () => {
     expect(applyOperatorSuggestionToQuery("icarus", null, "in", "Atlas")).toBe("in:Atlas ");
-    expect(applyOperatorSuggestionToQuery("icarus", null, "agent", "Claude Code")).toBe(
-      'agent:"Claude Code" ',
+    expect(applyOperatorSuggestionToQuery("icarus", null, "provider", "Claude Code")).toBe(
+      'provider:"Claude Code" ',
     );
   });
 
@@ -349,9 +352,9 @@ describe("tokenizeThreadSearchQuery", () => {
   });
 
   it("keeps a trailing operator editable while it is still being typed", () => {
-    expect(tokenizeThreadSearchQuery("in:atlas agent:co", now)).toEqual({
+    expect(tokenizeThreadSearchQuery("in:atlas provider:co", now)).toEqual({
       operators: ["in:atlas"],
-      text: "agent:co",
+      text: "provider:co",
     });
     expect(tokenizeThreadSearchQuery("in:", now)).toEqual({ operators: [], text: "in:" });
   });

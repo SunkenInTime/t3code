@@ -2,7 +2,7 @@
 // Discord-style operators over the already-synced shell data, used by the
 // command palette's thread search:
 //   in:<project>      scope to projects whose name or path contains the value
-//   agent:<provider>  provider name / instance id substring
+//   provider:<provider>  provider name / instance id substring
 //   before: after:    updatedAt bounds — ISO day, or relative like 7d / 2w
 //   on:               one calendar day — ISO day, today, yesterday
 // Everything else remains free text. Operators AND together; repeated values
@@ -17,15 +17,15 @@ export interface ParsedThreadSearchQuery {
       (via resolveProjectFilterKeys) because group names live outside the
       thread shells. */
   readonly projectQueries: readonly string[];
-  /** Lowercased agent: values. */
-  readonly agentQueries: readonly string[];
+  /** Lowercased provider: values. */
+  readonly providerQueries: readonly string[];
   /** Half-open [start, end) bounds on updatedAt, merged across all date
       operators; null side = unbounded. */
   readonly updatedStartMs: number | null;
   readonly updatedEndMs: number | null;
 }
 
-const SEARCH_OPERATOR_PATTERN = /^(in|agent|before|after|on):(.*)$/i;
+const SEARCH_OPERATOR_PATTERN = /^(in|provider|before|after|on):(.*)$/i;
 const DAY_MS = 86_400_000;
 
 /** Splits on whitespace, except inside double quotes (an unterminated quote
@@ -106,7 +106,7 @@ function resolveSearchDateToken(rawValue: string, now: Date): SearchDateToken | 
 export function parseThreadSearchQuery(query: string, now: Date): ParsedThreadSearchQuery {
   const textTokens: string[] = [];
   const projectQueries: string[] = [];
-  const agentQueries: string[] = [];
+  const providerQueries: string[] = [];
   let updatedStartMs: number | null = null;
   let updatedEndMs: number | null = null;
   const tightenStart = (ms: number) => {
@@ -131,8 +131,8 @@ export function parseThreadSearchQuery(query: string, now: Date): ParsedThreadSe
       projectQueries.push(value);
       continue;
     }
-    if (keyword === "agent") {
-      agentQueries.push(value);
+    if (keyword === "provider") {
+      providerQueries.push(value);
       continue;
     }
     const dateToken = resolveSearchDateToken(value, now);
@@ -158,18 +158,18 @@ export function parseThreadSearchQuery(query: string, now: Date): ParsedThreadSe
   return {
     text: textTokens.join(" ").toLowerCase(),
     projectQueries,
-    agentQueries,
+    providerQueries,
     updatedStartMs,
     updatedEndMs,
   };
 }
 
-/** Whether the parsed query carries any OPERATOR criteria (project, agent,
+/** Whether the parsed query carries any OPERATOR criteria (project, provider,
     or date bounds) — free text alone doesn't count. */
 export function hasThreadSearchOperators(parsed: ParsedThreadSearchQuery): boolean {
   return (
     parsed.projectQueries.length > 0 ||
-    parsed.agentQueries.length > 0 ||
+    parsed.providerQueries.length > 0 ||
     parsed.updatedStartMs !== null ||
     parsed.updatedEndMs !== null
   );
@@ -186,7 +186,7 @@ export interface OperatorSearchableThread {
 }
 
 /**
- * Applies the parsed query's OPERATOR criteria (agent, date bounds) plus the
+ * Applies the parsed query's OPERATOR criteria (provider, date bounds) plus the
  * free text against the thread title. Callers that rank text against richer
  * haystacks (project title, content snippets) pass `{ ...parsed, text: "" }`
  * and match the text themselves. The in: operator is applied separately as a
@@ -199,8 +199,8 @@ export function matchesParsedThreadSearch(
   if (parsed.text.length > 0 && !thread.title.toLowerCase().includes(parsed.text)) {
     return false;
   }
-  if (parsed.agentQueries.length > 0) {
-    const agentHaystack = [
+  if (parsed.providerQueries.length > 0) {
+    const providerHaystack = [
       thread.session?.providerName,
       thread.session?.providerInstanceId,
       thread.modelSelection.instanceId,
@@ -208,7 +208,7 @@ export function matchesParsedThreadSearch(
       .filter((candidate): candidate is string => typeof candidate === "string")
       .join(" ")
       .toLowerCase();
-    if (!parsed.agentQueries.some((query) => agentHaystack.includes(query))) {
+    if (!parsed.providerQueries.some((query) => providerHaystack.includes(query))) {
       return false;
     }
   }
@@ -265,7 +265,7 @@ export interface TrailingOperatorToken {
     returns null. */
 export function getTrailingOperatorToken(
   query: string,
-  keyword: "in" | "agent",
+  keyword: "in" | "provider",
 ): TrailingOperatorToken | null {
   const match = new RegExp(`(^|\\s)(${keyword}:("[^"]*"?|[^\\s"]*))$`, "i").exec(query);
   if (!match) return null;
@@ -276,11 +276,11 @@ export function getTrailingOperatorToken(
 }
 
 export const SEARCH_OPERATOR_HINTS: readonly {
-  keyword: "in" | "agent" | "before" | "after" | "on";
+  keyword: "in" | "provider" | "before" | "after" | "on";
   description: string;
 }[] = [
   { keyword: "in", description: "Filter by project" },
-  { keyword: "agent", description: "Filter by agent" },
+  { keyword: "provider", description: "Filter by provider" },
   { keyword: "before", description: "Updated before a date (2026-01-31, 7d)" },
   { keyword: "after", description: "Updated after a date (2026-01-31, 2w)" },
   { keyword: "on", description: "Updated on a day (2026-01-31, today, yesterday)" },
@@ -333,7 +333,7 @@ export function filterProjectSuggestions<
 export function applyOperatorSuggestionToQuery(
   query: string,
   token: TrailingOperatorToken | null,
-  keyword: "in" | "agent",
+  keyword: "in" | "provider",
   value: string,
 ): string {
   const unquoted = value.replaceAll('"', "");
@@ -402,7 +402,7 @@ export interface ThreadSearchQuerySegment {
  * Splits the raw query into alternating plain/operator segments covering the
  * exact input string (including whitespace), for the Discord-style operator
  * pills rendered behind the search input. A segment is highlighted only when
- * the parser would honor it: in:/agent: tokens always (an empty value means
+ * the parser would honor it: in:/provider: tokens always (an empty value means
  * the autocomplete is open), date tokens only while empty or parseable — a
  * token the parser degrades to plain text must not wear a pill.
  */
@@ -413,7 +413,7 @@ export function segmentThreadSearchQuery(query: string, now: Date): ThreadSearch
     if (!operator) return;
     const keyword = operator[1]!.toLowerCase();
     const value = unquoteSearchValue(operator[2]!).trim();
-    if (keyword === "in" || keyword === "agent") {
+    if (keyword === "in" || keyword === "provider") {
       operatorRanges.push([start, end]);
       return;
     }
