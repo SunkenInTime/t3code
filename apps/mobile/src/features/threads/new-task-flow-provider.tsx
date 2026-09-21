@@ -98,7 +98,6 @@ import { useLegacyPlanModeState } from "./use-legacy-plan-mode-enabled";
 import {
   resolveNewTaskBranchWorktreePath,
   resolveNewTaskLocalWorkspaceSelection,
-  shouldAutoSelectWorktreeBaseBranch,
 } from "./new-task-context-presentation";
 import { resolveEnvironmentProjectMatch } from "./new-task-project-selection";
 import { resolveProjectThreadCreationBranch } from "./projectThreadCreationValidation";
@@ -874,15 +873,18 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
 
   useEffect(() => {
     if (
-      !shouldAutoSelectWorktreeBaseBranch({
-        defaultWorkspaceModeSettled,
-        workspaceMode,
-        selectedBranchName,
-        liveWorkspaceSelection: selectedProjectDraftKey
-          ? getComposerDraftSnapshot(selectedProjectDraftKey).workspaceSelection
-          : undefined,
-      })
+      !selectedProjectDraftKey ||
+      !defaultWorkspaceModeSettled ||
+      workspaceMode !== "worktree" ||
+      selectedBranchName !== null
     ) {
+      return;
+    }
+    // The draft screen writes a thread's branch and worktree into the draft in
+    // the same commit this effect runs, so the rendered selection above can be
+    // stale. Re-read the draft before replacing it.
+    const live = getComposerDraftSnapshot(selectedProjectDraftKey).workspaceSelection;
+    if (live && (live.mode !== "worktree" || live.branch !== null)) {
       return;
     }
     // The default may only exist as origin/<default> (isRemote), which

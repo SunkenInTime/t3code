@@ -4,7 +4,6 @@ import {
   resolveNewTaskBranchWorktreePath,
   resolveNewTaskBranchLabel,
   resolveNewTaskLocalWorkspaceSelection,
-  shouldAutoSelectWorktreeBaseBranch,
 } from "./new-task-context-presentation";
 
 describe("resolveNewTaskLocalWorkspaceSelection", () => {
@@ -125,61 +124,5 @@ describe("resolveNewTaskBranchLabel", () => {
         workspaceMode: "worktree",
       }),
     ).toBe("Choose branch");
-  });
-});
-
-describe("shouldAutoSelectWorktreeBaseBranch", () => {
-  const settledWorktreeDefault = {
-    defaultWorkspaceModeSettled: true,
-    workspaceMode: "worktree" as const,
-    selectedBranchName: null,
-  };
-
-  it("picks a base branch for a fresh worktree draft", () => {
-    expect(
-      shouldAutoSelectWorktreeBaseBranch({
-        ...settledWorktreeDefault,
-        liveWorkspaceSelection: undefined,
-      }),
-    ).toBe(true);
-    expect(
-      shouldAutoSelectWorktreeBaseBranch({
-        ...settledWorktreeDefault,
-        liveWorkspaceSelection: { mode: "worktree", branch: null },
-      }),
-    ).toBe(true);
-  });
-
-  it("keeps a local selection written to the draft in the same commit", () => {
-    expect(
-      shouldAutoSelectWorktreeBaseBranch({
-        ...settledWorktreeDefault,
-        liveWorkspaceSelection: { mode: "local", branch: "t3code/0790af30" },
-      }),
-    ).toBe(false);
-  });
-
-  it("does nothing once a branch is selected or the mode is local", () => {
-    expect(
-      shouldAutoSelectWorktreeBaseBranch({
-        ...settledWorktreeDefault,
-        selectedBranchName: "main",
-        liveWorkspaceSelection: { mode: "worktree", branch: "main" },
-      }),
-    ).toBe(false);
-    expect(
-      shouldAutoSelectWorktreeBaseBranch({
-        ...settledWorktreeDefault,
-        workspaceMode: "local",
-        liveWorkspaceSelection: undefined,
-      }),
-    ).toBe(false);
-    expect(
-      shouldAutoSelectWorktreeBaseBranch({
-        ...settledWorktreeDefault,
-        defaultWorkspaceModeSettled: false,
-        liveWorkspaceSelection: undefined,
-      }),
-    ).toBe(false);
   });
 });
