@@ -117,7 +117,17 @@ const syncFs = <A>(method: string, path: string, run: () => A) =>
 // Electron emits ready as soon as startup yields to the event loop, and the
 // Clerk bridge must register its privileged scheme before that.
 const preReadyFileSystem = FileSystem.makeNoop({
-  exists: (path) => syncFs("exists", path, () => NodeFS.existsSync(path)),
+  // Like Effect's exists: only a missing path is false, other access errors fail.
+  exists: (path) =>
+    syncFs("exists", path, () => {
+      NodeFS.accessSync(path);
+      return true;
+    }).pipe(
+      Effect.catchIf(
+        (error) => error.reason._tag === "NotFound",
+        () => Effect.succeed(false),
+      ),
+    ),
   readFileString: (path) => syncFs("readFileString", path, () => NodeFS.readFileSync(path, "utf8")),
   makeDirectory: (path, options) =>
     syncFs("makeDirectory", path, () => {
