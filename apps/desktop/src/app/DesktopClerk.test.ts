@@ -30,11 +30,17 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
 
-const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
+const makeDesktopClerkLayer = (
+  isDevelopment = true,
+  events: string[] = [],
+  platform: NodeJS.Platform = "darwin",
+  fileSystem: FileSystem.FileSystem = FileSystem.makeNoop({ exists: () => Effect.succeed(false) }),
+) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
     stateDir: "/tmp/t3-state",
     isDevelopment,
     appDataDirectory: "/tmp/app-data",
+    platform,
   } as unknown as DesktopEnvironment.DesktopEnvironment["Service"]);
 
   const electronApp = {
@@ -50,7 +56,7 @@ const makeDesktopClerkLayer = (isDevelopment = true, events: string[] = []) => {
         NodePath.layerPosix,
         Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment),
         Layer.succeed(ElectronApp.ElectronApp, electronApp),
-        FileSystem.layerNoop({ exists: () => Effect.succeed(false) }),
+        Layer.succeed(FileSystem.FileSystem, fileSystem),
       ),
     ),
   );
@@ -92,6 +98,49 @@ describe("DesktopClerk", () => {
       createClerkBridgeMock.mockClear();
     });
   });
+
+  it.each([
+    {
+      name: "packaged Windows",
+      isDevelopment: false,
+      platform: "win32" as const,
+      userData: "/tmp/app-data/t3code-v2",
+    },
+    {
+      name: "development",
+      isDevelopment: true,
+      platform: "win32" as const,
+      userData: "/tmp/app-data/t3code-dev",
+    },
+  ])(
+    "creates the bridge before startup can yield to the event loop ($name)",
+    ({ isDevelopment, platform, userData }) => {
+      const events: string[] = [];
+      storageMock.mockReturnValue(storageAdapter);
+      createClerkBridgeMock.mockImplementation(() => {
+        events.push("createClerkBridge");
+        return { cleanup: vi.fn(), isPrimaryInstance: true };
+      });
+      // An ambient async FileSystem would let Electron emit ready before the bridge exists.
+      const deferredFileSystem = FileSystem.makeNoop({
+        exists: () =>
+          Effect.promise(async () => {
+            events.push("deferred exists");
+            return false;
+          }),
+      });
+
+      // runSync throws if the layer ever suspends.
+      // oxlint-disable-next-line t3code/no-manual-effect-runtime-in-tests -- The assertion IS that the layer builds synchronously; it.effect would mask a regression to async.
+      Effect.runSync(
+        Effect.scoped(
+          Layer.build(makeDesktopClerkLayer(isDevelopment, events, platform, deferredFileSystem)),
+        ),
+      );
+
+      assert.deepEqual(events, [`setPath:userData:${userData}`, "createClerkBridge"]);
+    },
+  );
 
   it.effect("preserves bridge initialization failures", () => {
     const cause = new Error("bridge initialization failed");
