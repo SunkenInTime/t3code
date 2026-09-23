@@ -29,12 +29,15 @@ import * as ElectronApp from "../electron/ElectronApp.ts";
 import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as DesktopClerk from "./DesktopClerk.ts";
 import * as DesktopEnvironment from "./DesktopEnvironment.ts";
+import * as DesktopPreReadyFileSystem from "./DesktopPreReadyFileSystem.ts";
 
 const makeDesktopClerkLayer = (
   isDevelopment = true,
   events: string[] = [],
   platform: NodeJS.Platform = "darwin",
-  fileSystem: FileSystem.FileSystem = FileSystem.makeNoop({ exists: () => Effect.succeed(false) }),
+  fileSystemLayer: Layer.Layer<FileSystem.FileSystem> = FileSystem.layerNoop({
+    exists: () => Effect.succeed(false),
+  }),
 ) => {
   const environment = DesktopEnvironment.DesktopEnvironment.of({
     stateDir: "/tmp/t3-state",
@@ -56,7 +59,7 @@ const makeDesktopClerkLayer = (
         NodePath.layerPosix,
         Layer.succeed(DesktopEnvironment.DesktopEnvironment, environment),
         Layer.succeed(ElectronApp.ElectronApp, electronApp),
-        Layer.succeed(FileSystem.FileSystem, fileSystem),
+        fileSystemLayer,
       ),
     ),
   );
@@ -121,20 +124,14 @@ describe("DesktopClerk", () => {
         events.push("createClerkBridge");
         return { cleanup: vi.fn(), isPrimaryInstance: true };
       });
-      // An ambient async FileSystem would let Electron emit ready before the bridge exists.
-      const deferredFileSystem = FileSystem.makeNoop({
-        exists: () =>
-          Effect.promise(async () => {
-            events.push("deferred exists");
-            return false;
-          }),
-      });
-
-      // runSync throws if the layer ever suspends.
+      // runSync throws if the layer ever suspends, which would let Electron emit
+      // ready before the bridge exists. main.ts provides the same FileSystem.
       // oxlint-disable-next-line t3code/no-manual-effect-runtime-in-tests -- The assertion IS that the layer builds synchronously; it.effect would mask a regression to async.
       Effect.runSync(
         Effect.scoped(
-          Layer.build(makeDesktopClerkLayer(isDevelopment, events, platform, deferredFileSystem)),
+          Layer.build(
+            makeDesktopClerkLayer(isDevelopment, events, platform, DesktopPreReadyFileSystem.layer),
+          ),
         ),
       );
 
