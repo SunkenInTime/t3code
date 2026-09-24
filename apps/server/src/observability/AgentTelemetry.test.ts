@@ -124,7 +124,6 @@ describe("AgentTelemetryRecorder", () => {
     const { recorder, spans, named } = makeRecorder();
     recorder.noteTurnInput({
       threadId: THREAD,
-      turnId: TURN,
       text: "Fix the failing test",
       attachmentCount: 0,
       model: "claude-sonnet-5",
@@ -308,7 +307,6 @@ describe("AgentTelemetryRecorder", () => {
     const { recorder, real } = makeRecorder(false);
     recorder.noteTurnInput({
       threadId: THREAD,
-      turnId: TURN,
       text: "secret plan",
       attachmentCount: 0,
       model: undefined,
@@ -348,6 +346,7 @@ describe("AgentTelemetryRecorder", () => {
             toolName: "deploy",
             input: {
               api_key: "sk-live-123",
+              access_token: "tok-abc",
               authorization: { value: "Bearer secret-token" },
               session_ids: ["secret-session"],
               retries: 3,
@@ -365,6 +364,7 @@ describe("AgentTelemetryRecorder", () => {
     // Nested objects and arrays under a sensitive key are hidden too.
     assert.notInclude(JSON.stringify(args), "secret-token");
     assert.notInclude(JSON.stringify(args), "secret-session");
+    assert.notInclude(JSON.stringify(args), "tok-abc");
   });
 
   it("ignores events for turns it never saw start and duplicate starts", () => {
@@ -632,7 +632,6 @@ describe("AgentTelemetryRecorder", () => {
     const note = (threadId: string, text: string) =>
       recorder.noteTurnInput({
         threadId,
-        turnId: TURN,
         text,
         attachmentCount: 0,
         model: undefined,
@@ -653,12 +652,11 @@ describe("AgentTelemetryRecorder", () => {
     assert.notInclude(String(agent!.attributes.get("gen_ai.input.messages")), "failed to send");
   });
 
-  it("keeps a prompt first when it is noted after its turn started", () => {
+  it("keeps a prompt first when it is bound after its turn started", () => {
     const { recorder, named } = makeRecorder();
     const note = (text: string) =>
       recorder.noteTurnInput({
         threadId: THREAD,
-        turnId: TURN,
         text,
         attachmentCount: 0,
         model: undefined,
@@ -671,8 +669,9 @@ describe("AgentTelemetryRecorder", () => {
         payload: { itemType: "assistant_message", status: "completed", detail: "On it." },
       }),
     );
-    note("Fix the gold discount");
-    note("Also add a test");
+    // Noted after the turn started (sendTurn was slow), then a steer.
+    recorder.bindTurnInput(note("Fix the gold discount"), TURN);
+    recorder.bindTurnInput(note("Also add a test"), TURN);
     recorder.handle(claudeResponse(2, 1, 1, "end_turn"));
     recorder.handle(event("turn.completed", 3, { payload: { state: "completed" } }));
 
@@ -681,5 +680,70 @@ describe("AgentTelemetryRecorder", () => {
       input.map((message: { parts: Array<{ content: string }> }) => message.parts[0]!.content),
       ["Fix the gold discount", "Also add a test"],
     );
+  });
+
+  it("gives a fast turn its prompt even if sendTurn returns after it finished", () => {
+    const { recorder, named } = makeRecorder();
+    const noteId = recorder.noteTurnInput({
+      threadId: THREAD,
+      text: "Quick question",
+      attachmentCount: 0,
+      model: undefined,
+      link: undefined,
+    });
+    recorder.handle(event("turn.started", 0, { payload: {} }));
+    recorder.handle(event("turn.completed", 1, { payload: { state: "completed" } }));
+    recorder.bindTurnInput(noteId, TURN);
+
+    const agent = named("invoke_agent")[0]!;
+    assert.include(String(agent.attributes.get("gen_ai.input.messages")), "Quick question");
+  });
+
+  it("keeps every send noted before its turn started, in order", () => {
+    const { recorder, named } = makeRecorder();
+    for (const text of ["First prompt", "Steer before start"]) {
+      recorder.noteTurnInput({
+        threadId: THREAD,
+        text,
+        attachmentCount: 0,
+        model: undefined,
+        link: undefined,
+      });
+    }
+    recorder.handle(event("turn.started", 0, { payload: {} }));
+    recorder.handle(claudeResponse(1, 1, 1, "end_turn"));
+    recorder.handle(event("turn.completed", 2, { payload: { state: "completed" } }));
+
+    const input = JSON.parse(named("chat ")[0]!.attributes.get("gen_ai.input.messages") as string);
+    assert.deepStrictEqual(
+      input.map((message: { parts: Array<{ content: string }> }) => message.parts[0]!.content),
+      ["First prompt", "Steer before start"],
+    );
+  });
+
+  it("does not hand a send to a turn that was already running", () => {
+    const { recorder, named } = makeRecorder();
+    recorder.handle(event("turn.started", 0, { payload: {} }));
+    const noteId = recorder.noteTurnInput({
+      threadId: THREAD,
+      text: "For the next turn",
+      attachmentCount: 0,
+      model: undefined,
+      link: undefined,
+    });
+    recorder.handle(event("turn.completed", 1, { payload: { state: "completed" } }));
+    recorder.bindTurnInput(noteId, "turn-2");
+    recorder.handle({
+      ...event("turn.started", 2, { payload: {} }),
+      turnId: "turn-2",
+    } as ProviderRuntimeEvent);
+    recorder.handle({
+      ...event("turn.completed", 3, { payload: { state: "completed" } }),
+      turnId: "turn-2",
+    } as ProviderRuntimeEvent);
+
+    const [first, second] = named("invoke_agent");
+    assert.notInclude(String(first!.attributes.get("gen_ai.input.messages")), "For the next turn");
+    assert.include(String(second!.attributes.get("gen_ai.input.messages")), "For the next turn");
   });
 });

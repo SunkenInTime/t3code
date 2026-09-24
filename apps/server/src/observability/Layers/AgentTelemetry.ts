@@ -34,20 +34,28 @@ export const AgentTraceExporter = Context.Reference<Tracer.Tracer | undefined>(
 );
 
 export interface AgentTurnInputs {
-  /** Records the text T3 hands a provider so the agent span can show it. */
+  /**
+   * Records the text T3 is about to hand a provider so the agent span can
+   * show it. Call before `sendTurn`, then bind the returned id to the turn.
+   */
   readonly noteTurnInput: (input: {
     readonly threadId: string;
-    readonly turnId: string;
     readonly text: string | undefined;
     readonly attachmentCount: number;
     readonly model: string | undefined;
-  }) => Effect.Effect<void>;
+  }) => Effect.Effect<number | undefined>;
+  readonly bindTurnInput: (inputId: number | undefined, turnId: string) => Effect.Effect<void>;
 }
 
 /** No-op unless `AgentTelemetryLive` is running. */
 export const AgentTurnInputs = Context.Reference<AgentTurnInputs>(
   "t3/observability/AgentTurnInputs",
-  { defaultValue: () => ({ noteTurnInput: () => Effect.void }) },
+  {
+    defaultValue: () => ({
+      noteTurnInput: () => Effect.succeed(undefined),
+      bindTurnInput: () => Effect.void,
+    }),
+  },
 );
 
 class RecorderHolder extends Context.Service<
@@ -65,9 +73,13 @@ const TurnInputsLive = Layer.effect(
       noteTurnInput: (input) =>
         Effect.gen(function* () {
           const recorder = holder.current;
-          if (!recorder) return;
+          if (!recorder) return undefined;
           const link = Option.getOrUndefined(yield* Effect.option(Effect.currentSpan));
-          recorder.noteTurnInput({ ...input, link });
+          return recorder.noteTurnInput({ ...input, link });
+        }),
+      bindTurnInput: (inputId, turnId) =>
+        Effect.sync(() => {
+          if (inputId !== undefined) holder.current?.bindTurnInput(inputId, turnId);
         }),
     } satisfies AgentTurnInputs;
   }),

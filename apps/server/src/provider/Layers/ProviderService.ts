@@ -1734,14 +1734,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }),
         (turnMetadata) =>
           Effect.gen(function* () {
-            const turn = yield* routed.adapter.sendTurn(input);
-            yield* agentTurnInputs.noteTurnInput({
+            // Noted before the send: a fast turn can finish before it returns.
+            const telemetryInputId = yield* agentTurnInputs.noteTurnInput({
               threadId: input.threadId,
-              turnId: String(turn.turnId),
               text: input.input,
               attachmentCount: attachments.length,
               model: input.modelSelection?.model,
             });
+            const turn = yield* routed.adapter.sendTurn(input);
+            yield* agentTurnInputs.bindTurnInput(telemetryInputId, String(turn.turnId));
             yield* associateTurnAnalytics({
               providerInstanceId: routed.instanceId,
               threadId: input.threadId,

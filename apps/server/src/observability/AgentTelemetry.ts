@@ -34,6 +34,7 @@ const AGENT_NAME_PREFIX = "T3 Code";
 
 const MAX_TEXT_CHARS = 8_000;
 const MAX_JSON_STRING_CHARS = 4_000;
+const STREAM_TRUNCATED_MARKER = "… [truncated]";
 /** How long a sent prompt waits for its turn to start before it is dropped. */
 const PENDING_INPUT_TTL_MS = 5 * 60_000;
 
@@ -54,6 +55,8 @@ const SENSITIVE_KEY_PATTERN = new RegExp(
     "csrf",
     "xsrf",
     "jwt",
+    // Not in Logfire's defaults; catches access_token, refresh_token, etc.
+    "token",
     "ssn",
     "social[._ -]?security",
     "credit[._ -]?card",
@@ -185,8 +188,6 @@ interface AgentRun {
 
 export interface TurnInputNote {
   readonly threadId: string;
-  /** The turn `sendTurn` started or steered. */
-  readonly turnId: string;
   readonly text: string | undefined;
   readonly attachmentCount: number;
   readonly model: string | undefined;
@@ -230,6 +231,13 @@ function asCount(value: unknown): number | undefined {
 
 function truncateText(text: string, limit = MAX_TEXT_CHARS): string {
   if (text.length <= limit) return text;
+  // Already capped while streaming.
+  if (
+    text.length <= limit + STREAM_TRUNCATED_MARKER.length &&
+    text.endsWith(STREAM_TRUNCATED_MARKER)
+  ) {
+    return text;
+  }
   return `${text.slice(0, limit)}… [truncated ${text.length - limit} chars]`;
 }
 
@@ -470,7 +478,14 @@ const exitInterrupted = (): Exit.Exit<unknown, unknown> => Exit.failCause(Cause.
 export class AgentTelemetryRecorder {
   private readonly runs = new Map<string, AgentRun>();
   /** Sends not yet matched to a turn start, with when they were noted. */
-  private readonly pendingInputs = new Map<string, { note: TurnInputNote; notedAtMs: number }>();
+  private readonly pendingInputs: Array<{
+    readonly id: number;
+    readonly note: TurnInputNote;
+    readonly notedAtMs: number;
+    /** Set once `sendTurn` returned the turn this send belongs to. */
+    turnId: string | undefined;
+  }> = [];
+  private nextInputId = 1;
 
   private readonly options: AgentTelemetryOptions;
 
@@ -484,29 +499,47 @@ export class AgentTelemetryRecorder {
   }
 
   /**
-   * Records the text T3 sent for a turn. `sendTurn` returns before the
-   * turn's events are processed, so the turn may or may not have started.
+   * Records the text T3 is about to send. It is noted before `sendTurn`
+   * because a fast turn can start and finish before `sendTurn` returns; the
+   * returned id binds it to its turn afterwards with `bindTurnInput`.
    */
-  noteTurnInput(note: TurnInputNote): void {
-    const key = `${note.threadId}:${note.turnId}`;
-    const run = this.runs.get(key);
-    if (run) {
-      if (note.link)
-        run.span.addLinks([{ span: note.link, attributes: { "t3.link": "provider.sendTurn" } }]);
-      // The first send is the turn's prompt; later ones steer it.
-      this.addUserMessage(run, note, !run.promptRecorded);
-      return;
-    }
+  noteTurnInput(note: TurnInputNote): number {
     // A send whose turn never starts (it failed or was cancelled) must not
     // hold its prompt forever.
     const nowMs = this.options.nowMs();
-    for (const [pendingKey, pending] of this.pendingInputs) {
-      if (nowMs - pending.notedAtMs > PENDING_INPUT_TTL_MS) this.pendingInputs.delete(pendingKey);
+    for (let index = this.pendingInputs.length - 1; index >= 0; index -= 1) {
+      if (nowMs - this.pendingInputs[index]!.notedAtMs > PENDING_INPUT_TTL_MS) {
+        this.pendingInputs.splice(index, 1);
+      }
     }
-    this.pendingInputs.set(key, {
+    const id = this.nextInputId++;
+    this.pendingInputs.push({
+      id,
       note: { ...note, text: note.text === undefined ? undefined : truncateText(note.text) },
       notedAtMs: nowMs,
+      turnId: undefined,
     });
+    return id;
+  }
+
+  /** Ties a noted send to the turn `sendTurn` started or steered. */
+  bindTurnInput(inputId: number, turnId: string): void {
+    const index = this.pendingInputs.findIndex((pending) => pending.id === inputId);
+    if (index < 0) return;
+    const pending = this.pendingInputs[index]!;
+    const run = this.runs.get(`${pending.note.threadId}:${turnId}`);
+    if (!run) {
+      pending.turnId = turnId;
+      return;
+    }
+    this.pendingInputs.splice(index, 1);
+    if (pending.note.link) {
+      run.span.addLinks([
+        { span: pending.note.link, attributes: { "t3.link": "provider.sendTurn" } },
+      ]);
+    }
+    // The first send is the turn's prompt; later ones steer it.
+    this.addUserMessage(run, pending.note, !run.promptRecorded);
   }
 
   handle(event: ProviderRuntimeEvent): void {
@@ -521,8 +554,10 @@ export class AgentTelemetryRecorder {
         this.finishRun(event, "interrupted", { errorMessage: event.payload.reason });
         return;
       case "session.exited": {
-        for (const [key, pending] of this.pendingInputs) {
-          if (pending.note.threadId === event.threadId) this.pendingInputs.delete(key);
+        for (let index = this.pendingInputs.length - 1; index >= 0; index -= 1) {
+          if (this.pendingInputs[index]!.note.threadId === event.threadId) {
+            this.pendingInputs.splice(index, 1);
+          }
         }
         const run = this.activeRun(event.threadId);
         if (run) {
@@ -672,9 +707,21 @@ export class AgentTelemetryRecorder {
     const identity = providerIdentity(event.provider);
     const agentName = agentNameForDriver(event.provider);
     const facts = this.options.sessionFacts?.(event.threadId);
-    const noteKey = `${event.threadId}:${event.turnId}`;
-    const note = this.pendingInputs.get(noteKey)?.note;
-    this.pendingInputs.delete(noteKey);
+    // Sends for this thread not yet tied to another turn belong to this one,
+    // in the order they were sent: a prompt, then any steers.
+    const turnId = event.turnId;
+    const notes = this.pendingInputs
+      .filter(
+        (pending) =>
+          pending.note.threadId === event.threadId &&
+          (pending.turnId === undefined || pending.turnId === turnId),
+      )
+      .map((pending) => pending.note);
+    for (let index = this.pendingInputs.length - 1; index >= 0; index -= 1) {
+      const pending = this.pendingInputs[index]!;
+      if (notes.includes(pending.note)) this.pendingInputs.splice(index, 1);
+    }
+    const note = notes[0];
     const model = event.payload.model ?? note?.model ?? facts?.model;
     const cwd = facts?.cwd;
     const workspaceName = cwd ? cwd.split(/[\\/]/u).findLast((part) => part.length > 0) : undefined;
@@ -735,7 +782,7 @@ export class AgentTelemetryRecorder {
       promptRecorded: false,
     };
     this.runs.set(`${event.threadId}:${event.turnId}`, run);
-    if (note) this.addUserMessage(run, note, true);
+    notes.forEach((entry, index) => this.addUserMessage(run, entry, index === 0));
   }
 
   private addUserMessage(run: AgentRun, note: TurnInputNote, isPrompt: boolean): void {
@@ -778,13 +825,13 @@ export class AgentTelemetryRecorder {
     const key = event.itemId ?? "default";
     if (event.payload.streamKind === "assistant_text") {
       this.currentOutput(run, at);
-      run.assistantText.set(key, (run.assistantText.get(key) ?? "") + event.payload.delta);
+      run.assistantText.set(key, appendCapped(run.assistantText.get(key), event.payload.delta));
     } else if (
       event.payload.streamKind === "reasoning_text" ||
       event.payload.streamKind === "reasoning_summary_text"
     ) {
       this.currentOutput(run, at);
-      run.reasoningText.set(key, (run.reasoningText.get(key) ?? "") + event.payload.delta);
+      run.reasoningText.set(key, appendCapped(run.reasoningText.get(key), event.payload.delta));
     }
   }
 
@@ -1434,6 +1481,15 @@ export class AgentTelemetryRecorder {
           : Exit.void,
     );
   }
+}
+
+/** Appends streamed text without holding more than the exported limit. */
+function appendCapped(current: string | undefined, delta: string): string {
+  if (current?.endsWith(STREAM_TRUNCATED_MARKER)) return current;
+  const text = (current ?? "") + delta;
+  return text.length > MAX_TEXT_CHARS
+    ? text.slice(0, MAX_TEXT_CHARS) + STREAM_TRUNCATED_MARKER
+    : text;
 }
 
 function setToolAttribute(tool: ToolRun, key: string, value: unknown): void {
