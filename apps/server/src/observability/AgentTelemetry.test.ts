@@ -856,4 +856,55 @@ describe("AgentTelemetryRecorder", () => {
       BigInt(Date.parse(isoAt(2))) * 1_000_000n,
     );
   });
+
+  it("lets Claude's completion close a subagent after a terminal update", () => {
+    const { recorder, named } = makeRecorder();
+    recorder.handle(event("turn.started", 0, { payload: {} }));
+    recorder.handle(
+      event("task.started", 1, { payload: { taskId: "task-1", taskType: "local_agent" } }),
+    );
+    recorder.handle(
+      event("task.updated", 2, { payload: { taskId: "task-1", status: "completed" } }),
+    );
+    recorder.handle(
+      event("task.completed", 3, {
+        payload: {
+          taskId: "task-1",
+          status: "completed",
+          summary: "Found two call sites",
+          typedUsage: { totalTokens: 900, inputTokens: 800, outputTokens: 100 },
+        },
+      }),
+    );
+    recorder.handle(event("turn.completed", 4, { payload: { state: "completed" } }));
+
+    const [subagent] = named("invoke_agent T3 Code / Claude subagent");
+    assert.strictEqual(subagent!.attributes.get("final_result"), "Found two call sites");
+    assert.strictEqual(subagent!.attributes.get("gen_ai.aggregated_usage.input_tokens"), 800);
+    assert.strictEqual(
+      (subagent!.status as Extract<Tracer.SpanStatus, { _tag: "Ended" }>).endTime,
+      BigInt(Date.parse(isoAt(3))) * 1_000_000n,
+    );
+  });
+
+  it("keeps a subagent running past its turn until it completes", () => {
+    const { recorder, named } = makeRecorder();
+    recorder.handle(event("turn.started", 0, { payload: {} }));
+    recorder.handle(
+      event("task.started", 1, { payload: { taskId: "bg-agent", taskType: "local_agent" } }),
+    );
+    recorder.handle(event("turn.completed", 2, { payload: { state: "completed" } }));
+    const [subagent] = named("invoke_agent T3 Code / Claude subagent");
+    assert.strictEqual(subagent!.status._tag, "Started");
+
+    recorder.handle({
+      ...event("task.completed", 9, { payload: { taskId: "bg-agent", status: "completed" } }),
+      turnId: undefined,
+    } as unknown as ProviderRuntimeEvent);
+    assert.isTrue(Exit.isSuccess(endExit(subagent!)));
+    assert.strictEqual(
+      (subagent!.status as Extract<Tracer.SpanStatus, { _tag: "Ended" }>).endTime,
+      BigInt(Date.parse(isoAt(9))) * 1_000_000n,
+    );
+  });
 });

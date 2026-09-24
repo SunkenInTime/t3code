@@ -504,6 +504,14 @@ export class AgentTelemetryRecorder {
   }> = [];
   private nextInputId = 1;
   /**
+   * Subagents still running when their parent turn ended (Claude background
+   * agents). They end when their own terminal event arrives.
+   */
+  private readonly detachedSubagents = new Map<
+    string,
+    { readonly span: Tracer.Span; readonly threadId: string }
+  >();
+  /**
    * Finished runs whose thread still has an unbound send. A fast turn can end
    * before `sendTurn` returns its id, so the run waits for that binding (or
    * for `abandonTurnInput`) before its span ends.
@@ -615,6 +623,7 @@ export class AgentTelemetryRecorder {
           }
         }
         this.releaseHeldRuns(event.threadId, true);
+        this.endDetachedSubagents(event.threadId, this.eventMs(event));
         const run = this.activeRun(event.threadId);
         if (run) {
           this.finishRun(
@@ -627,6 +636,13 @@ export class AgentTelemetryRecorder {
       }
       default:
         break;
+    }
+    if (
+      (event.type === "task.completed" || event.type === "task.updated") &&
+      this.detachedSubagents.has(event.payload.taskId)
+    ) {
+      this.onTaskEnd(undefined, event, this.eventMs(event));
+      return;
     }
     const run = this.runFor(event);
     if (!run) return;
@@ -660,21 +676,9 @@ export class AgentTelemetryRecorder {
         this.onTaskStarted(run, event, at);
         return;
       case "task.completed":
-        this.endSubagent(run, event.payload.taskId, event.payload.status, at, {
-          summary: event.payload.summary,
-          usage: event.payload.typedUsage,
-        });
+      case "task.updated":
+        this.onTaskEnd(run, event, at);
         return;
-      case "task.updated": {
-        // Codex can end a child agent with an update instead of a completion.
-        const status = event.payload.status;
-        if (status === "completed" || status === "failed") {
-          this.endSubagent(run, event.payload.taskId, status, at, { summary: event.payload.error });
-        } else if (status === "cancelled" || status === "interrupted") {
-          this.endSubagent(run, event.payload.taskId, "stopped", at, {});
-        }
-        return;
-      }
       case "runtime.error":
         run.span.event("runtime.error", toNanos(at), {
           "error.message": event.payload.message,
@@ -700,6 +704,14 @@ export class AgentTelemetryRecorder {
   }
 
   /** Ends every open span, for server shutdown. */
+  private endDetachedSubagents(threadId: string | undefined, atMs: number): void {
+    for (const [taskId, detached] of Array.from(this.detachedSubagents)) {
+      if (threadId !== undefined && detached.threadId !== threadId) continue;
+      this.detachedSubagents.delete(taskId);
+      detached.span.end(toNanos(atMs), exitInterrupted());
+    }
+  }
+
   closeAll(reason: string): void {
     for (const held of Array.from(this.heldRuns.values())) {
       this.releaseHeldRuns(held.run.threadId, true);
@@ -708,6 +720,7 @@ export class AgentTelemetryRecorder {
     for (const run of Array.from(this.runs.values())) {
       this.endRun(run, "interrupted", { errorMessage: reason }, atMs);
     }
+    this.endDetachedSubagents(undefined, atMs);
   }
 
   get openRunCount(): number {
@@ -1413,8 +1426,32 @@ export class AgentTelemetryRecorder {
     run.subagents.set(agentId, span);
   }
 
+  private onTaskEnd(
+    run: AgentRun | undefined,
+    event: Extract<ProviderRuntimeEvent, { type: "task.completed" | "task.updated" }>,
+    at: number,
+  ): void {
+    if (event.type === "task.completed") {
+      this.endSubagent(run, event.payload.taskId, event.payload.status, at, {
+        summary: event.payload.summary,
+        usage: event.payload.typedUsage,
+      });
+      return;
+    }
+    // Codex can end a child agent with an update instead of a completion.
+    // Claude sends a terminal update before its completion, which carries the
+    // summary and usage, so Claude subagents wait for the completion.
+    if (event.provider !== "codex") return;
+    const status = event.payload.status;
+    if (status === "completed" || status === "failed") {
+      this.endSubagent(run, event.payload.taskId, status, at, { summary: event.payload.error });
+    } else if (status === "cancelled" || status === "interrupted") {
+      this.endSubagent(run, event.payload.taskId, "stopped", at, {});
+    }
+  }
+
   private endSubagent(
-    run: AgentRun,
+    run: AgentRun | undefined,
     taskId: string,
     status: "completed" | "failed" | "stopped",
     at: number,
@@ -1425,9 +1462,10 @@ export class AgentTelemetryRecorder {
         | undefined;
     },
   ): void {
-    const span = run.subagents.get(taskId);
+    const span = run?.subagents.get(taskId) ?? this.detachedSubagents.get(taskId)?.span;
     if (!span) return;
-    run.subagents.delete(taskId);
+    run?.subagents.delete(taskId);
+    this.detachedSubagents.delete(taskId);
     const usage = details.usage;
     if (usage) {
       if (usage.inputTokens !== undefined) {
@@ -1489,7 +1527,12 @@ export class AgentTelemetryRecorder {
         exitInterrupted(),
       );
     }
-    for (const span of run.subagents.values()) span.end(toNanos(at), exitInterrupted());
+    // A subagent can outlive its turn (Claude background agents); it ends
+    // with its own completion, or when the session exits.
+    for (const [taskId, span] of run.subagents) {
+      this.detachedSubagents.set(taskId, { span, threadId: run.threadId });
+    }
+    run.subagents.clear();
     for (const call of run.modelCalls.values()) {
       call.span.attribute("t3.tool.status", "unfinished");
       call.span.end(toNanos(Math.max(at, call.startMs)), exitInterrupted());
