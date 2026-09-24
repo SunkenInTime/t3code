@@ -2,7 +2,13 @@
 
 > For maintainers. Using T3 Code? See [docs/user](../user/).
 
-T3 Code has one server-side observability model:
+On `demo/logfire-live`, use the [Logfire agent demo setup](logfire-demo.md). This
+branch disables background server/browser tracing, local trace files, and app
+metrics/log exports. Only the [agent spans](#agent-runs-genai-spans) are exported.
+The general instrumentation procedures below describe upstream T3 Code and are
+inactive in this demo branch.
+
+Upstream T3 Code has one server-side observability model:
 
 - pretty logs go to stdout for humans
 - completed spans go to a local NDJSON trace file
@@ -569,7 +575,7 @@ Values are case-insensitive and trimmed. An unrecognized value is ignored with a
 
 ### Agent Runs (GenAI Spans)
 
-When `T3CODE_OTLP_TRACES_URL` is set, the server also exports each provider turn as
+When `T3CODE_OTLP_TRACES_URL` is set, the server exports each provider turn as
 OpenTelemetry GenAI spans, which backends such as Pydantic Logfire read as agent runs. The mapping
 lives in `apps/server/src/observability/AgentTelemetry.ts` and reads only the canonical provider
 runtime events, so every adapter goes through the same code.
@@ -600,14 +606,8 @@ Message text, tool arguments, and tool results are exported only with
 `OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`. Structured tool arguments have
 sensitive-looking keys (Logfire's default patterns) redacted, and long text is truncated.
 
-Sending to Logfire needs only the existing variables:
-
-```bash
-export T3CODE_OTLP_TRACES_URL=https://logfire-us.pydantic.dev/v1/traces
-export T3CODE_OTLP_METRICS_URL=https://logfire-us.pydantic.dev/v1/metrics
-export T3CODE_OTLP_HEADERS="Authorization=<write token>"
-export OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=dev
-```
+For reproducible demo configuration and startup commands, use the
+[Logfire agent demo setup](logfire-demo.md).
 
 ### What Is Instrumented Today
 

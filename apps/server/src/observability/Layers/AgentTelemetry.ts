@@ -19,7 +19,6 @@ import * as Config from "effect/Config";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
 import * as Stream from "effect/Stream";
 import type * as Tracer from "effect/Tracer";
 
@@ -74,12 +73,9 @@ const TurnInputsLive = Layer.effect(
     const holder = yield* RecorderHolder;
     return {
       noteTurnInput: (input) =>
-        Effect.gen(function* () {
-          const recorder = holder.current;
-          if (!recorder) return undefined;
-          const link = Option.getOrUndefined(yield* Effect.option(Effect.currentSpan));
-          return recorder.noteTurnInput({ ...input, link });
-        }),
+        // Runtime tracing is disabled in the demo; its spans have "noop" IDs,
+        // which are invalid OTLP links. Agent runs start their own trace.
+        Effect.sync(() => holder.current?.noteTurnInput({ ...input, link: undefined })),
       bindTurnInput: (inputId, turnId) =>
         Effect.sync(() => {
           if (inputId !== undefined) holder.current?.bindTurnInput(inputId, turnId);
