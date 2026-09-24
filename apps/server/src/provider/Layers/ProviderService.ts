@@ -1741,7 +1741,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
               attachmentCount: attachments.length,
               model: input.modelSelection?.model,
             });
-            const turn = yield* routed.adapter.sendTurn(input);
+            const turn = yield* routed.adapter
+              .sendTurn(input)
+              .pipe(Effect.onError(() => agentTurnInputs.abandonTurnInput(telemetryInputId)));
             yield* agentTurnInputs.bindTurnInput(telemetryInputId, String(turn.turnId));
             yield* associateTurnAnalytics({
               providerInstanceId: routed.instanceId,

@@ -150,6 +150,22 @@ interface ModelToolCall {
   failedExecutions: number;
 }
 
+interface FinishDetails {
+  readonly errorMessage?: string | undefined;
+  readonly stopReason?: string | null | undefined;
+  readonly totalCostUsd?: number | undefined;
+  readonly modelUsage?: Record<string, unknown> | undefined;
+  readonly tokenUsage?:
+    | {
+        readonly usageStatus: string;
+        readonly inputTokens?: number | undefined;
+        readonly outputTokens?: number | undefined;
+        readonly cachedInputTokens?: number | undefined;
+        readonly cacheCreationTokens?: number | undefined;
+      }
+    | undefined;
+}
+
 interface AgentRun {
   readonly threadId: string;
   readonly turnId: string;
@@ -158,7 +174,8 @@ interface AgentRun {
   readonly agentName: string;
   readonly span: Tracer.Span;
   readonly startMs: number;
-  readonly model: string | undefined;
+  /** Current model; a reroute changes it for later responses. */
+  model: string | undefined;
   readonly transcript: Array<Message>;
   /** Messages observed since the last closed model response. */
   newMessages: Array<Message>;
@@ -486,6 +503,15 @@ export class AgentTelemetryRecorder {
     turnId: string | undefined;
   }> = [];
   private nextInputId = 1;
+  /**
+   * Finished runs whose thread still has an unbound send. A fast turn can end
+   * before `sendTurn` returns its id, so the run waits for that binding (or
+   * for `abandonTurnInput`) before its span ends.
+   */
+  private readonly heldRuns = new Map<
+    string,
+    { run: AgentRun; state: string; details: FinishDetails; atMs: number }
+  >();
 
   private readonly options: AgentTelemetryOptions;
 
@@ -508,8 +534,10 @@ export class AgentTelemetryRecorder {
     // hold its prompt forever.
     const nowMs = this.options.nowMs();
     for (let index = this.pendingInputs.length - 1; index >= 0; index -= 1) {
-      if (nowMs - this.pendingInputs[index]!.notedAtMs > PENDING_INPUT_TTL_MS) {
+      const pending = this.pendingInputs[index]!;
+      if (nowMs - pending.notedAtMs > PENDING_INPUT_TTL_MS) {
         this.pendingInputs.splice(index, 1);
+        this.releaseHeldRuns(pending.note.threadId);
       }
     }
     const id = this.nextInputId++;
@@ -527,9 +555,11 @@ export class AgentTelemetryRecorder {
     const index = this.pendingInputs.findIndex((pending) => pending.id === inputId);
     if (index < 0) return;
     const pending = this.pendingInputs[index]!;
-    const run = this.runs.get(`${pending.note.threadId}:${turnId}`);
+    const key = `${pending.note.threadId}:${turnId}`;
+    const run = this.runs.get(key) ?? this.heldRuns.get(key)?.run;
     if (!run) {
       pending.turnId = turnId;
+      this.releaseHeldRuns(pending.note.threadId);
       return;
     }
     this.pendingInputs.splice(index, 1);
@@ -540,6 +570,31 @@ export class AgentTelemetryRecorder {
     }
     // The first send is the turn's prompt; later ones steer it.
     this.addUserMessage(run, pending.note, !run.promptRecorded);
+    this.releaseHeldRuns(pending.note.threadId);
+  }
+
+  /** Drops a noted send whose `sendTurn` failed. */
+  abandonTurnInput(inputId: number): void {
+    const index = this.pendingInputs.findIndex((pending) => pending.id === inputId);
+    if (index < 0) return;
+    const [pending] = this.pendingInputs.splice(index, 1);
+    this.releaseHeldRuns(pending!.note.threadId);
+  }
+
+  /** Ends a thread's held runs once none of its sends is still unbound. */
+  private releaseHeldRuns(threadId: string, force = false): void {
+    if (!force && this.hasUnboundInput(threadId)) return;
+    for (const [key, held] of Array.from(this.heldRuns)) {
+      if (held.run.threadId !== threadId) continue;
+      this.heldRuns.delete(key);
+      this.endRun(held.run, held.state, held.details, held.atMs);
+    }
+  }
+
+  private hasUnboundInput(threadId: string): boolean {
+    return this.pendingInputs.some(
+      (pending) => pending.note.threadId === threadId && pending.turnId === undefined,
+    );
   }
 
   handle(event: ProviderRuntimeEvent): void {
@@ -559,6 +614,7 @@ export class AgentTelemetryRecorder {
             this.pendingInputs.splice(index, 1);
           }
         }
+        this.releaseHeldRuns(event.threadId, true);
         const run = this.activeRun(event.threadId);
         if (run) {
           this.finishRun(
@@ -618,6 +674,7 @@ export class AgentTelemetryRecorder {
         });
         return;
       case "model.rerouted":
+        run.model = event.payload.toModel;
         run.span.event("model.rerouted", toNanos(at), {
           from: event.payload.fromModel,
           to: event.payload.toModel,
@@ -631,6 +688,9 @@ export class AgentTelemetryRecorder {
 
   /** Ends every open span, for server shutdown. */
   closeAll(reason: string): void {
+    for (const held of Array.from(this.heldRuns.values())) {
+      this.releaseHeldRuns(held.run.threadId, true);
+    }
     const atMs = this.options.nowMs();
     for (const run of Array.from(this.runs.values())) {
       this.endRun(run, "interrupted", { errorMessage: reason }, atMs);
@@ -638,7 +698,7 @@ export class AgentTelemetryRecorder {
   }
 
   get openRunCount(): number {
-    return this.runs.size;
+    return this.runs.size + this.heldRuns.size;
   }
 
   private activeRun(threadId: string): AgentRun | undefined {
@@ -707,15 +767,12 @@ export class AgentTelemetryRecorder {
     const identity = providerIdentity(event.provider);
     const agentName = agentNameForDriver(event.provider);
     const facts = this.options.sessionFacts?.(event.threadId);
-    // Sends for this thread not yet tied to another turn belong to this one,
-    // in the order they were sent: a prompt, then any steers.
+    // Sends already bound to this turn, in order: a prompt, then any steers.
+    // Unbound sends wait for `bindTurnInput`; a turn that started meanwhile
+    // (a Claude background turn) must not take them.
     const turnId = event.turnId;
     const notes = this.pendingInputs
-      .filter(
-        (pending) =>
-          pending.note.threadId === event.threadId &&
-          (pending.turnId === undefined || pending.turnId === turnId),
-      )
+      .filter((pending) => pending.note.threadId === event.threadId && pending.turnId === turnId)
       .map((pending) => pending.note);
     for (let index = this.pendingInputs.length - 1; index >= 0; index -= 1) {
       const pending = this.pendingInputs[index]!;
@@ -1313,7 +1370,9 @@ export class AgentTelemetryRecorder {
     if (run.subagents.has(agentId)) return;
     const parentTool = payload.toolUseId ? run.tools.get(payload.toolUseId) : undefined;
     const name = `${run.agentName} subagent`;
-    const span = this.startSpan(`invoke_agent ${name}`, parentTool?.span ?? run.span, at, {
+    // A subagent means its Task call finished streaming and is running.
+    const parent = parentTool ? this.openToolSpan(parentTool, at) : run.span;
+    const span = this.startSpan(`invoke_agent ${name}`, parent, at, {
       "logfire.msg": `${payload.title ?? payload.description ?? "subagent"} run`,
       "gen_ai.operation.name": "invoke_agent",
       "gen_ai.agent.name": name,
@@ -1368,35 +1427,23 @@ export class AgentTelemetryRecorder {
       readonly createdAt: string;
     },
     state: string,
-    details: {
-      readonly errorMessage?: string | undefined;
-      readonly stopReason?: string | null | undefined;
-      readonly totalCostUsd?: number | undefined;
-      readonly modelUsage?: Record<string, unknown> | undefined;
-      readonly tokenUsage?:
-        | {
-            readonly usageStatus: string;
-            readonly inputTokens?: number | undefined;
-            readonly outputTokens?: number | undefined;
-            readonly cachedInputTokens?: number | undefined;
-            readonly cacheCreationTokens?: number | undefined;
-          }
-        | undefined;
-    },
+    details: FinishDetails,
   ): void {
     const run = event.turnId
       ? this.runs.get(`${event.threadId}:${event.turnId}`)
       : this.activeRun(event.threadId);
     if (!run) return;
-    this.endRun(run, state, details, this.eventMs(event));
+    const atMs = this.eventMs(event);
+    if (!run.promptRecorded && this.hasUnboundInput(run.threadId)) {
+      const key = `${run.threadId}:${run.turnId}`;
+      this.runs.delete(key);
+      this.heldRuns.set(key, { run, state, details, atMs });
+      return;
+    }
+    this.endRun(run, state, details, atMs);
   }
 
-  private endRun(
-    run: AgentRun,
-    state: string,
-    details: Parameters<AgentTelemetryRecorder["finishRun"]>[2],
-    at: number,
-  ): void {
+  private endRun(run: AgentRun, state: string, details: FinishDetails, at: number): void {
     this.runs.delete(`${run.threadId}:${run.turnId}`);
     const interrupted = state === "interrupted" || state === "cancelled";
     // Output after the last usage report still came from a model response.
@@ -1440,6 +1487,12 @@ export class AgentTelemetryRecorder {
         span.attribute(
           "gen_ai.aggregated_usage.cache_read.input_tokens",
           turnUsage.cachedInputTokens,
+        );
+      }
+      if (turnUsage.cacheCreationTokens !== undefined) {
+        span.attribute(
+          "gen_ai.aggregated_usage.cache_creation.input_tokens",
+          turnUsage.cacheCreationTokens,
         );
       }
     } else if (run.modelRequests > 0) {

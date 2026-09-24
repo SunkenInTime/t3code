@@ -122,13 +122,16 @@ const endExit = (span: Tracer.NativeSpan) => {
 describe("AgentTelemetryRecorder", () => {
   it("records a Claude turn as agent, chat, and tool spans", () => {
     const { recorder, spans, named } = makeRecorder();
-    recorder.noteTurnInput({
-      threadId: THREAD,
-      text: "Fix the failing test",
-      attachmentCount: 0,
-      model: "claude-sonnet-5",
-      link: undefined,
-    });
+    recorder.bindTurnInput(
+      recorder.noteTurnInput({
+        threadId: THREAD,
+        text: "Fix the failing test",
+        attachmentCount: 0,
+        model: "claude-sonnet-5",
+        link: undefined,
+      }),
+      TURN,
+    );
     recorder.handle(event("turn.started", 0, { payload: {} }));
     recorder.handle(
       event("content.delta", 1, {
@@ -637,7 +640,7 @@ describe("AgentTelemetryRecorder", () => {
         model: undefined,
         link: undefined,
       });
-    note(THREAD, "prompt that failed to send");
+    recorder.bindTurnInput(note(THREAD, "prompt that failed to send"), TURN);
     now += 6 * 60_000;
     note("thread-2", "later prompt");
     now += 1_000;
@@ -702,13 +705,16 @@ describe("AgentTelemetryRecorder", () => {
   it("keeps every send noted before its turn started, in order", () => {
     const { recorder, named } = makeRecorder();
     for (const text of ["First prompt", "Steer before start"]) {
-      recorder.noteTurnInput({
-        threadId: THREAD,
-        text,
-        attachmentCount: 0,
-        model: undefined,
-        link: undefined,
-      });
+      recorder.bindTurnInput(
+        recorder.noteTurnInput({
+          threadId: THREAD,
+          text,
+          attachmentCount: 0,
+          model: undefined,
+          link: undefined,
+        }),
+        TURN,
+      );
     }
     recorder.handle(event("turn.started", 0, { payload: {} }));
     recorder.handle(claudeResponse(1, 1, 1, "end_turn"));
@@ -745,5 +751,67 @@ describe("AgentTelemetryRecorder", () => {
     const [first, second] = named("invoke_agent");
     assert.notInclude(String(first!.attributes.get("gen_ai.input.messages")), "For the next turn");
     assert.include(String(second!.attributes.get("gen_ai.input.messages")), "For the next turn");
+  });
+
+  it("ends a held run when its send fails instead of binding", () => {
+    const { recorder, named } = makeRecorder();
+    const noteId = recorder.noteTurnInput({
+      threadId: THREAD,
+      text: "Never bound",
+      attachmentCount: 0,
+      model: undefined,
+      link: undefined,
+    });
+    recorder.handle(event("turn.started", 0, { payload: {} }));
+    recorder.handle(event("turn.completed", 1, { payload: { state: "completed" } }));
+    // Held open while the send is unbound.
+    assert.strictEqual(named("invoke_agent")[0]!.status._tag, "Started");
+    assert.strictEqual(recorder.openRunCount, 1);
+    recorder.abandonTurnInput(noteId);
+    assert.strictEqual(recorder.openRunCount, 0);
+    const [agent] = named("invoke_agent");
+    assert.strictEqual(agent!.status._tag, "Ended");
+    assert.notInclude(String(agent!.attributes.get("gen_ai.input.messages")), "Never bound");
+  });
+
+  it("labels responses after a reroute with the new model", () => {
+    const { recorder, named } = makeRecorder();
+    recorder.handle(event("turn.started", 0, { payload: { model: "model-a" } }));
+    recorder.handle(
+      event("model.rerouted", 1, {
+        payload: { fromModel: "model-a", toModel: "model-b", reason: "capacity" },
+      }),
+    );
+    recorder.handle(claudeResponse(2, 1, 1, "end_turn"));
+    recorder.handle(event("turn.completed", 3, { payload: { state: "completed" } }));
+    assert.strictEqual(named("chat ")[0]!.attributes.get("gen_ai.request.model"), "model-b");
+  });
+
+  it("nests a subagent under the Task call that is still streaming", () => {
+    const { recorder, named } = makeRecorder();
+    recorder.handle(event("turn.started", 0, { payload: {} }));
+    recorder.handle(
+      event("item.started", 1, {
+        itemId: "toolu_task",
+        payload: {
+          itemType: "collab_agent_tool_call",
+          status: "inProgress",
+          data: { toolName: "Task", input: {} },
+        },
+      }),
+    );
+    recorder.handle(
+      event("task.started", 1.5, {
+        payload: { taskId: "task-1", toolUseId: "toolu_task", taskType: "local_agent" },
+      }),
+    );
+    recorder.handle(
+      event("task.completed", 2, { payload: { taskId: "task-1", status: "completed" } }),
+    );
+    recorder.handle(event("turn.completed", 3, { payload: { state: "completed" } }));
+
+    const [task] = named("execute_tool Task");
+    const [subagent] = named("invoke_agent T3 Code / Claude subagent");
+    assert.strictEqual(Option.getOrUndefined(subagent!.parent)?.spanId, task!.spanId);
   });
 });

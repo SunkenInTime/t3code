@@ -45,6 +45,8 @@ export interface AgentTurnInputs {
     readonly model: string | undefined;
   }) => Effect.Effect<number | undefined>;
   readonly bindTurnInput: (inputId: number | undefined, turnId: string) => Effect.Effect<void>;
+  /** Drops a noted send whose `sendTurn` failed. */
+  readonly abandonTurnInput: (inputId: number | undefined) => Effect.Effect<void>;
 }
 
 /** No-op unless `AgentTelemetryLive` is running. */
@@ -54,6 +56,7 @@ export const AgentTurnInputs = Context.Reference<AgentTurnInputs>(
     defaultValue: () => ({
       noteTurnInput: () => Effect.succeed(undefined),
       bindTurnInput: () => Effect.void,
+      abandonTurnInput: () => Effect.void,
     }),
   },
 );
@@ -80,6 +83,10 @@ const TurnInputsLive = Layer.effect(
       bindTurnInput: (inputId, turnId) =>
         Effect.sync(() => {
           if (inputId !== undefined) holder.current?.bindTurnInput(inputId, turnId);
+        }),
+      abandonTurnInput: (inputId) =>
+        Effect.sync(() => {
+          if (inputId !== undefined) holder.current?.abandonTurnInput(inputId);
         }),
     } satisfies AgentTurnInputs;
   }),
