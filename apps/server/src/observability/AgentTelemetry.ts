@@ -30,7 +30,7 @@ import * as Exit from "effect/Exit";
 import * as Option from "effect/Option";
 import * as Tracer from "effect/Tracer";
 
-export const AGENT_NAME_PREFIX = "T3 Code";
+const AGENT_NAME_PREFIX = "T3 Code";
 
 const MAX_TEXT_CHARS = 8_000;
 const MAX_JSON_STRING_CHARS = 4_000;
@@ -91,7 +91,7 @@ function providerIdentity(driver: string): ProviderIdentity {
 }
 
 /** Stable agent name per provider driver, e.g. `T3 Code / Claude`. */
-export function agentNameForDriver(driver: string): string {
+function agentNameForDriver(driver: string): string {
   return `${AGENT_NAME_PREFIX} / ${providerIdentity(driver).label}`;
 }
 
@@ -221,13 +221,13 @@ function asCount(value: unknown): number | undefined {
     : undefined;
 }
 
-export function truncateText(text: string, limit = MAX_TEXT_CHARS): string {
+function truncateText(text: string, limit = MAX_TEXT_CHARS): string {
   if (text.length <= limit) return text;
   return `${text.slice(0, limit)}… [truncated ${text.length - limit} chars]`;
 }
 
 /** Redacts sensitive keys and bounds string sizes in structured tool data. */
-export function sanitizeStructured(value: unknown, depth = 0): unknown {
+function sanitizeStructured(value: unknown, depth = 0): unknown {
   if (typeof value === "string") return truncateText(value, MAX_JSON_STRING_CHARS);
   if (depth > 8) return "[depth limit]";
   if (Array.isArray(value)) return value.slice(0, 100).map((v) => sanitizeStructured(v, depth + 1));
@@ -256,7 +256,7 @@ function toolResultText(value: unknown): string | undefined {
   return undefined;
 }
 
-export interface ToolCallFacts {
+interface ToolCallFacts {
   readonly name: string;
   readonly arguments: unknown;
   readonly result: unknown;
@@ -265,7 +265,7 @@ export interface ToolCallFacts {
 }
 
 /** Reads tool name, arguments, and result from a canonical item payload. */
-export function readToolCall(
+function readToolCall(
   driver: string,
   payload: {
     readonly itemType: string;
@@ -398,7 +398,7 @@ interface ResponseToolFacts {
  * the session does not report `model.response.completed` (a resumed Codex
  * thread). Input tokens include cache writes, matching Pydantic AI.
  */
-export function readRequestUsage(
+function readRequestUsage(
   event: Extract<ProviderRuntimeEvent, { type: "thread.token-usage.updated" }>,
 ): (RequestUsage & { readonly codexTotalKey?: string }) | undefined {
   const raw = event.raw;
