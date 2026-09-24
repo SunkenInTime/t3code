@@ -193,6 +193,8 @@ const McpStatusUpdatedType = Schema.Literal("mcp.status.updated");
 const McpOauthCompletedType = Schema.Literal("mcp.oauth.completed");
 const ModelReroutedType = Schema.Literal("model.rerouted");
 const ModelResponseCompletedType = Schema.Literal("model.response.completed");
+const ModelToolCallStartedType = Schema.Literal("model.tool_call.started");
+const ModelToolCallCompletedType = Schema.Literal("model.tool_call.completed");
 const ConfigWarningType = Schema.Literal("config.warning");
 const DeprecationNoticeType = Schema.Literal("deprecation.notice");
 const FilesPersistedType = Schema.Literal("files.persisted");
@@ -799,6 +801,25 @@ const ModelResponseCompletedPayload = Schema.Struct({
 });
 export type ModelResponseCompletedPayload = typeof ModelResponseCompletedPayload.Type;
 
+/**
+ * A tool call the model made, for providers whose calls are not their
+ * execution items. A Codex `exec` call is a script that can run several
+ * commands; those commands arrive as their own items.
+ */
+const ModelToolCallStartedPayload = Schema.Struct({
+  callId: TrimmedNonEmptyStringSchema,
+  name: TrimmedNonEmptyStringSchema,
+  arguments: Schema.optional(Schema.Unknown),
+});
+export type ModelToolCallStartedPayload = typeof ModelToolCallStartedPayload.Type;
+
+/** The call's output, as the provider recorded it for the model. */
+const ModelToolCallCompletedPayload = Schema.Struct({
+  callId: TrimmedNonEmptyStringSchema,
+  output: Schema.optional(Schema.Unknown),
+});
+export type ModelToolCallCompletedPayload = typeof ModelToolCallCompletedPayload.Type;
+
 const ConfigWarningPayload = Schema.Struct({
   summary: TrimmedNonEmptyStringSchema,
   details: Schema.optional(TrimmedNonEmptyStringSchema),
@@ -1177,6 +1198,22 @@ const ProviderRuntimeModelResponseCompletedEvent = Schema.Struct({
 export type ProviderRuntimeModelResponseCompletedEvent =
   typeof ProviderRuntimeModelResponseCompletedEvent.Type;
 
+const ProviderRuntimeModelToolCallStartedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: ModelToolCallStartedType,
+  payload: ModelToolCallStartedPayload,
+});
+export type ProviderRuntimeModelToolCallStartedEvent =
+  typeof ProviderRuntimeModelToolCallStartedEvent.Type;
+
+const ProviderRuntimeModelToolCallCompletedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: ModelToolCallCompletedType,
+  payload: ModelToolCallCompletedPayload,
+});
+export type ProviderRuntimeModelToolCallCompletedEvent =
+  typeof ProviderRuntimeModelToolCallCompletedEvent.Type;
+
 const ProviderRuntimeConfigWarningEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: ConfigWarningType,
@@ -1265,6 +1302,8 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeMcpOauthCompletedEvent,
   ProviderRuntimeModelReroutedEvent,
   ProviderRuntimeModelResponseCompletedEvent,
+  ProviderRuntimeModelToolCallStartedEvent,
+  ProviderRuntimeModelToolCallCompletedEvent,
   ProviderRuntimeConfigWarningEvent,
   ProviderRuntimeDeprecationNoticeEvent,
   ProviderRuntimeFilesPersistedEvent,

@@ -12,7 +12,7 @@
  *
  * @module observability/Layers/AgentTelemetry
  */
-import * as os from "node:os";
+import * as NodeOS from "node:os";
 
 import * as Clock from "effect/Clock";
 import * as Config from "effect/Config";
@@ -88,7 +88,7 @@ const SubscriberLive = Layer.effectDiscard(
       tracer: exporter,
       captureContent,
       staticAttributes: {
-        "host.name": os.hostname(),
+        "host.name": NodeOS.hostname(),
         "t3.app.version": packageJson.version,
       },
       sessionFacts: (threadId) => sessionFacts.get(threadId),

@@ -445,4 +445,146 @@ describe("AgentTelemetryRecorder", () => {
     assert.strictEqual(chat.attributes.get("gen_ai.client.operation.time_to_first_chunk"), 1.5);
     assert.strictEqual(named("invoke_agent")[0]!.attributes.get("t3.agent.model_requests"), 1);
   });
+
+  it("records a Codex model tool call with its executions nested under it", () => {
+    const { recorder, named, real } = makeRecorder();
+    const codex = (type: string, second: number, fields: Record<string, unknown> = {}) =>
+      ({ ...event(type, second, fields), provider: "codex" }) as ProviderRuntimeEvent;
+    recorder.handle(codex("turn.started", 0, { payload: {} }));
+    recorder.handle(
+      codex("model.tool_call.started", 2, {
+        payload: {
+          callId: "call_1",
+          name: "exec",
+          arguments: 'tools.exec_command({cmd:"npm test"})',
+        },
+      }),
+    );
+    recorder.handle(
+      codex("model.response.completed", 2, {
+        payload: {
+          requestStartedAt: isoAt(0.5),
+          requestStartSource: "input_recorded",
+          usage: { inputTokens: 100, outputTokens: 10 },
+        },
+      }),
+    );
+    const execItem = (type: "item.started" | "item.completed", second: number) =>
+      codex(type, second, {
+        itemId: "exec-1",
+        payload: {
+          itemType: "command_execution",
+          status: type === "item.started" ? "inProgress" : "failed",
+          data: {
+            item: {
+              type: "commandExecution",
+              command: "pwsh -Command npm test",
+              ...(type === "item.completed" ? { exitCode: 1, aggregatedOutput: "1 failing" } : {}),
+            },
+          },
+        },
+      });
+    recorder.handle(execItem("item.started", 3));
+    recorder.handle(execItem("item.completed", 4));
+    recorder.handle(
+      codex("model.tool_call.completed", 4.5, {
+        payload: { callId: "call_1", output: "Exit code 1: 1 failing" },
+      }),
+    );
+    recorder.handle(
+      codex("model.response.completed", 6, {
+        payload: {
+          requestStartedAt: isoAt(4.5),
+          requestStartSource: "input_recorded",
+          usage: { inputTokens: 120, outputTokens: 5 },
+        },
+      }),
+    );
+    recorder.handle(codex("turn.completed", 7, { payload: { state: "completed" } }));
+
+    const [call] = named("execute_tool exec");
+    assert.isDefined(call);
+    assert.strictEqual(call!.attributes.get("gen_ai.tool.call.id"), "call_1");
+    assert.strictEqual(call!.startTime, BigInt(Date.parse(isoAt(2))) * 1_000_000n);
+    assert.strictEqual(
+      (call!.status as Extract<Tracer.SpanStatus, { _tag: "Ended" }>).endTime,
+      BigInt(Date.parse(isoAt(4.5))) * 1_000_000n,
+    );
+    assert.strictEqual(call!.attributes.get("t3.tool.failed_executions"), 1);
+
+    const [execution] = real().filter((span) => span.name === "tool execution command_execution");
+    assert.isDefined(execution);
+    assert.strictEqual(Option.getOrUndefined(execution!.parent)?.spanId, call!.spanId);
+    assert.isFalse(execution!.attributes.has("gen_ai.operation.name"));
+    assert.isTrue(Exit.isFailure(endExit(execution!)));
+
+    // The model's call and its result share one id in the transcript.
+    const chats = named("chat ");
+    const firstOutput = JSON.parse(chats[0]!.attributes.get("gen_ai.output.messages") as string);
+    assert.strictEqual(firstOutput[0].parts[0].id, "call_1");
+    const secondInput = JSON.parse(chats[1]!.attributes.get("gen_ai.input.messages") as string);
+    assert.strictEqual(secondInput[0].parts[0].type, "tool_call_response");
+    assert.strictEqual(secondInput[0].parts[0].id, "call_1");
+
+    const [agent] = named("invoke_agent");
+    assert.strictEqual(agent!.attributes.get("t3.agent.tool_calls"), 1);
+    assert.strictEqual(agent!.attributes.get("t3.agent.tool_executions"), 1);
+    assert.strictEqual(agent!.attributes.get("t3.agent.tool_calling_requests"), 1);
+  });
+
+  it("does not duplicate a Claude tool that finished before its response ended", () => {
+    const { recorder, named } = makeRecorder();
+    recorder.handle(event("turn.started", 0, { payload: {} }));
+    recorder.handle(bashTool("item.started", 1, "tool-1", { command: "ls" }));
+    recorder.handle(bashTool("item.completed", 1.5, "tool-1", { command: "ls", result: "a" }));
+    recorder.handle(
+      claudeResponse(2, 1, 1, "tool_use", { startSecond: 0.2, firstChunkSecond: 0.5 }, [
+        { id: "tool-1", name: "Bash" },
+      ]),
+    );
+    recorder.handle(event("turn.completed", 3, { payload: { state: "completed" } }));
+
+    const tools = named("execute_tool");
+    assert.strictEqual(tools.length, 1);
+    assert.strictEqual(tools[0]!.startTime, BigInt(Date.parse(isoAt(1))) * 1_000_000n);
+    const output = JSON.parse(
+      named("chat ")[0]!.attributes.get("gen_ai.output.messages") as string,
+    );
+    assert.strictEqual(
+      output[0].parts.filter((part: { type: string }) => part.type === "tool_call").length,
+      1,
+    );
+  });
+
+  it("ends Codex executions still running when their call returns", () => {
+    const { recorder, real } = makeRecorder();
+    const codex = (type: string, second: number, fields: Record<string, unknown> = {}) =>
+      ({ ...event(type, second, fields), provider: "codex" }) as ProviderRuntimeEvent;
+    recorder.handle(codex("turn.started", 0, { payload: {} }));
+    recorder.handle(
+      codex("model.tool_call.started", 1, { payload: { callId: "call_1", name: "exec" } }),
+    );
+    recorder.handle(
+      codex("item.started", 1.5, {
+        itemId: "exec-1",
+        payload: {
+          itemType: "command_execution",
+          status: "inProgress",
+          data: { item: { type: "commandExecution" } },
+        },
+      }),
+    );
+    recorder.handle(
+      codex("model.tool_call.completed", 2, { payload: { callId: "call_1", output: "ok" } }),
+    );
+    recorder.handle(codex("turn.completed", 3, { payload: { state: "completed" } }));
+
+    const [execution] = real().filter((span) => span.name.startsWith("tool execution"));
+    assert.strictEqual(execution!.attributes.get("t3.tool.status"), "running_when_call_returned");
+    assert.isTrue(Exit.isSuccess(endExit(execution!)));
+    assert.strictEqual(
+      (execution!.status as Extract<Tracer.SpanStatus, { _tag: "Ended" }>).endTime,
+      BigInt(Date.parse(isoAt(2))) * 1_000_000n,
+    );
+  });
 });

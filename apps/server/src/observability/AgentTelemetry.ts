@@ -120,6 +120,13 @@ interface Message {
 interface ToolRun {
   /** Unset until execution is known to have started; see `openToolSpan`. */
   span: Tracer.Span | undefined;
+  readonly spanName: string;
+  /**
+   * An execution inside a model tool call that the adapter reported
+   * separately (a Codex `exec` script running shell commands). It is not a
+   * tool call of its own, so it carries no `gen_ai.tool.*` attributes.
+   */
+  readonly nested: boolean;
   readonly parent: Tracer.AnySpan;
   readonly attributes: Map<string, unknown>;
   readonly itemId: string;
@@ -128,6 +135,14 @@ interface ToolRun {
   readonly call: Extract<MessagePart, { type: "tool_call" }>;
   approvalWaitMs: number;
   approvalOpenedAtMs: number | undefined;
+}
+
+/** A tool call the model made, reported by the adapter rather than an item. */
+interface ModelToolCall {
+  readonly span: Tracer.Span;
+  readonly name: string;
+  readonly startMs: number;
+  failedExecutions: number;
 }
 
 interface AgentRun {
@@ -159,6 +174,8 @@ interface AgentRun {
   lastCodexTotal: string | undefined;
   /** Set once the adapter reports response boundaries for this run. */
   responseEvents: boolean;
+  readonly modelCalls: Map<string, ModelToolCall>;
+  toolExecutions: number;
 }
 
 export interface TurnInputNote {
@@ -366,6 +383,9 @@ interface ResponseTiming {
   readonly firstChunkMs: number | undefined;
   readonly responseModel: string | undefined;
   readonly responseId: string | undefined;
+}
+
+interface ResponseToolFacts {
   readonly toolCalls: ReadonlyArray<{
     readonly id: string;
     readonly name: string;
@@ -505,6 +525,12 @@ export class AgentTelemetryRecorder {
         return;
       case "model.response.completed":
         this.onResponse(run, event, at);
+        return;
+      case "model.tool_call.started":
+        this.startModelToolCall(run, event, at);
+        return;
+      case "model.tool_call.completed":
+        this.finishModelToolCall(run, event, at);
         return;
       case "request.opened":
       case "request.resolved":
@@ -673,6 +699,8 @@ export class AgentTelemetryRecorder {
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       lastCodexTotal: undefined,
       responseEvents: false,
+      modelCalls: new Map(),
+      toolExecutions: 0,
     };
     this.runs.set(`${event.threadId}:${event.turnId}`, run);
     if (note) this.addUserMessage(run, note);
@@ -725,7 +753,7 @@ export class AgentTelemetryRecorder {
   private openToolSpan(tool: ToolRun, startMs: number): Tracer.Span {
     if (!tool.span) {
       tool.span = this.startSpan(
-        `execute_tool ${tool.name}`,
+        tool.spanName,
         tool.parent,
         startMs,
         Object.fromEntries(tool.attributes),
@@ -770,35 +798,60 @@ export class AgentTelemetryRecorder {
     const facts = readToolCall(run.driver, payload);
     if (!existing) {
       if (event.type === "item.completed" && payload.status === undefined) return;
-      const parent = (payload.agentId && run.subagents.get(payload.agentId)) || run.span;
       const call: Extract<MessagePart, { type: "tool_call" }> = {
         type: "tool_call",
         id: itemId,
         name: facts.name,
       };
+      // While a model tool call is open, an item is one of its executions.
+      // With several calls open the owner is ambiguous, so it goes under the
+      // agent instead of a guessed call.
+      const openCalls = [...run.modelCalls.entries()];
+      const nested = openCalls.length > 0 && !payload.agentId;
+      const owner = openCalls.length === 1 ? openCalls[0] : undefined;
+      const parent =
+        (payload.agentId && run.subagents.get(payload.agentId)) || owner?.[1].span || run.span;
       // Subagent tools belong to the subagent, not to the parent's model output.
       // Once an adapter reports response boundaries, a tool starting with no
       // response open was listed by the response that already closed.
-      if (!payload.agentId && !payload.parentToolUseId && !(run.responseEvents && !run.output)) {
+      if (
+        !nested &&
+        !payload.agentId &&
+        !payload.parentToolUseId &&
+        !(run.responseEvents && !run.output)
+      ) {
         const output = this.currentOutput(run, at);
         output.parts.push(call);
       }
       const attributes = new Map<string, unknown>(
-        Object.entries({
-          "logfire.msg": `running tool: ${facts.name}`,
-          "gen_ai.operation.name": "execute_tool",
-          "gen_ai.tool.name": facts.name,
-          "gen_ai.tool.call.id": itemId,
-          "gen_ai.agent.name": run.agentName,
-          "gen_ai.conversation.id": run.threadId,
-          "t3.tool.item_type": payload.itemType,
-          "t3.turn.id": run.turnId,
-          "t3.subagent.id": payload.agentId,
-          "logfire.json_schema": JSON_SCHEMA_TOOL,
-        }).filter(([, value]) => value !== undefined),
+        Object.entries(
+          nested
+            ? {
+                "logfire.msg": `running ${facts.name}`,
+                "t3.tool.name": facts.name,
+                "t3.tool.item_id": itemId,
+                "t3.tool.parent_call_id": owner?.[0],
+                "t3.tool.item_type": payload.itemType,
+                "t3.turn.id": run.turnId,
+              }
+            : {
+                "logfire.msg": `running tool: ${facts.name}`,
+                "gen_ai.operation.name": "execute_tool",
+                "gen_ai.tool.name": facts.name,
+                "gen_ai.tool.call.id": itemId,
+                "gen_ai.agent.name": run.agentName,
+                "gen_ai.conversation.id": run.threadId,
+                "t3.tool.item_type": payload.itemType,
+                "t3.turn.id": run.turnId,
+                "t3.subagent.id": payload.agentId,
+                "logfire.json_schema": JSON_SCHEMA_TOOL,
+              },
+        ).filter(([, value]) => value !== undefined),
       );
       const newTool: ToolRun = {
         span: undefined,
+        spanName: nested ? `tool execution ${facts.name}` : `execute_tool ${facts.name}`,
+        nested,
         parent,
         attributes,
         itemId,
@@ -809,11 +862,17 @@ export class AgentTelemetryRecorder {
         approvalOpenedAtMs: undefined,
       };
       run.tools.set(itemId, newTool);
-      run.toolCalls += 1;
+      if (nested) run.toolExecutions += 1;
+      else run.toolCalls += 1;
       // A call still streaming is not running yet. The response that lists
       // it opens its span; subagent responses are not reported, so their
       // tools open now.
-      if (!run.identity.toolStartsWhileStreaming || payload.agentId || payload.parentToolUseId) {
+      if (
+        nested ||
+        !run.identity.toolStartsWhileStreaming ||
+        payload.agentId ||
+        payload.parentToolUseId
+      ) {
         this.openToolSpan(newTool, at);
       }
     }
@@ -821,7 +880,11 @@ export class AgentTelemetryRecorder {
     if (facts.arguments !== undefined && this.options.captureContent) {
       const args = sanitizeStructured(facts.arguments);
       tool.call.arguments = args;
-      setToolAttribute(tool, "gen_ai.tool.call.arguments", JSON.stringify(args));
+      setToolAttribute(
+        tool,
+        tool.nested ? "t3.tool.arguments" : "gen_ai.tool.call.arguments",
+        JSON.stringify(args),
+      );
     }
     if (event.type !== "item.completed") return;
 
@@ -837,7 +900,7 @@ export class AgentTelemetryRecorder {
     if (this.options.captureContent && result !== undefined) {
       setToolAttribute(
         tool,
-        "gen_ai.tool.call.result",
+        tool.nested ? "t3.tool.result" : "gen_ai.tool.call.result",
         typeof result === "string" ? result : JSON.stringify(result),
       );
     }
@@ -848,8 +911,14 @@ export class AgentTelemetryRecorder {
     if (tool.approvalWaitMs > 0) {
       setToolAttribute(tool, "t3.tool.approval_wait_ms", tool.approvalWaitMs);
     }
-    if (failed) run.failedToolCalls += 1;
-    if (!payload.agentId && !payload.parentToolUseId) {
+    if (failed) {
+      run.failedToolCalls += 1;
+      const owner = tool.nested
+        ? run.modelCalls.get(String(tool.attributes.get("t3.tool.parent_call_id")))
+        : undefined;
+      if (owner) owner.failedExecutions += 1;
+    }
+    if (!tool.nested && !payload.agentId && !payload.parentToolUseId) {
       const response: Message = {
         role: "user",
         parts: this.options.captureContent
@@ -928,10 +997,93 @@ export class AgentTelemetryRecorder {
             firstChunkMs: parse(payload.firstChunkAt),
             responseModel: payload.model,
             responseId: payload.responseId,
-            toolCalls: payload.toolCalls ?? [],
           }
         : undefined,
+      { toolCalls: payload.toolCalls ?? [] },
     );
+  }
+
+  /** A model tool call the adapter reports apart from its execution items. */
+  private startModelToolCall(
+    run: AgentRun,
+    event: Extract<ProviderRuntimeEvent, { type: "model.tool_call.started" }>,
+    at: number,
+  ): void {
+    const { callId, name } = event.payload;
+    if (run.modelCalls.has(callId)) return;
+    const args =
+      event.payload.arguments !== undefined && this.options.captureContent
+        ? sanitizeStructured(event.payload.arguments)
+        : undefined;
+    const span = this.startSpan(`execute_tool ${name}`, run.span, at, {
+      "logfire.msg": `running tool: ${name}`,
+      "gen_ai.operation.name": "execute_tool",
+      "gen_ai.tool.name": name,
+      "gen_ai.tool.call.id": callId,
+      "gen_ai.agent.name": run.agentName,
+      "gen_ai.conversation.id": run.threadId,
+      "gen_ai.tool.call.arguments":
+        args === undefined ? undefined : typeof args === "string" ? args : JSON.stringify(args),
+      "t3.turn.id": run.turnId,
+      "logfire.json_schema": JSON_SCHEMA_TOOL,
+    });
+    run.modelCalls.set(callId, { span, name, startMs: at, failedExecutions: 0 });
+    run.toolCalls += 1;
+    this.currentOutput(run, at).parts.push({
+      type: "tool_call",
+      id: callId,
+      name,
+      ...(args !== undefined ? { arguments: args } : {}),
+    });
+  }
+
+  private finishModelToolCall(
+    run: AgentRun,
+    event: Extract<ProviderRuntimeEvent, { type: "model.tool_call.completed" }>,
+    at: number,
+  ): void {
+    const toolResult = { id: event.payload.callId, output: event.payload.output };
+    const call = run.modelCalls.get(toolResult.id);
+    if (!call) return;
+    run.modelCalls.delete(toolResult.id);
+    const endMs = Math.max(at, call.startMs);
+    // Codex can keep a command's process alive long after the call returned
+    // its output (its shell sessions linger until reaped). The model moved on
+    // here, so its executions end here too, marked as still running.
+    for (const [itemId, tool] of run.tools) {
+      if (!tool.nested || tool.attributes.get("t3.tool.parent_call_id") !== toolResult.id) continue;
+      run.tools.delete(itemId);
+      setToolAttribute(tool, "t3.tool.status", "running_when_call_returned");
+      setToolAttribute(tool, "t3.tool.process_outlived_call", true);
+      this.openToolSpan(tool, tool.startMs).end(toNanos(Math.max(endMs, tool.startMs)), Exit.void);
+    }
+    const result =
+      toolResult.output === undefined
+        ? undefined
+        : typeof toolResult.output === "string"
+          ? truncateText(toolResult.output)
+          : sanitizeStructured(toolResult.output);
+    if (this.options.captureContent && result !== undefined) {
+      call.span.attribute(
+        "gen_ai.tool.call.result",
+        typeof result === "string" ? result : JSON.stringify(result),
+      );
+      const response: Message = {
+        role: "user",
+        parts: [{ type: "tool_call_response", id: toolResult.id, name: call.name, result }],
+      };
+      run.transcript.push(response);
+      run.newMessages.push(response);
+    }
+    call.span.attribute("t3.tool.status", "completed");
+    if (call.failedExecutions > 0) {
+      call.span.attribute("t3.tool.failed_executions", call.failedExecutions);
+    }
+    call.span.end(toNanos(endMs), Exit.void);
+    if (!run.output && at > run.requestStartMs) {
+      run.requestStartMs = at;
+      run.requestStartSource = "tool_result";
+    }
   }
 
   /** Emits a `chat` span for the model response observed since the last one. */
@@ -940,29 +1092,28 @@ export class AgentTelemetryRecorder {
     at: number,
     usage: RequestUsage | undefined,
     timing?: ResponseTiming,
+    tools?: ResponseToolFacts,
   ): void {
     const output = run.output ?? { role: "assistant" as const, parts: [] };
-    // The adapter lists the response's tool calls. Codex runs them only after
-    // the response ends, so their items have not started yet.
-    for (const call of timing?.toolCalls ?? []) {
+    for (const call of tools?.toolCalls ?? []) {
       const listed = run.tools.get(call.id);
-      if (listed && !listed.span) {
-        const streamingMs = Math.max(0, at - listed.startMs);
-        listed.attributes.set("t3.tool.call_streaming_ms", streamingMs);
-        this.openToolSpan(listed, Math.max(listed.startMs, at));
+      if (listed) {
+        // An item for this call already streamed (Claude); it runs from now.
+        if (!listed.span) {
+          const streamingMs = Math.max(0, at - listed.startMs);
+          listed.attributes.set("t3.tool.call_streaming_ms", streamingMs);
+          this.openToolSpan(listed, Math.max(listed.startMs, at));
+        }
+        if (!output.parts.some((part) => part.type === "tool_call" && part.id === call.id)) {
+          output.parts.push(listed.call);
+        }
+        continue;
       }
-      if (output.parts.some((part) => part.type === "tool_call" && part.id === call.id)) continue;
-      const known = run.tools.get(call.id)?.call;
-      output.parts.push(
-        known ?? {
-          type: "tool_call",
-          id: call.id,
-          name: call.name,
-          ...(call.arguments !== undefined && this.options.captureContent
-            ? { arguments: sanitizeStructured(call.arguments) }
-            : {}),
-        },
-      );
+      // Already finished (Claude ran it while still streaming) or reported
+      // as its own call event: keep the transcript entry, add no span.
+      if (!output.parts.some((part) => part.type === "tool_call" && part.id === call.id)) {
+        output.parts.push({ type: "tool_call", id: call.id, name: call.name });
+      }
     }
     if (!run.output && output.parts.length > 0) run.transcript.push(output);
     const toolCallCount = output.parts.filter((part) => part.type === "tool_call").length;
@@ -1168,8 +1319,14 @@ export class AgentTelemetryRecorder {
       );
     }
     for (const span of run.subagents.values()) span.end(toNanos(at), exitInterrupted());
+    for (const call of run.modelCalls.values()) {
+      call.span.attribute("t3.tool.status", "unfinished");
+      call.span.end(toNanos(Math.max(at, call.startMs)), exitInterrupted());
+    }
+    run.modelCalls.clear();
 
     const span = run.span;
+    if (run.toolExecutions > 0) span.attribute("t3.agent.tool_executions", run.toolExecutions);
     span.attribute("t3.turn.state", state);
     if (details.stopReason) span.attribute("t3.turn.stop_reason", details.stopReason);
     span.attribute("t3.agent.tool_calls", run.toolCalls);

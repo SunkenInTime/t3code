@@ -998,7 +998,6 @@ interface CodexResponseTracker {
   /** When the pending request's last input item was recorded. */
   requestStartedAt: string | undefined;
   firstChunkAt: string | undefined;
-  toolCalls: Array<{ readonly id: string; readonly name: string; readonly arguments?: unknown }>;
 }
 
 const CODEX_OUTPUT_ITEM_TYPES: ReadonlySet<string> = new Set(["reasoning", "agentMessage", "plan"]);
@@ -1010,10 +1009,15 @@ function isCodexInputResponseItem(item: Record<string, unknown>): boolean {
 }
 
 /**
- * Follows one Codex thread's model requests. Codex (with raw events) records
- * each request's input items, streams output items, then reports
- * `rawResponse/completed` with the response's exact usage. Codex does not
- * report when it sends a request, so the start is the last input item.
+ * Follows one Codex thread's model requests and tool calls, from the raw
+ * events T3 enables on `thread/start`. Codex records each request's input
+ * items, streams output items, then reports `rawResponse/completed` with the
+ * response's exact usage. Codex does not report when it sends a request, so
+ * the start is the last input item.
+ *
+ * A model tool call (`exec`, `apply_patch`, ...) is reported when its raw item
+ * completes and again when Codex records its output. The commands it runs
+ * arrive separately as execution items, sometimes before the response ends.
  */
 function trackCodexResponse(
   tracker: CodexResponseTracker,
@@ -1028,7 +1032,6 @@ function trackCodexResponse(
     case "turn/started":
       tracker.requestStartedAt = undefined;
       tracker.firstChunkAt = undefined;
-      tracker.toolCalls = [];
       return undefined;
     case "rawResponseItem/completed": {
       const item =
@@ -1036,27 +1039,32 @@ function trackCodexResponse(
           ? (payload.item as Record<string, unknown>)
           : undefined;
       if (!item) return undefined;
+      const callId =
+        typeof item.call_id === "string" && item.call_id.length > 0 ? item.call_id : undefined;
       if (isCodexInputResponseItem(item)) {
         if (tracker.firstChunkAt === undefined) tracker.requestStartedAt = event.createdAt;
-      } else {
-        if (tracker.requestStartedAt !== undefined && tracker.firstChunkAt === undefined) {
-          tracker.firstChunkAt = event.createdAt;
-        }
-        const type = typeof item.type === "string" ? item.type : "";
-        if (type.endsWith("_call")) {
-          const id = typeof item.call_id === "string" ? item.call_id : item.id;
-          const name = typeof item.name === "string" ? item.name : type;
-          const args = item.arguments ?? item.input ?? item.action;
-          if (typeof id === "string" && id.length > 0) {
-            tracker.toolCalls.push({
-              id,
-              name,
-              ...(args !== undefined ? { arguments: args } : {}),
-            });
-          }
-        }
+        if (!callId) return undefined;
+        return {
+          ...runtimeEventBase(event, canonicalThreadId),
+          type: "model.tool_call.completed",
+          payload: { callId, ...(item.output !== undefined ? { output: item.output } : {}) },
+        };
       }
-      return undefined;
+      if (tracker.requestStartedAt !== undefined && tracker.firstChunkAt === undefined) {
+        tracker.firstChunkAt = event.createdAt;
+      }
+      const type = typeof item.type === "string" ? item.type : "";
+      if (!type.endsWith("_call") || !callId) return undefined;
+      const args = item.arguments ?? item.input ?? item.action;
+      return {
+        ...runtimeEventBase(event, canonicalThreadId),
+        type: "model.tool_call.started",
+        payload: {
+          callId,
+          name: typeof item.name === "string" && item.name.length > 0 ? item.name : type,
+          ...(args !== undefined ? { arguments: args } : {}),
+        },
+      };
     }
     case "item/started": {
       const item = readPayload(EffectCodexSchema.V2ItemStartedNotification, event.payload)?.item;
@@ -1075,10 +1083,9 @@ function trackCodexResponse(
         EffectCodexSchema.V2RawResponseCompletedNotification,
         event.payload,
       );
-      const { requestStartedAt, firstChunkAt, toolCalls } = tracker;
+      const { requestStartedAt, firstChunkAt } = tracker;
       tracker.requestStartedAt = undefined;
       tracker.firstChunkAt = undefined;
-      tracker.toolCalls = [];
       if (!completed) return undefined;
       const usage = completed.usage ?? undefined;
       const cacheWrite = usage?.cacheWriteInputTokens ?? 0;
@@ -1091,7 +1098,6 @@ function trackCodexResponse(
             ? { requestStartedAt, requestStartSource: "input_recorded" as const }
             : {}),
           ...(firstChunkAt ? { firstChunkAt } : {}),
-          ...(toolCalls.length > 0 ? { toolCalls } : {}),
           ...(usage
             ? {
                 usage: {
@@ -2459,7 +2465,6 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         const responseTracker: CodexResponseTracker = {
           requestStartedAt: undefined,
           firstChunkAt: undefined,
-          toolCalls: [],
         };
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* () {
