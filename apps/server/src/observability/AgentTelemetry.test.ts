@@ -124,6 +124,7 @@ describe("AgentTelemetryRecorder", () => {
     const { recorder, spans, named } = makeRecorder();
     recorder.noteTurnInput({
       threadId: THREAD,
+      turnId: TURN,
       text: "Fix the failing test",
       attachmentCount: 0,
       model: "claude-sonnet-5",
@@ -307,6 +308,7 @@ describe("AgentTelemetryRecorder", () => {
     const { recorder, real } = makeRecorder(false);
     recorder.noteTurnInput({
       threadId: THREAD,
+      turnId: TURN,
       text: "secret plan",
       attachmentCount: 0,
       model: undefined,
@@ -589,7 +591,19 @@ describe("AgentTelemetryRecorder", () => {
     recorder.handle(
       codex("model.tool_call.completed", 2, { payload: { callId: "call_1", output: "ok" } }),
     );
+    // Codex reports the lingering process's end later; it must not add a span.
+    recorder.handle(
+      codex("item.completed", 2.5, {
+        itemId: "exec-1",
+        payload: {
+          itemType: "command_execution",
+          status: "completed",
+          data: { item: { type: "commandExecution", exitCode: 0 } },
+        },
+      }),
+    );
     recorder.handle(codex("turn.completed", 3, { payload: { state: "completed" } }));
+    assert.strictEqual(real().filter((span) => span.name.includes("command_execution")).length, 1);
 
     const execution = real().find((span) => span.name.startsWith("tool execution"));
     assert.strictEqual(execution!.attributes.get("t3.tool.status"), "running_when_call_returned");
@@ -618,6 +632,7 @@ describe("AgentTelemetryRecorder", () => {
     const note = (threadId: string, text: string) =>
       recorder.noteTurnInput({
         threadId,
+        turnId: TURN,
         text,
         attachmentCount: 0,
         model: undefined,
@@ -636,5 +651,35 @@ describe("AgentTelemetryRecorder", () => {
         span.attributes.get("logfire.span_type") !== "pending_span",
     );
     assert.notInclude(String(agent!.attributes.get("gen_ai.input.messages")), "failed to send");
+  });
+
+  it("keeps a prompt first when it is noted after its turn started", () => {
+    const { recorder, named } = makeRecorder();
+    const note = (text: string) =>
+      recorder.noteTurnInput({
+        threadId: THREAD,
+        turnId: TURN,
+        text,
+        attachmentCount: 0,
+        model: undefined,
+        link: undefined,
+      });
+    recorder.handle(event("turn.started", 0, { payload: {} }));
+    recorder.handle(
+      event("item.completed", 1, {
+        itemId: "text-1",
+        payload: { itemType: "assistant_message", status: "completed", detail: "On it." },
+      }),
+    );
+    note("Fix the gold discount");
+    note("Also add a test");
+    recorder.handle(claudeResponse(2, 1, 1, "end_turn"));
+    recorder.handle(event("turn.completed", 3, { payload: { state: "completed" } }));
+
+    const input = JSON.parse(named("chat ")[0]!.attributes.get("gen_ai.input.messages") as string);
+    assert.deepStrictEqual(
+      input.map((message: { parts: Array<{ content: string }> }) => message.parts[0]!.content),
+      ["Fix the gold discount", "Also add a test"],
+    );
   });
 });

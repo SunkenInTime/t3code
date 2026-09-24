@@ -24,7 +24,7 @@ import * as Stream from "effect/Stream";
 import type * as Tracer from "effect/Tracer";
 
 import packageJson from "../../../package.json" with { type: "json" };
-import { ProviderService } from "../../provider/Services/ProviderService.ts";
+import * as ProviderService from "../../provider/Services/ProviderService.ts";
 import { AgentTelemetryRecorder } from "../AgentTelemetry.ts";
 
 /** The OTLP trace exporter, when one is configured. Set by `ObservabilityLive`. */
@@ -37,6 +37,7 @@ export interface AgentTurnInputs {
   /** Records the text T3 hands a provider so the agent span can show it. */
   readonly noteTurnInput: (input: {
     readonly threadId: string;
+    readonly turnId: string;
     readonly text: string | undefined;
     readonly attachmentCount: number;
     readonly model: string | undefined;
@@ -77,10 +78,19 @@ const SubscriberLive = Layer.effectDiscard(
     const exporter = yield* AgentTraceExporter;
     if (!exporter) return;
     const holder = yield* RecorderHolder;
-    const providerService = yield* ProviderService;
+    const providerService = yield* ProviderService.ProviderService;
+    // A bad value must not stop the server; content capture stays off.
     const captureContent = yield* Config.Boolean(
       "OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT",
-    ).pipe(Config.withDefault(false));
+    ).pipe(
+      Config.withDefault(false),
+      Effect.catch((cause) =>
+        Effect.logWarning(
+          "Ignoring invalid OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT; content capture is off.",
+          { cause },
+        ).pipe(Effect.as(false)),
+      ),
+    );
 
     const clock = yield* Clock.Clock;
     const sessionFacts = new Map<string, { model?: string; cwd?: string; instanceId?: string }>();

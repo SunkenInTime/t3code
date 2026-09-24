@@ -115,7 +115,7 @@ import * as SourceControlRepositoryService from "./sourceControl/SourceControlRe
 import * as ProjectSetupScriptRunner from "./project/ProjectSetupScriptRunner.ts";
 import * as WorktreeSetupTracker from "./project/WorktreeSetupTracker.ts";
 import { ObservabilityLive } from "./observability/Layers/Observability.ts";
-import { AgentTelemetryLive, AgentTurnInputsLive } from "./observability/Layers/AgentTelemetry.ts";
+import * as AgentTelemetry from "./observability/Layers/AgentTelemetry.ts";
 import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import * as RemoteOpenTargets from "./environment/RemoteOpenTargets.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
@@ -452,12 +452,12 @@ const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
 
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   // Records agent runs as OpenTelemetry GenAI spans when OTLP export is on.
-  Layer.provideMerge(AgentTelemetryLive),
+  Layer.provideMerge(AgentTelemetry.AgentTelemetryLive),
   // Subscribes to `account.rate-limits.updated` so usage bars track live
   // telemetry instead of waiting for the next status probe.
   Layer.provideMerge(ProviderUsageLimitsIngestionLive),
   Layer.provideMerge(ProviderLayerLive),
-  Layer.provideMerge(AgentTurnInputsLive),
+  Layer.provideMerge(AgentTelemetry.AgentTurnInputsLive),
   Layer.provideMerge(OrchestrationLayerLive),
 );
 

@@ -178,10 +178,15 @@ interface AgentRun {
   responseEvents: boolean;
   readonly modelCalls: Map<string, ModelToolCall>;
   toolExecutions: number;
+  /** Execution items ended early; their late completions are ignored. */
+  readonly retiredItemIds: Set<string>;
+  promptRecorded: boolean;
 }
 
 export interface TurnInputNote {
   readonly threadId: string;
+  /** The turn `sendTurn` started or steered. */
+  readonly turnId: string;
   readonly text: string | undefined;
   readonly attachmentCount: number;
   readonly model: string | undefined;
@@ -478,21 +483,27 @@ export class AgentTelemetryRecorder {
     return Number.isFinite(parsed) ? parsed : this.options.nowMs();
   }
 
-  /** Remembers the text T3 sent, consumed by the thread's next turn start. */
+  /**
+   * Records the text T3 sent for a turn. `sendTurn` returns before the
+   * turn's events are processed, so the turn may or may not have started.
+   */
   noteTurnInput(note: TurnInputNote): void {
-    const active = this.activeRun(note.threadId);
-    if (active) {
-      // A send while a turn runs is a steer into that turn.
-      this.addUserMessage(active, note);
+    const key = `${note.threadId}:${note.turnId}`;
+    const run = this.runs.get(key);
+    if (run) {
+      if (note.link)
+        run.span.addLinks([{ span: note.link, attributes: { "t3.link": "provider.sendTurn" } }]);
+      // The first send is the turn's prompt; later ones steer it.
+      this.addUserMessage(run, note, !run.promptRecorded);
       return;
     }
     // A send whose turn never starts (it failed or was cancelled) must not
     // hold its prompt forever.
     const nowMs = this.options.nowMs();
-    for (const [threadId, pending] of this.pendingInputs) {
-      if (nowMs - pending.notedAtMs > PENDING_INPUT_TTL_MS) this.pendingInputs.delete(threadId);
+    for (const [pendingKey, pending] of this.pendingInputs) {
+      if (nowMs - pending.notedAtMs > PENDING_INPUT_TTL_MS) this.pendingInputs.delete(pendingKey);
     }
-    this.pendingInputs.set(note.threadId, {
+    this.pendingInputs.set(key, {
       note: { ...note, text: note.text === undefined ? undefined : truncateText(note.text) },
       notedAtMs: nowMs,
     });
@@ -510,7 +521,9 @@ export class AgentTelemetryRecorder {
         this.finishRun(event, "interrupted", { errorMessage: event.payload.reason });
         return;
       case "session.exited": {
-        this.pendingInputs.delete(event.threadId);
+        for (const [key, pending] of this.pendingInputs) {
+          if (pending.note.threadId === event.threadId) this.pendingInputs.delete(key);
+        }
         const run = this.activeRun(event.threadId);
         if (run) {
           this.finishRun(
@@ -659,8 +672,9 @@ export class AgentTelemetryRecorder {
     const identity = providerIdentity(event.provider);
     const agentName = agentNameForDriver(event.provider);
     const facts = this.options.sessionFacts?.(event.threadId);
-    const note = this.pendingInputs.get(event.threadId)?.note;
-    this.pendingInputs.delete(event.threadId);
+    const noteKey = `${event.threadId}:${event.turnId}`;
+    const note = this.pendingInputs.get(noteKey)?.note;
+    this.pendingInputs.delete(noteKey);
     const model = event.payload.model ?? note?.model ?? facts?.model;
     const cwd = facts?.cwd;
     const workspaceName = cwd ? cwd.split(/[\\/]/u).findLast((part) => part.length > 0) : undefined;
@@ -717,12 +731,15 @@ export class AgentTelemetryRecorder {
       responseEvents: false,
       modelCalls: new Map(),
       toolExecutions: 0,
+      retiredItemIds: new Set(),
+      promptRecorded: false,
     };
     this.runs.set(`${event.threadId}:${event.turnId}`, run);
-    if (note) this.addUserMessage(run, note);
+    if (note) this.addUserMessage(run, note, true);
   }
 
-  private addUserMessage(run: AgentRun, note: TurnInputNote): void {
+  private addUserMessage(run: AgentRun, note: TurnInputNote, isPrompt: boolean): void {
+    if (isPrompt) run.promptRecorded = true;
     const text = note.text ?? "";
     const parts: Array<MessagePart> =
       this.options.captureContent && text.length > 0
@@ -734,8 +751,14 @@ export class AgentTelemetryRecorder {
     run.span.attribute("t3.input.chars", text.length);
     if (parts.length === 0) return;
     const message: Message = { role: "user", parts };
-    run.transcript.push(message);
-    run.newMessages.push(message);
+    if (isPrompt) {
+      // A prompt noted after the turn started still opens the conversation.
+      run.transcript.unshift(message);
+      run.newMessages.unshift(message);
+    } else {
+      run.transcript.push(message);
+      run.newMessages.push(message);
+    }
   }
 
   private currentOutput(run: AgentRun, at: number): Message {
@@ -809,6 +832,7 @@ export class AgentTelemetryRecorder {
       return;
     }
     if (!isToolItem(payload.itemType)) return;
+    if (run.retiredItemIds.has(itemId)) return;
 
     const existing = run.tools.get(itemId);
     const facts = readToolCall(run.driver, payload);
@@ -928,11 +952,15 @@ export class AgentTelemetryRecorder {
       setToolAttribute(tool, "t3.tool.approval_wait_ms", tool.approvalWaitMs);
     }
     if (failed) {
-      run.failedToolCalls += 1;
+      // A failed call counts once, however many of its executions failed.
       const owner = tool.nested
         ? run.modelCalls.get(String(tool.attributes.get("t3.tool.parent_call_id")))
         : undefined;
-      if (owner) owner.failedExecutions += 1;
+      if (!tool.nested) run.failedToolCalls += 1;
+      else if (owner) {
+        if (owner.failedExecutions === 0) run.failedToolCalls += 1;
+        owner.failedExecutions += 1;
+      }
     }
     if (!tool.nested && !payload.agentId && !payload.parentToolUseId) {
       const response: Message = {
@@ -1069,6 +1097,7 @@ export class AgentTelemetryRecorder {
     for (const [itemId, tool] of run.tools) {
       if (!tool.nested || tool.attributes.get("t3.tool.parent_call_id") !== toolResult.id) continue;
       run.tools.delete(itemId);
+      run.retiredItemIds.add(itemId);
       setToolAttribute(tool, "t3.tool.status", "running_when_call_returned");
       setToolAttribute(tool, "t3.tool.process_outlived_call", true);
       this.openToolSpan(tool, tool.startMs).end(toNanos(Math.max(endMs, tool.startMs)), Exit.void);
