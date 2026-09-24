@@ -34,6 +34,8 @@ const AGENT_NAME_PREFIX = "T3 Code";
 
 const MAX_TEXT_CHARS = 8_000;
 const MAX_JSON_STRING_CHARS = 4_000;
+/** How long a sent prompt waits for its turn to start before it is dropped. */
+const PENDING_INPUT_TTL_MS = 5 * 60_000;
 
 // Logfire's default scrubbing patterns, applied to structured tool argument
 // keys only. Matching free text would redact ordinary transcript sentences.
@@ -235,7 +237,10 @@ function sanitizeStructured(value: unknown, depth = 0): unknown {
   if (!record) return value;
   const out: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(record)) {
-    const match = typeof entry === "string" ? key.match(SENSITIVE_KEY_PATTERN) : null;
+    // Like Logfire's scrubber: a sensitive key hides any value except plain
+    // booleans, numbers, and null, so nested objects and arrays cannot leak.
+    const keepsValue = entry === null || typeof entry === "boolean" || typeof entry === "number";
+    const match = keepsValue ? null : key.match(SENSITIVE_KEY_PATTERN);
     out[key] = match ? `[Scrubbed due to '${match[0]}']` : sanitizeStructured(entry, depth + 1);
   }
   return out;
@@ -459,7 +464,8 @@ const exitInterrupted = (): Exit.Exit<unknown, unknown> => Exit.failCause(Cause.
  */
 export class AgentTelemetryRecorder {
   private readonly runs = new Map<string, AgentRun>();
-  private readonly pendingInputs = new Map<string, TurnInputNote>();
+  /** Sends not yet matched to a turn start, with when they were noted. */
+  private readonly pendingInputs = new Map<string, { note: TurnInputNote; notedAtMs: number }>();
 
   private readonly options: AgentTelemetryOptions;
 
@@ -480,7 +486,16 @@ export class AgentTelemetryRecorder {
       this.addUserMessage(active, note);
       return;
     }
-    this.pendingInputs.set(note.threadId, note);
+    // A send whose turn never starts (it failed or was cancelled) must not
+    // hold its prompt forever.
+    const nowMs = this.options.nowMs();
+    for (const [threadId, pending] of this.pendingInputs) {
+      if (nowMs - pending.notedAtMs > PENDING_INPUT_TTL_MS) this.pendingInputs.delete(threadId);
+    }
+    this.pendingInputs.set(note.threadId, {
+      note: { ...note, text: note.text === undefined ? undefined : truncateText(note.text) },
+      notedAtMs: nowMs,
+    });
   }
 
   handle(event: ProviderRuntimeEvent): void {
@@ -495,6 +510,7 @@ export class AgentTelemetryRecorder {
         this.finishRun(event, "interrupted", { errorMessage: event.payload.reason });
         return;
       case "session.exited": {
+        this.pendingInputs.delete(event.threadId);
         const run = this.activeRun(event.threadId);
         if (run) {
           this.finishRun(
@@ -643,7 +659,7 @@ export class AgentTelemetryRecorder {
     const identity = providerIdentity(event.provider);
     const agentName = agentNameForDriver(event.provider);
     const facts = this.options.sessionFacts?.(event.threadId);
-    const note = this.pendingInputs.get(event.threadId);
+    const note = this.pendingInputs.get(event.threadId)?.note;
     this.pendingInputs.delete(event.threadId);
     const model = event.payload.model ?? note?.model ?? facts?.model;
     const cwd = facts?.cwd;

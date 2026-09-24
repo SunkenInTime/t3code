@@ -105,7 +105,9 @@ const SubscriberLive = Layer.effectDiscard(
     yield* providerService.streamEvents.pipe(
       Stream.runForEach((event) =>
         Effect.gen(function* () {
-          if (event.type === "turn.started") {
+          if (event.type === "session.exited") {
+            sessionFacts.delete(event.threadId);
+          } else if (event.type === "turn.started") {
             // Model and workspace live on the session, not the turn event.
             const sessions = yield* providerService.listSessions();
             const session = sessions.find((entry) => entry.threadId === event.threadId);

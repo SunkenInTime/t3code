@@ -342,7 +342,16 @@ describe("AgentTelemetryRecorder", () => {
         payload: {
           itemType: "mcp_tool_call",
           status: "completed",
-          data: { toolName: "deploy", input: { api_key: "sk-live-123", region: "us" } },
+          data: {
+            toolName: "deploy",
+            input: {
+              api_key: "sk-live-123",
+              authorization: { value: "Bearer secret-token" },
+              session_ids: ["secret-session"],
+              retries: 3,
+              region: "us",
+            },
+          },
         },
       }),
     );
@@ -351,6 +360,9 @@ describe("AgentTelemetryRecorder", () => {
     );
     assert.strictEqual(args.region, "us");
     assert.notInclude(args.api_key, "sk-live");
+    // Nested objects and arrays under a sensitive key are hidden too.
+    assert.notInclude(JSON.stringify(args), "secret-token");
+    assert.notInclude(JSON.stringify(args), "secret-session");
   });
 
   it("ignores events for turns it never saw start and duplicate starts", () => {
@@ -586,5 +598,43 @@ describe("AgentTelemetryRecorder", () => {
       (execution!.status as Extract<Tracer.SpanStatus, { _tag: "Ended" }>).endTime,
       BigInt(Date.parse(isoAt(2))) * 1_000_000n,
     );
+  });
+
+  it("drops a sent prompt whose turn never started", () => {
+    const spans: Array<Tracer.NativeSpan> = [];
+    let now = Date.parse("2026-01-01T00:00:00.000Z");
+    const recorder = new AgentTelemetryRecorder({
+      tracer: Tracer.make({
+        span: (options) => {
+          const span = new Tracer.NativeSpan(options);
+          spans.push(span);
+          return span;
+        },
+      }),
+      captureContent: true,
+      staticAttributes: {},
+      nowMs: () => now,
+    });
+    const note = (threadId: string, text: string) =>
+      recorder.noteTurnInput({
+        threadId,
+        text,
+        attachmentCount: 0,
+        model: undefined,
+        link: undefined,
+      });
+    note(THREAD, "prompt that failed to send");
+    now += 6 * 60_000;
+    note("thread-2", "later prompt");
+    now += 1_000;
+    recorder.handle(event("turn.started", 0, { payload: {} }));
+    recorder.handle(event("turn.completed", 1, { payload: { state: "completed" } }));
+
+    const agent = spans.find(
+      (span) =>
+        span.name.startsWith("invoke_agent") &&
+        span.attributes.get("logfire.span_type") !== "pending_span",
+    );
+    assert.notInclude(String(agent!.attributes.get("gen_ai.input.messages")), "failed to send");
   });
 });
