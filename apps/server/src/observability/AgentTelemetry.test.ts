@@ -512,7 +512,7 @@ describe("AgentTelemetryRecorder", () => {
     );
     assert.strictEqual(call!.attributes.get("t3.tool.failed_executions"), 1);
 
-    const [execution] = real().filter((span) => span.name === "tool execution command_execution");
+    const execution = real().find((span) => span.name === "tool execution command_execution");
     assert.isDefined(execution);
     assert.strictEqual(Option.getOrUndefined(execution!.parent)?.spanId, call!.spanId);
     assert.isFalse(execution!.attributes.has("gen_ai.operation.name"));
@@ -579,7 +579,7 @@ describe("AgentTelemetryRecorder", () => {
     );
     recorder.handle(codex("turn.completed", 3, { payload: { state: "completed" } }));
 
-    const [execution] = real().filter((span) => span.name.startsWith("tool execution"));
+    const execution = real().find((span) => span.name.startsWith("tool execution"));
     assert.strictEqual(execution!.attributes.get("t3.tool.status"), "running_when_call_returned");
     assert.isTrue(Exit.isSuccess(endExit(execution!)));
     assert.strictEqual(
