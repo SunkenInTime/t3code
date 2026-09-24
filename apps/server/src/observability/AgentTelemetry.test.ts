@@ -31,6 +31,11 @@ function makeRecorder(captureContent = true) {
   return { recorder, spans, real, named };
 }
 
+const isoAt = (second: number) =>
+  `2026-01-01T00:${String(Math.floor(second / 60)).padStart(2, "0")}:${(second % 60)
+    .toFixed(3)
+    .padStart(6, "0")}Z`;
+
 let seq = 0;
 function event(
   type: string,
@@ -43,30 +48,39 @@ function event(
     provider: "claudeAgent",
     threadId: THREAD,
     turnId: TURN,
-    createdAt: new Date(Date.parse("2026-01-01T00:00:00.000Z") + second * 1000).toISOString(),
+    createdAt: isoAt(second),
     type,
     ...fields,
   } as unknown as ProviderRuntimeEvent;
 }
 
-const claudeUsage = (second: number, input: number, output: number, stopReason: string) =>
-  event("thread.token-usage.updated", second, {
-    payload: { usage: { usedTokens: input + output } },
-    raw: {
-      source: "claude.sdk.message",
-      method: "claude/stream_event/message_delta",
-      payload: {
-        type: "stream_event",
-        event: {
-          type: "message_delta",
-          delta: { stop_reason: stopReason },
-          usage: {
-            input_tokens: input,
-            cache_read_input_tokens: 100,
-            cache_creation_input_tokens: 10,
-            output_tokens: output,
-          },
-        },
+/** A Claude response whose request started at `startSecond` (from ttft). */
+const claudeResponse = (
+  second: number,
+  input: number,
+  output: number,
+  finishReason: string,
+  timing?: { startSecond: number; firstChunkSecond: number },
+  toolCalls?: Array<{ id: string; name: string }>,
+) =>
+  event("model.response.completed", second, {
+    payload: {
+      responseId: `msg-${second}`,
+      model: "claude-sonnet-5-20260101",
+      finishReason,
+      ...(toolCalls ? { toolCalls } : {}),
+      ...(timing
+        ? {
+            requestStartedAt: isoAt(timing.startSecond),
+            requestStartSource: "provider_ttft",
+            firstChunkAt: isoAt(timing.firstChunkSecond),
+          }
+        : {}),
+      usage: {
+        inputTokens: input + 110,
+        outputTokens: output,
+        cachedInputTokens: 100,
+        cacheCreationTokens: 10,
       },
     },
   });
@@ -129,7 +143,11 @@ describe("AgentTelemetryRecorder", () => {
       }),
     );
     recorder.handle(bashTool("item.started", 2, "tool-1", { command: "npm test" }));
-    recorder.handle(claudeUsage(3, 5, 40, "tool_use"));
+    recorder.handle(
+      claudeResponse(3, 5, 40, "tool_use", { startSecond: 0.5, firstChunkSecond: 1 }, [
+        { id: "tool-1", name: "Bash" },
+      ]),
+    );
     recorder.handle(
       bashTool("item.completed", 6, "tool-1", {
         command: "npm test",
@@ -144,7 +162,9 @@ describe("AgentTelemetryRecorder", () => {
         payload: { itemType: "assistant_message", status: "completed", detail: "Fixed it." },
       }),
     );
-    recorder.handle(claudeUsage(9, 7, 20, "end_turn"));
+    recorder.handle(
+      claudeResponse(9, 7, 20, "end_turn", { startSecond: 6.25, firstChunkSecond: 7 }),
+    );
     recorder.handle(
       event("turn.completed", 10, {
         payload: {
@@ -181,12 +201,16 @@ describe("AgentTelemetryRecorder", () => {
     assert.deepStrictEqual(chats[0]!.attributes.get("gen_ai.response.finish_reasons"), [
       "tool_use",
     ]);
-    assert.strictEqual(chats[0]!.attributes.get("t3.genai.chat.start_source"), "turn_start");
-    assert.strictEqual(chats[1]!.attributes.get("t3.genai.chat.start_source"), "tool_result");
-    // The second response starts once the tool result is back.
+    // Start times come from the provider, not from neighbouring events.
+    assert.strictEqual(chats[0]!.attributes.get("t3.genai.chat.start_source"), "provider_ttft");
+    assert.strictEqual(chats[1]!.startTime, BigInt(Date.parse(isoAt(6.25))) * 1_000_000n);
     assert.strictEqual(
-      chats[1]!.startTime,
-      BigInt(Date.parse("2026-01-01T00:00:06.000Z")) * 1_000_000n,
+      chats[1]!.attributes.get("gen_ai.client.operation.time_to_first_chunk"),
+      0.75,
+    );
+    assert.strictEqual(
+      chats[0]!.attributes.get("gen_ai.response.model"),
+      "claude-sonnet-5-20260101",
     );
     const firstOutput = JSON.parse(chats[0]!.attributes.get("gen_ai.output.messages") as string);
     assert.deepStrictEqual(
@@ -204,6 +228,9 @@ describe("AgentTelemetryRecorder", () => {
       '{"command":"npm test"}',
     );
     assert.strictEqual(Option.getOrUndefined(tool!.parent)?.spanId, agent!.spanId);
+    // Claude streamed the call from 2 s; it could only run once the response ended at 3 s.
+    assert.strictEqual(tool!.startTime, BigInt(Date.parse(isoAt(3))) * 1_000_000n);
+    assert.strictEqual(tool!.attributes.get("t3.tool.call_streaming_ms"), 1000);
     assert.isTrue(Exit.isFailure(endExit(tool!)));
 
     // Agent and tool each get a pending twin so they show while running.
@@ -290,7 +317,7 @@ describe("AgentTelemetryRecorder", () => {
     recorder.handle(
       bashTool("item.completed", 2, "tool-1", { command: "cat .env", result: "X=1" }),
     );
-    recorder.handle(claudeUsage(3, 1, 1, "end_turn"));
+    recorder.handle(claudeResponse(3, 1, 1, "end_turn"));
     recorder.handle(event("turn.completed", 4, { payload: { state: "completed" } }));
 
     for (const span of real()) {
@@ -342,5 +369,80 @@ describe("AgentTelemetryRecorder", () => {
     recorder.closeAll("shutdown");
     assert.strictEqual(recorder.openRunCount, 0);
     assert.strictEqual(named("invoke_agent")[0]!.status._tag, "Ended");
+  });
+
+  it("ends Codex chat spans at the reported response, before its tools run", () => {
+    const { recorder, named } = makeRecorder();
+    const codex = (type: string, second: number, fields: Record<string, unknown> = {}) =>
+      ({ ...event(type, second, fields), provider: "codex" }) as ProviderRuntimeEvent;
+    recorder.handle(codex("turn.started", 0, { payload: {} }));
+    recorder.handle(
+      codex("model.response.completed", 4, {
+        payload: {
+          responseId: "resp-1",
+          requestStartedAt: isoAt(1),
+          requestStartSource: "input_recorded",
+          firstChunkAt: isoAt(2.5),
+          usage: { inputTokens: 100, outputTokens: 10, cachedInputTokens: 40 },
+        },
+      }),
+    );
+    recorder.handle(
+      codex("item.started", 5, {
+        itemId: "exec-1",
+        payload: {
+          itemType: "command_execution",
+          status: "inProgress",
+          data: { item: { type: "commandExecution", command: "npm test" } },
+        },
+      }),
+    );
+    recorder.handle(
+      codex("item.completed", 7, {
+        itemId: "exec-1",
+        payload: {
+          itemType: "command_execution",
+          status: "completed",
+          data: {
+            item: {
+              type: "commandExecution",
+              command: "npm test",
+              exitCode: 0,
+              aggregatedOutput: "ok",
+            },
+          },
+        },
+      }),
+    );
+    // Codex's usage snapshot lands after the tool; it must not add a response.
+    recorder.handle(
+      codex("thread.token-usage.updated", 7, {
+        payload: { usage: { usedTokens: 110 } },
+        raw: {
+          source: "codex.app-server.notification",
+          method: "thread/tokenUsage/updated",
+          payload: {
+            tokenUsage: {
+              total: { inputTokens: 100 },
+              last: { inputTokens: 100, outputTokens: 10 },
+            },
+          },
+        },
+      }),
+    );
+    recorder.handle(codex("turn.completed", 8, { payload: { state: "completed" } }));
+
+    const chats = named("chat ");
+    assert.strictEqual(chats.length, 1);
+    const chat = chats[0]!;
+    assert.strictEqual(chat.attributes.get("t3.genai.chat.start_source"), "input_recorded");
+    assert.strictEqual(chat.startTime, BigInt(Date.parse(isoAt(1))) * 1_000_000n);
+    assert.strictEqual(endExit(chat)._tag, "Success");
+    assert.strictEqual(
+      (chat.status as Extract<Tracer.SpanStatus, { _tag: "Ended" }>).endTime,
+      BigInt(Date.parse(isoAt(4))) * 1_000_000n,
+    );
+    assert.strictEqual(chat.attributes.get("gen_ai.client.operation.time_to_first_chunk"), 1.5);
+    assert.strictEqual(named("invoke_agent")[0]!.attributes.get("t3.agent.model_requests"), 1);
   });
 });

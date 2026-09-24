@@ -8,11 +8,18 @@
  * provider. Values a provider does not expose are omitted, not guessed.
  *
  * Timing notes that matter when reading the spans:
- * - Tool spans run from the provider's item start to its item completion.
- *   Claude starts a tool item when the model begins streaming the call.
- * - Neither provider reports when a model request starts, so a `chat` span
- *   starts at the previous observed boundary (turn start, previous response,
- *   or the last tool result) and says so in `t3.genai.chat.start_source`.
+ * - Tool spans end at the provider's item completion. Claude starts a tool
+ *   item when the model begins streaming the call, so its span opens when the
+ *   response listing the call ends (or at completion, if the tool finished
+ *   first, which Claude Code does for tools it runs while still streaming).
+ *   `t3.tool.call_streaming_ms` keeps the streaming time.
+ * - `chat` spans come from `model.response.completed`, where adapters report
+ *   each response's request start, first chunk, and end. Claude's start is
+ *   its own time-to-first-token subtracted from the first chunk; Codex's is
+ *   when it recorded the request's last input item. Sessions without that
+ *   event (a resumed Codex thread) fall back to per-response usage, and the
+ *   span starts at the previous observed boundary. `t3.genai.chat.start_source`
+ *   always says which.
  *
  * @module observability/AgentTelemetry
  */
@@ -58,10 +65,20 @@ interface ProviderIdentity {
   readonly genAiProvider?: string;
   /** Whether the driver reports usage once per model response. */
   readonly reportsRequestUsage: boolean;
+  /**
+   * The driver starts a tool item while the model is still streaming the
+   * call and runs it after the response ends (Claude Code does both).
+   */
+  readonly toolStartsWhileStreaming?: boolean;
 }
 
 const PROVIDER_IDENTITIES: Record<string, ProviderIdentity> = {
-  claudeAgent: { label: "Claude", genAiProvider: "anthropic", reportsRequestUsage: true },
+  claudeAgent: {
+    label: "Claude",
+    genAiProvider: "anthropic",
+    reportsRequestUsage: true,
+    toolStartsWhileStreaming: true,
+  },
   codex: { label: "Codex", genAiProvider: "openai", reportsRequestUsage: true },
   cursor: { label: "Cursor", reportsRequestUsage: false },
   grok: { label: "Grok", genAiProvider: "xai", reportsRequestUsage: false },
@@ -101,7 +118,10 @@ interface Message {
 }
 
 interface ToolRun {
-  readonly span: Tracer.Span;
+  /** Unset until execution is known to have started; see `openToolSpan`. */
+  span: Tracer.Span | undefined;
+  readonly parent: Tracer.AnySpan;
+  readonly attributes: Map<string, unknown>;
   readonly itemId: string;
   readonly name: string;
   readonly startMs: number;
@@ -137,6 +157,8 @@ interface AgentRun {
   failedToolCalls: number;
   usage: { input: number; output: number; cacheRead: number; cacheWrite: number };
   lastCodexTotal: string | undefined;
+  /** Set once the adapter reports response boundaries for this run. */
+  responseEvents: boolean;
 }
 
 export interface TurnInputNote {
@@ -338,33 +360,29 @@ interface RequestUsage {
   readonly finishReason: string | undefined;
 }
 
+interface ResponseTiming {
+  readonly startMs: number;
+  readonly startSource: "provider_ttft" | "input_recorded";
+  readonly firstChunkMs: number | undefined;
+  readonly responseModel: string | undefined;
+  readonly responseId: string | undefined;
+  readonly toolCalls: ReadonlyArray<{
+    readonly id: string;
+    readonly name: string;
+    readonly arguments?: unknown;
+  }>;
+}
+
 /**
- * Per-response usage, when the event is one. Claude reports it on each
- * `message_delta`; Codex reports the newest response as `tokenUsage.last`.
- * Input tokens include cache reads and writes, matching Pydantic AI.
+ * Per-response usage from a Codex `tokenUsage.last` snapshot. Only used when
+ * the session does not report `model.response.completed` (a resumed Codex
+ * thread). Input tokens include cache writes, matching Pydantic AI.
  */
 export function readRequestUsage(
   event: Extract<ProviderRuntimeEvent, { type: "thread.token-usage.updated" }>,
 ): (RequestUsage & { readonly codexTotalKey?: string }) | undefined {
   const raw = event.raw;
   if (!raw) return undefined;
-  if (raw.method === "claude/stream_event/message_delta") {
-    const streamEvent = asRecord(asRecord(raw.payload)?.event);
-    const usage = asRecord(streamEvent?.usage);
-    if (!usage) return undefined;
-    const uncached = asCount(usage.input_tokens) ?? 0;
-    const cacheRead = asCount(usage.cache_read_input_tokens);
-    const cacheWrite = asCount(usage.cache_creation_input_tokens);
-    const details = asRecord(usage.output_tokens_details);
-    return {
-      input: uncached + (cacheRead ?? 0) + (cacheWrite ?? 0),
-      output: asCount(usage.output_tokens) ?? 0,
-      cacheRead,
-      cacheWrite,
-      reasoning: asCount(details?.thinking_tokens),
-      finishReason: asString(asRecord(streamEvent?.delta)?.stop_reason),
-    };
-  }
   if (raw.method === "thread/tokenUsage/updated") {
     const tokenUsage = asRecord(asRecord(raw.payload)?.tokenUsage);
     const last = asRecord(tokenUsage?.last);
@@ -484,6 +502,9 @@ export class AgentTelemetryRecorder {
         return;
       case "thread.token-usage.updated":
         this.onUsage(run, event, at);
+        return;
+      case "model.response.completed":
+        this.onResponse(run, event, at);
         return;
       case "request.opened":
       case "request.resolved":
@@ -651,6 +672,7 @@ export class AgentTelemetryRecorder {
       failedToolCalls: 0,
       usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
       lastCodexTotal: undefined,
+      responseEvents: false,
     };
     this.runs.set(`${event.threadId}:${event.turnId}`, run);
     if (note) this.addUserMessage(run, note);
@@ -699,6 +721,19 @@ export class AgentTelemetryRecorder {
     }
   }
 
+  /** Starts a tool's span (once) with every attribute recorded so far. */
+  private openToolSpan(tool: ToolRun, startMs: number): Tracer.Span {
+    if (!tool.span) {
+      tool.span = this.startSpan(
+        `execute_tool ${tool.name}`,
+        tool.parent,
+        startMs,
+        Object.fromEntries(tool.attributes),
+      );
+    }
+    return tool.span;
+  }
+
   private onItem(
     run: AgentRun,
     event: Extract<
@@ -742,38 +777,51 @@ export class AgentTelemetryRecorder {
         name: facts.name,
       };
       // Subagent tools belong to the subagent, not to the parent's model output.
-      if (!payload.agentId && !payload.parentToolUseId) {
+      // Once an adapter reports response boundaries, a tool starting with no
+      // response open was listed by the response that already closed.
+      if (!payload.agentId && !payload.parentToolUseId && !(run.responseEvents && !run.output)) {
         const output = this.currentOutput(run, at);
         output.parts.push(call);
       }
-      const span = this.startSpan(`execute_tool ${facts.name}`, parent, at, {
-        "logfire.msg": `running tool: ${facts.name}`,
-        "gen_ai.operation.name": "execute_tool",
-        "gen_ai.tool.name": facts.name,
-        "gen_ai.tool.call.id": itemId,
-        "gen_ai.agent.name": run.agentName,
-        "gen_ai.conversation.id": run.threadId,
-        "t3.tool.item_type": payload.itemType,
-        "t3.turn.id": run.turnId,
-        "t3.subagent.id": payload.agentId,
-        "logfire.json_schema": JSON_SCHEMA_TOOL,
-      });
-      run.tools.set(itemId, {
-        span,
+      const attributes = new Map<string, unknown>(
+        Object.entries({
+          "logfire.msg": `running tool: ${facts.name}`,
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.name": facts.name,
+          "gen_ai.tool.call.id": itemId,
+          "gen_ai.agent.name": run.agentName,
+          "gen_ai.conversation.id": run.threadId,
+          "t3.tool.item_type": payload.itemType,
+          "t3.turn.id": run.turnId,
+          "t3.subagent.id": payload.agentId,
+          "logfire.json_schema": JSON_SCHEMA_TOOL,
+        }).filter(([, value]) => value !== undefined),
+      );
+      const newTool: ToolRun = {
+        span: undefined,
+        parent,
+        attributes,
         itemId,
         name: facts.name,
         startMs: at,
         call,
         approvalWaitMs: 0,
         approvalOpenedAtMs: undefined,
-      });
+      };
+      run.tools.set(itemId, newTool);
       run.toolCalls += 1;
+      // A call still streaming is not running yet. The response that lists
+      // it opens its span; subagent responses are not reported, so their
+      // tools open now.
+      if (!run.identity.toolStartsWhileStreaming || payload.agentId || payload.parentToolUseId) {
+        this.openToolSpan(newTool, at);
+      }
     }
     const tool = run.tools.get(itemId)!;
     if (facts.arguments !== undefined && this.options.captureContent) {
       const args = sanitizeStructured(facts.arguments);
       tool.call.arguments = args;
-      tool.span.attribute("gen_ai.tool.call.arguments", JSON.stringify(args));
+      setToolAttribute(tool, "gen_ai.tool.call.arguments", JSON.stringify(args));
     }
     if (event.type !== "item.completed") return;
 
@@ -787,17 +835,18 @@ export class AgentTelemetryRecorder {
           ? undefined
           : sanitizeStructured(facts.result);
     if (this.options.captureContent && result !== undefined) {
-      tool.span.attribute(
+      setToolAttribute(
+        tool,
         "gen_ai.tool.call.result",
         typeof result === "string" ? result : JSON.stringify(result),
       );
     }
-    tool.span.attribute("t3.tool.status", status);
+    setToolAttribute(tool, "t3.tool.status", status);
     if (facts.providerDurationMs !== undefined) {
-      tool.span.attribute("t3.tool.provider_duration_ms", facts.providerDurationMs);
+      setToolAttribute(tool, "t3.tool.provider_duration_ms", facts.providerDurationMs);
     }
     if (tool.approvalWaitMs > 0) {
-      tool.span.attribute("t3.tool.approval_wait_ms", tool.approvalWaitMs);
+      setToolAttribute(tool, "t3.tool.approval_wait_ms", tool.approvalWaitMs);
     }
     if (failed) run.failedToolCalls += 1;
     if (!payload.agentId && !payload.parentToolUseId) {
@@ -816,7 +865,7 @@ export class AgentTelemetryRecorder {
         run.requestStartSource = "tool_result";
       }
     }
-    tool.span.end(
+    this.openToolSpan(tool, tool.startMs).end(
       toNanos(Math.max(at, tool.startMs)),
       status === "declined"
         ? exitFailure("Tool call declined")
@@ -835,6 +884,7 @@ export class AgentTelemetryRecorder {
     event: Extract<ProviderRuntimeEvent, { type: "thread.token-usage.updated" }>,
     at: number,
   ): void {
+    if (run.responseEvents) return;
     const usage = readRequestUsage(event);
     if (!usage) return;
     if (usage.codexTotalKey !== undefined) {
@@ -845,12 +895,79 @@ export class AgentTelemetryRecorder {
     this.closeRequest(run, at, usage);
   }
 
+  private onResponse(
+    run: AgentRun,
+    event: Extract<ProviderRuntimeEvent, { type: "model.response.completed" }>,
+    at: number,
+  ): void {
+    run.responseEvents = true;
+    const payload = event.payload;
+    const parse = (iso: string | undefined) => {
+      const ms = iso === undefined ? Number.NaN : Date.parse(iso);
+      return Number.isFinite(ms) ? ms : undefined;
+    };
+    const startMs = parse(payload.requestStartedAt);
+    const usage = payload.usage;
+    this.closeRequest(
+      run,
+      at,
+      usage
+        ? {
+            input: usage.inputTokens,
+            output: usage.outputTokens,
+            cacheRead: usage.cachedInputTokens,
+            cacheWrite: usage.cacheCreationTokens,
+            reasoning: usage.reasoningTokens,
+            finishReason: payload.finishReason,
+          }
+        : undefined,
+      startMs !== undefined && payload.requestStartSource
+        ? {
+            startMs,
+            startSource: payload.requestStartSource,
+            firstChunkMs: parse(payload.firstChunkAt),
+            responseModel: payload.model,
+            responseId: payload.responseId,
+            toolCalls: payload.toolCalls ?? [],
+          }
+        : undefined,
+    );
+  }
+
   /** Emits a `chat` span for the model response observed since the last one. */
-  private closeRequest(run: AgentRun, at: number, usage: RequestUsage | undefined): void {
+  private closeRequest(
+    run: AgentRun,
+    at: number,
+    usage: RequestUsage | undefined,
+    timing?: ResponseTiming,
+  ): void {
     const output = run.output ?? { role: "assistant" as const, parts: [] };
+    // The adapter lists the response's tool calls. Codex runs them only after
+    // the response ends, so their items have not started yet.
+    for (const call of timing?.toolCalls ?? []) {
+      const listed = run.tools.get(call.id);
+      if (listed && !listed.span) {
+        const streamingMs = Math.max(0, at - listed.startMs);
+        listed.attributes.set("t3.tool.call_streaming_ms", streamingMs);
+        this.openToolSpan(listed, Math.max(listed.startMs, at));
+      }
+      if (output.parts.some((part) => part.type === "tool_call" && part.id === call.id)) continue;
+      const known = run.tools.get(call.id)?.call;
+      output.parts.push(
+        known ?? {
+          type: "tool_call",
+          id: call.id,
+          name: call.name,
+          ...(call.arguments !== undefined && this.options.captureContent
+            ? { arguments: sanitizeStructured(call.arguments) }
+            : {}),
+        },
+      );
+    }
+    if (!run.output && output.parts.length > 0) run.transcript.push(output);
     const toolCallCount = output.parts.filter((part) => part.type === "tool_call").length;
     if (usage?.finishReason) output.finish_reason = usage.finishReason;
-    const startMs = Math.min(run.requestStartMs, at);
+    const startMs = Math.min(timing?.startMs ?? run.requestStartMs, at);
     const model = run.model;
     const span = this.options.tracer.span({
       name: `chat ${model ?? "unknown"}`,
@@ -871,7 +988,14 @@ export class AgentTelemetryRecorder {
       "gen_ai.agent.name": run.agentName,
       "gen_ai.conversation.id": run.threadId,
       "t3.turn.id": run.turnId,
-      "t3.genai.chat.start_source": run.requestStartSource,
+      "t3.genai.chat.start_source": timing?.startSource ?? run.requestStartSource,
+      "gen_ai.response.model": timing?.responseModel,
+      "gen_ai.response.id": timing?.responseId,
+      // Seconds, as Pydantic AI and Logfire's dashboards read it.
+      "gen_ai.client.operation.time_to_first_chunk":
+        timing?.firstChunkMs !== undefined
+          ? Math.max(0, timing.firstChunkMs - timing.startMs) / 1000
+          : undefined,
       "t3.genai.chat.output_tool_calls": toolCallCount,
       "t3.genai.input_messages_scope": "new_since_previous_response",
       "logfire.json_schema": JSON_SCHEMA_CHAT,
@@ -916,7 +1040,8 @@ export class AgentTelemetryRecorder {
     at: number,
   ): void {
     const tool = event.itemId ? run.tools.get(event.itemId) : undefined;
-    const target = tool?.span ?? run.span;
+    // An approval prompt means the call finished streaming and wants to run.
+    const target = tool ? this.openToolSpan(tool, at) : run.span;
     if (event.type === "request.opened") {
       if (tool) tool.approvalOpenedAtMs = at;
       target.event("approval.requested", toNanos(at), {
@@ -1036,8 +1161,11 @@ export class AgentTelemetryRecorder {
       this.closeRequest(run, at, undefined);
     }
     for (const tool of run.tools.values()) {
-      tool.span.attribute("t3.tool.status", "unfinished");
-      tool.span.end(toNanos(Math.max(at, tool.startMs)), exitInterrupted());
+      setToolAttribute(tool, "t3.tool.status", "unfinished");
+      this.openToolSpan(tool, tool.startMs).end(
+        toNanos(Math.max(at, tool.startMs)),
+        exitInterrupted(),
+      );
     }
     for (const span of run.subagents.values()) span.end(toNanos(at), exitInterrupted());
 
@@ -1104,6 +1232,11 @@ export class AgentTelemetryRecorder {
           : Exit.void,
     );
   }
+}
+
+function setToolAttribute(tool: ToolRun, key: string, value: unknown): void {
+  tool.attributes.set(key, value);
+  tool.span?.attribute(key, value);
 }
 
 function isToolItem(itemType: string): boolean {

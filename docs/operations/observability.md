@@ -578,10 +578,15 @@ runtime events, so every adapter goes through the same code.
   (`T3 Code / Claude`, `T3 Code / Codex`); thread, turn, model, workspace name, host, and app
   version are attributes. `gen_ai.conversation.id` is the thread id.
 - `execute_tool <name>`: one per tool item, with arguments, result, status, and approval wait.
-- `chat <model>`: one per model response, for providers that report usage per response (Claude
-  and Codex). Neither reports when a request starts, so the span starts at the previous turn,
-  response, or tool-result boundary and says which in `t3.genai.chat.start_source`. Codex runs
-  tool calls before it reports usage, so Codex windows can include tool time.
+  Claude starts a tool item while the model streams the call; its span opens when that response
+  ends, and `t3.tool.call_streaming_ms` keeps the streaming time.
+- `chat <model>`: one per model response, from the `model.response.completed` runtime event
+  (Claude and Codex). Claude's request start is the first chunk minus Claude Code's own
+  `ttft_ms`; Codex's is when it recorded the request's last input item, and its end is
+  `rawResponse/completed`, which T3 enables with `experimentalRawEvents` on `thread/start`.
+  `t3.genai.chat.start_source` says which, and `gen_ai.client.operation.time_to_first_chunk`
+  carries the time to first chunk. A resumed Codex thread has no raw events, so it falls back to
+  usage snapshots with the start at the previous boundary.
 
 Long runs and tools also get a zero-length Logfire pending span, so they show in the live view
 before they finish. Agent spans skip the local trace file.

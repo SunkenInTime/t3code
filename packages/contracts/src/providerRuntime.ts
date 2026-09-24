@@ -192,6 +192,7 @@ const AccountRateLimitsUpdatedType = Schema.Literal("account.rate-limits.updated
 const McpStatusUpdatedType = Schema.Literal("mcp.status.updated");
 const McpOauthCompletedType = Schema.Literal("mcp.oauth.completed");
 const ModelReroutedType = Schema.Literal("model.rerouted");
+const ModelResponseCompletedType = Schema.Literal("model.response.completed");
 const ConfigWarningType = Schema.Literal("config.warning");
 const DeprecationNoticeType = Schema.Literal("deprecation.notice");
 const FilesPersistedType = Schema.Literal("files.persisted");
@@ -761,6 +762,43 @@ const ModelReroutedPayload = Schema.Struct({
 });
 export type ModelReroutedPayload = typeof ModelReroutedPayload.Type;
 
+/**
+ * One main-agent model response, for adapters whose provider reports response
+ * boundaries. Times are when T3 observed them. `requestStartSource` says how
+ * the request start was obtained: `provider_ttft` is the provider's own
+ * time-to-first-chunk subtracted from the first chunk; `input_recorded` is the
+ * moment the provider recorded the request's last input item.
+ */
+const ModelResponseCompletedPayload = Schema.Struct({
+  responseId: Schema.optional(TrimmedNonEmptyStringSchema),
+  model: Schema.optional(TrimmedNonEmptyStringSchema),
+  requestStartedAt: Schema.optional(IsoDateTime),
+  requestStartSource: Schema.optional(Schema.Literals(["provider_ttft", "input_recorded"])),
+  firstChunkAt: Schema.optional(IsoDateTime),
+  finishReason: Schema.optional(TrimmedNonEmptyStringSchema),
+  /** Tool calls the model requested in this response, in order. */
+  toolCalls: Schema.optional(
+    Schema.Array(
+      Schema.Struct({
+        id: TrimmedNonEmptyStringSchema,
+        name: TrimmedNonEmptyStringSchema,
+        arguments: Schema.optional(Schema.Unknown),
+      }),
+    ),
+  ),
+  usage: Schema.optional(
+    Schema.Struct({
+      /** Includes cache reads and writes. */
+      inputTokens: NonNegativeInt,
+      outputTokens: NonNegativeInt,
+      cachedInputTokens: Schema.optional(NonNegativeInt),
+      cacheCreationTokens: Schema.optional(NonNegativeInt),
+      reasoningTokens: Schema.optional(NonNegativeInt),
+    }),
+  ),
+});
+export type ModelResponseCompletedPayload = typeof ModelResponseCompletedPayload.Type;
+
 const ConfigWarningPayload = Schema.Struct({
   summary: TrimmedNonEmptyStringSchema,
   details: Schema.optional(TrimmedNonEmptyStringSchema),
@@ -1131,6 +1169,14 @@ const ProviderRuntimeModelReroutedEvent = Schema.Struct({
 });
 export type ProviderRuntimeModelReroutedEvent = typeof ProviderRuntimeModelReroutedEvent.Type;
 
+const ProviderRuntimeModelResponseCompletedEvent = Schema.Struct({
+  ...ProviderRuntimeEventBase.fields,
+  type: ModelResponseCompletedType,
+  payload: ModelResponseCompletedPayload,
+});
+export type ProviderRuntimeModelResponseCompletedEvent =
+  typeof ProviderRuntimeModelResponseCompletedEvent.Type;
+
 const ProviderRuntimeConfigWarningEvent = Schema.Struct({
   ...ProviderRuntimeEventBase.fields,
   type: ConfigWarningType,
@@ -1218,6 +1264,7 @@ export const ProviderRuntimeEventV2 = Schema.Union([
   ProviderRuntimeMcpStatusUpdatedEvent,
   ProviderRuntimeMcpOauthCompletedEvent,
   ProviderRuntimeModelReroutedEvent,
+  ProviderRuntimeModelResponseCompletedEvent,
   ProviderRuntimeConfigWarningEvent,
   ProviderRuntimeDeprecationNoticeEvent,
   ProviderRuntimeFilesPersistedEvent,

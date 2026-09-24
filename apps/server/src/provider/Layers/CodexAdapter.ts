@@ -994,6 +994,123 @@ function runtimeEventBase(
   };
 }
 
+interface CodexResponseTracker {
+  /** When the pending request's last input item was recorded. */
+  requestStartedAt: string | undefined;
+  firstChunkAt: string | undefined;
+  toolCalls: Array<{ readonly id: string; readonly name: string; readonly arguments?: unknown }>;
+}
+
+const CODEX_OUTPUT_ITEM_TYPES: ReadonlySet<string> = new Set(["reasoning", "agentMessage", "plan"]);
+
+function isCodexInputResponseItem(item: Record<string, unknown>): boolean {
+  const type = typeof item.type === "string" ? item.type : "";
+  if (type === "message") return item.role !== "assistant";
+  return type.endsWith("_output");
+}
+
+/**
+ * Follows one Codex thread's model requests. Codex (with raw events) records
+ * each request's input items, streams output items, then reports
+ * `rawResponse/completed` with the response's exact usage. Codex does not
+ * report when it sends a request, so the start is the last input item.
+ */
+function trackCodexResponse(
+  tracker: CodexResponseTracker,
+  event: ProviderEvent,
+  canonicalThreadId: ThreadId,
+): ProviderRuntimeEvent | undefined {
+  const payload =
+    typeof event.payload === "object" && event.payload !== null
+      ? (event.payload as Record<string, unknown>)
+      : undefined;
+  switch (event.method) {
+    case "turn/started":
+      tracker.requestStartedAt = undefined;
+      tracker.firstChunkAt = undefined;
+      tracker.toolCalls = [];
+      return undefined;
+    case "rawResponseItem/completed": {
+      const item =
+        typeof payload?.item === "object" && payload.item !== null
+          ? (payload.item as Record<string, unknown>)
+          : undefined;
+      if (!item) return undefined;
+      if (isCodexInputResponseItem(item)) {
+        if (tracker.firstChunkAt === undefined) tracker.requestStartedAt = event.createdAt;
+      } else {
+        if (tracker.requestStartedAt !== undefined && tracker.firstChunkAt === undefined) {
+          tracker.firstChunkAt = event.createdAt;
+        }
+        const type = typeof item.type === "string" ? item.type : "";
+        if (type.endsWith("_call")) {
+          const id = typeof item.call_id === "string" ? item.call_id : item.id;
+          const name = typeof item.name === "string" ? item.name : type;
+          const args = item.arguments ?? item.input ?? item.action;
+          if (typeof id === "string" && id.length > 0) {
+            tracker.toolCalls.push({
+              id,
+              name,
+              ...(args !== undefined ? { arguments: args } : {}),
+            });
+          }
+        }
+      }
+      return undefined;
+    }
+    case "item/started": {
+      const item = readPayload(EffectCodexSchema.V2ItemStartedNotification, event.payload)?.item;
+      if (
+        item &&
+        CODEX_OUTPUT_ITEM_TYPES.has(item.type) &&
+        tracker.requestStartedAt !== undefined &&
+        tracker.firstChunkAt === undefined
+      ) {
+        tracker.firstChunkAt = event.createdAt;
+      }
+      return undefined;
+    }
+    case "rawResponse/completed": {
+      const completed = readPayload(
+        EffectCodexSchema.V2RawResponseCompletedNotification,
+        event.payload,
+      );
+      const { requestStartedAt, firstChunkAt, toolCalls } = tracker;
+      tracker.requestStartedAt = undefined;
+      tracker.firstChunkAt = undefined;
+      tracker.toolCalls = [];
+      if (!completed) return undefined;
+      const usage = completed.usage ?? undefined;
+      const cacheWrite = usage?.cacheWriteInputTokens ?? 0;
+      return {
+        ...runtimeEventBase(event, canonicalThreadId),
+        type: "model.response.completed",
+        payload: {
+          responseId: completed.responseId,
+          ...(requestStartedAt
+            ? { requestStartedAt, requestStartSource: "input_recorded" as const }
+            : {}),
+          ...(firstChunkAt ? { firstChunkAt } : {}),
+          ...(toolCalls.length > 0 ? { toolCalls } : {}),
+          ...(usage
+            ? {
+                usage: {
+                  inputTokens: usage.inputTokens + cacheWrite,
+                  outputTokens: usage.outputTokens,
+                  cachedInputTokens: usage.cachedInputTokens,
+                  ...(cacheWrite > 0 ? { cacheCreationTokens: cacheWrite } : {}),
+                  reasoningTokens: usage.reasoningOutputTokens,
+                },
+              }
+            : {}),
+        },
+      };
+    }
+    default:
+      return undefined;
+  }
+}
+
 function mapItemLifecycle(
   event: ProviderEvent,
   canonicalThreadId: ThreadId,
@@ -2339,6 +2456,11 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
         // this a child of `startSession`, and Effect interrupts a fiber's
         // children when it completes, so the consumer died on return and every
         // runtime event the session emitted afterwards was dropped.
+        const responseTracker: CodexResponseTracker = {
+          requestStartedAt: undefined,
+          firstChunkAt: undefined,
+          toolCalls: [],
+        };
         const eventFiber = yield* Stream.runForEach(runtime.events, (event) =>
           Effect.gen(function* () {
             yield* writeNativeEvent(event);
@@ -2444,9 +2566,12 @@ export const makeCodexAdapter = Effect.fn("makeCodexAdapter")(function* (
               }
               return runtimeEvent;
             });
-            const runtimeEvents = usageLimitError
-              ? [usageLimitError, ...mappedEvents]
-              : mappedEvents;
+            const responseEvent = trackCodexResponse(responseTracker, event, event.threadId);
+            const runtimeEvents = [
+              ...(usageLimitError ? [usageLimitError] : []),
+              ...mappedEvents,
+              ...(responseEvent ? [responseEvent] : []),
+            ];
             if (runtimeEvents.length === 0) {
               yield* Effect.logDebug("ignoring unhandled Codex provider event", {
                 method: event.method,
