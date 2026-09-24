@@ -17,6 +17,7 @@ import * as ServerConfig from "../../config.ts";
 import * as ResourceAttribution from "../../resourceTelemetry/ResourceAttribution.ts";
 import { ServerLoggerLive } from "../../serverLogger.ts";
 import * as BrowserTraceCollector from "../BrowserTraceCollector.ts";
+import { AgentTraceExporter } from "./AgentTelemetry.ts";
 
 export const ObservabilityLive = Layer.unwrap(
   Effect.gen(function* () {
@@ -73,6 +74,7 @@ export const ObservabilityLive = Layer.unwrap(
 
         return Layer.mergeAll(
           Layer.succeed(Tracer.Tracer, tracer),
+          Layer.succeed(AgentTraceExporter, delegate),
           BrowserTraceCollector.layer(sink),
         );
       }),

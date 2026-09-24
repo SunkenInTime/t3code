@@ -1,0 +1,1119 @@
+/**
+ * Maps canonical provider runtime events onto OpenTelemetry GenAI spans.
+ *
+ * One `invoke_agent` span covers a provider turn. Tool items become
+ * `execute_tool` children. Claude and Codex report usage per model response,
+ * and each of those reports closes a `chat` child. Everything is derived from
+ * events every adapter already emits, so this module never talks to a
+ * provider. Values a provider does not expose are omitted, not guessed.
+ *
+ * Timing notes that matter when reading the spans:
+ * - Tool spans run from the provider's item start to its item completion.
+ *   Claude starts a tool item when the model begins streaming the call.
+ * - Neither provider reports when a model request starts, so a `chat` span
+ *   starts at the previous observed boundary (turn start, previous response,
+ *   or the last tool result) and says so in `t3.genai.chat.start_source`.
+ *
+ * @module observability/AgentTelemetry
+ */
+import type { ProviderRuntimeEvent } from "@t3tools/contracts";
+import * as Cause from "effect/Cause";
+import * as Context from "effect/Context";
+import * as Exit from "effect/Exit";
+import * as Option from "effect/Option";
+import * as Tracer from "effect/Tracer";
+
+export const AGENT_NAME_PREFIX = "T3 Code";
+
+const MAX_TEXT_CHARS = 8_000;
+const MAX_JSON_STRING_CHARS = 4_000;
+
+// Logfire's default scrubbing patterns, applied to structured tool argument
+// keys only. Matching free text would redact ordinary transcript sentences.
+const SENSITIVE_KEY_PATTERN = new RegExp(
+  [
+    "password",
+    "passwd",
+    "mysql_pwd",
+    "secret",
+    "auth(?!ors?\\b)",
+    "credential",
+    "private[._ -]?key",
+    "api[._ -]?key",
+    "session",
+    "cookie",
+    "csrf",
+    "xsrf",
+    "jwt",
+    "ssn",
+    "social[._ -]?security",
+    "credit[._ -]?card",
+  ].join("|"),
+  "iu",
+);
+
+interface ProviderIdentity {
+  readonly label: string;
+  /** `gen_ai.provider.name` for the model vendor, when the driver implies one. */
+  readonly genAiProvider?: string;
+  /** Whether the driver reports usage once per model response. */
+  readonly reportsRequestUsage: boolean;
+}
+
+const PROVIDER_IDENTITIES: Record<string, ProviderIdentity> = {
+  claudeAgent: { label: "Claude", genAiProvider: "anthropic", reportsRequestUsage: true },
+  codex: { label: "Codex", genAiProvider: "openai", reportsRequestUsage: true },
+  cursor: { label: "Cursor", reportsRequestUsage: false },
+  grok: { label: "Grok", genAiProvider: "xai", reportsRequestUsage: false },
+  opencode: { label: "OpenCode", reportsRequestUsage: false },
+  antigravity: { label: "Antigravity", reportsRequestUsage: false },
+};
+
+function providerIdentity(driver: string): ProviderIdentity {
+  return PROVIDER_IDENTITIES[driver] ?? { label: driver, reportsRequestUsage: false };
+}
+
+/** Stable agent name per provider driver, e.g. `T3 Code / Claude`. */
+export function agentNameForDriver(driver: string): string {
+  return `${AGENT_NAME_PREFIX} / ${providerIdentity(driver).label}`;
+}
+
+type MessagePart =
+  | { readonly type: "text"; readonly content: string }
+  | { readonly type: "thinking"; readonly content: string }
+  | {
+      type: "tool_call";
+      readonly id: string;
+      readonly name: string;
+      arguments?: unknown;
+    }
+  | {
+      readonly type: "tool_call_response";
+      readonly id: string;
+      readonly name: string;
+      readonly result: unknown;
+    };
+
+interface Message {
+  readonly role: "user" | "assistant";
+  readonly parts: Array<MessagePart>;
+  finish_reason?: string;
+}
+
+interface ToolRun {
+  readonly span: Tracer.Span;
+  readonly itemId: string;
+  readonly name: string;
+  readonly startMs: number;
+  readonly call: Extract<MessagePart, { type: "tool_call" }>;
+  approvalWaitMs: number;
+  approvalOpenedAtMs: number | undefined;
+}
+
+interface AgentRun {
+  readonly threadId: string;
+  readonly turnId: string;
+  readonly driver: string;
+  readonly identity: ProviderIdentity;
+  readonly agentName: string;
+  readonly span: Tracer.Span;
+  readonly startMs: number;
+  readonly model: string | undefined;
+  readonly transcript: Array<Message>;
+  /** Messages observed since the last closed model response. */
+  newMessages: Array<Message>;
+  output: Message | undefined;
+  outputStartedMs: number | undefined;
+  requestStartMs: number;
+  requestStartSource: "turn_start" | "previous_response" | "tool_result";
+  readonly tools: Map<string, ToolRun>;
+  readonly subagents: Map<string, Tracer.Span>;
+  readonly assistantText: Map<string, string>;
+  readonly reasoningText: Map<string, string>;
+  lastAssistantText: string | undefined;
+  modelRequests: number;
+  toolCallingRequests: number;
+  toolCalls: number;
+  failedToolCalls: number;
+  usage: { input: number; output: number; cacheRead: number; cacheWrite: number };
+  lastCodexTotal: string | undefined;
+}
+
+export interface TurnInputNote {
+  readonly threadId: string;
+  readonly text: string | undefined;
+  readonly attachmentCount: number;
+  readonly model: string | undefined;
+  readonly link: Tracer.AnySpan | undefined;
+}
+
+export interface AgentTelemetryOptions {
+  readonly tracer: Tracer.Tracer;
+  readonly captureContent: boolean;
+  /** Attributes added to every agent span, e.g. host and app version. */
+  readonly staticAttributes: Readonly<Record<string, string>>;
+  /** Wall clock in milliseconds, used only when an event time is unreadable. */
+  readonly nowMs: () => number;
+  /** Session facts looked up when a turn starts. */
+  readonly sessionFacts?: (threadId: string) =>
+    | {
+        readonly model?: string | undefined;
+        readonly cwd?: string | undefined;
+        readonly instanceId?: string | undefined;
+      }
+    | undefined;
+}
+
+const toNanos = (ms: number) => BigInt(Math.round(ms)) * 1_000_000n;
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function asString(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function asCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? Math.round(value)
+    : undefined;
+}
+
+export function truncateText(text: string, limit = MAX_TEXT_CHARS): string {
+  if (text.length <= limit) return text;
+  return `${text.slice(0, limit)}… [truncated ${text.length - limit} chars]`;
+}
+
+/** Redacts sensitive keys and bounds string sizes in structured tool data. */
+export function sanitizeStructured(value: unknown, depth = 0): unknown {
+  if (typeof value === "string") return truncateText(value, MAX_JSON_STRING_CHARS);
+  if (depth > 8) return "[depth limit]";
+  if (Array.isArray(value)) return value.slice(0, 100).map((v) => sanitizeStructured(v, depth + 1));
+  const record = asRecord(value);
+  if (!record) return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    const match = typeof entry === "string" ? key.match(SENSITIVE_KEY_PATTERN) : null;
+    out[key] = match ? `[Scrubbed due to '${match[0]}']` : sanitizeStructured(entry, depth + 1);
+  }
+  return out;
+}
+
+function toolResultText(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) {
+    const texts = value.flatMap((entry) => {
+      const record = asRecord(entry);
+      if (!record) return [];
+      if (typeof record.text === "string") return [record.text];
+      if (record.type === "image") return ["[image]"];
+      return [];
+    });
+    return texts.length > 0 ? texts.join("\n") : undefined;
+  }
+  return undefined;
+}
+
+export interface ToolCallFacts {
+  readonly name: string;
+  readonly arguments: unknown;
+  readonly result: unknown;
+  readonly error: string | undefined;
+  readonly providerDurationMs: number | undefined;
+}
+
+/** Reads tool name, arguments, and result from a canonical item payload. */
+export function readToolCall(
+  driver: string,
+  payload: {
+    readonly itemType: string;
+    readonly title?: string | undefined;
+    readonly data?: unknown;
+  },
+): ToolCallFacts {
+  const data = asRecord(payload.data);
+  if (driver === "claudeAgent") {
+    const resultBlock = asRecord(data?.result);
+    const resultText = toolResultText(resultBlock?.content);
+    return {
+      name: asString(data?.toolName) ?? payload.title ?? payload.itemType,
+      arguments: data?.input,
+      result: resultText ?? resultBlock?.content,
+      error: resultBlock?.is_error === true ? (resultText ?? "Tool reported an error") : undefined,
+      providerDurationMs: undefined,
+    };
+  }
+  if (driver === "codex") {
+    const item = asRecord(data?.item) ?? {};
+    const type = asString(item.type) ?? payload.itemType;
+    const error = asString(asRecord(item.error)?.message);
+    switch (type) {
+      case "commandExecution":
+        return {
+          name: "command_execution",
+          arguments: { command: item.command, cwd: item.cwd },
+          result:
+            item.aggregatedOutput === undefined && item.exitCode === undefined
+              ? undefined
+              : { exit_code: item.exitCode, output: item.aggregatedOutput },
+          error:
+            typeof item.exitCode === "number" && item.exitCode !== 0
+              ? `Exit code ${item.exitCode}`
+              : error,
+          providerDurationMs: asCount(item.durationMs),
+        };
+      case "mcpToolCall":
+        return {
+          name: `${asString(item.server) ?? "mcp"}.${asString(item.tool) ?? "tool"}`,
+          arguments: item.arguments,
+          result: item.result,
+          error,
+          providerDurationMs: asCount(item.durationMs),
+        };
+      case "dynamicToolCall":
+        return {
+          name: asString(item.tool) ?? "dynamic_tool",
+          arguments: item.arguments,
+          result: item.contentItems ?? item.result,
+          error,
+          providerDurationMs: asCount(item.durationMs),
+        };
+      case "fileChange":
+        return {
+          name: "file_change",
+          arguments: {
+            changes: Array.isArray(item.changes)
+              ? item.changes.map((change) => {
+                  const record = asRecord(change);
+                  return { path: record?.path, kind: record?.kind };
+                })
+              : undefined,
+          },
+          result: Array.isArray(item.changes)
+            ? item.changes.map((change) => asRecord(change)?.diff)
+            : undefined,
+          error,
+          providerDurationMs: undefined,
+        };
+      case "webSearch":
+        return {
+          name: "web_search",
+          arguments: { query: item.query },
+          result: item.action,
+          error,
+          providerDurationMs: undefined,
+        };
+      default: {
+        const { id: _id, status: _status, ...rest } = item;
+        return {
+          name: type,
+          arguments: rest,
+          result: undefined,
+          error,
+          providerDurationMs: asCount(item.durationMs),
+        };
+      }
+    }
+  }
+  // ACP-style adapters (Cursor, Grok, OpenCode, Antigravity) vary; read the
+  // common shapes and fall back to the item title.
+  return {
+    name: asString(data?.toolName) ?? asString(data?.name) ?? payload.title ?? payload.itemType,
+    arguments: data?.input ?? data?.rawInput ?? data?.args ?? data?.arguments,
+    result: data?.result ?? data?.output ?? data?.rawOutput,
+    error: asString(asRecord(data?.error)?.message) ?? asString(data?.error),
+    providerDurationMs: undefined,
+  };
+}
+
+interface RequestUsage {
+  readonly input: number;
+  readonly output: number;
+  readonly cacheRead: number | undefined;
+  readonly cacheWrite: number | undefined;
+  readonly reasoning: number | undefined;
+  readonly finishReason: string | undefined;
+}
+
+/**
+ * Per-response usage, when the event is one. Claude reports it on each
+ * `message_delta`; Codex reports the newest response as `tokenUsage.last`.
+ * Input tokens include cache reads and writes, matching Pydantic AI.
+ */
+export function readRequestUsage(
+  event: Extract<ProviderRuntimeEvent, { type: "thread.token-usage.updated" }>,
+): (RequestUsage & { readonly codexTotalKey?: string }) | undefined {
+  const raw = event.raw;
+  if (!raw) return undefined;
+  if (raw.method === "claude/stream_event/message_delta") {
+    const streamEvent = asRecord(asRecord(raw.payload)?.event);
+    const usage = asRecord(streamEvent?.usage);
+    if (!usage) return undefined;
+    const uncached = asCount(usage.input_tokens) ?? 0;
+    const cacheRead = asCount(usage.cache_read_input_tokens);
+    const cacheWrite = asCount(usage.cache_creation_input_tokens);
+    const details = asRecord(usage.output_tokens_details);
+    return {
+      input: uncached + (cacheRead ?? 0) + (cacheWrite ?? 0),
+      output: asCount(usage.output_tokens) ?? 0,
+      cacheRead,
+      cacheWrite,
+      reasoning: asCount(details?.thinking_tokens),
+      finishReason: asString(asRecord(streamEvent?.delta)?.stop_reason),
+    };
+  }
+  if (raw.method === "thread/tokenUsage/updated") {
+    const tokenUsage = asRecord(asRecord(raw.payload)?.tokenUsage);
+    const last = asRecord(tokenUsage?.last);
+    if (!last) return undefined;
+    const cacheWrite = asCount(last.cacheWriteInputTokens);
+    return {
+      input: (asCount(last.inputTokens) ?? 0) + (cacheWrite ?? 0),
+      output: asCount(last.outputTokens) ?? 0,
+      cacheRead: asCount(last.cachedInputTokens),
+      cacheWrite,
+      reasoning: asCount(last.reasoningOutputTokens),
+      finishReason: undefined,
+      codexTotalKey: JSON.stringify(tokenUsage?.total ?? null),
+    };
+  }
+  return undefined;
+}
+
+const JSON_SCHEMA_AGENT = JSON.stringify({
+  type: "object",
+  properties: {
+    "gen_ai.input.messages": { type: "array" },
+    "gen_ai.output.messages": { type: "array" },
+    all_messages_events: { type: "array" },
+  },
+});
+const JSON_SCHEMA_CHAT = JSON.stringify({
+  type: "object",
+  properties: {
+    "gen_ai.input.messages": { type: "array" },
+    "gen_ai.output.messages": { type: "array" },
+  },
+});
+const JSON_SCHEMA_TOOL = JSON.stringify({
+  type: "object",
+  properties: {
+    "gen_ai.tool.call.arguments": { type: "object" },
+    "gen_ai.tool.call.result": { type: "object" },
+  },
+});
+
+function exitFailure(message: string): Exit.Exit<unknown, unknown> {
+  const error = new Error(message);
+  error.name = "AgentRunError";
+  error.stack = `${error.name}: ${message}`;
+  return Exit.fail(error);
+}
+
+const exitInterrupted = (): Exit.Exit<unknown, unknown> => Exit.failCause(Cause.interrupt());
+
+/**
+ * Stateful recorder for one server process. Feed it every canonical runtime
+ * event plus the input text of each sent turn; it opens and closes spans.
+ */
+export class AgentTelemetryRecorder {
+  private readonly runs = new Map<string, AgentRun>();
+  private readonly pendingInputs = new Map<string, TurnInputNote>();
+
+  private readonly options: AgentTelemetryOptions;
+
+  constructor(options: AgentTelemetryOptions) {
+    this.options = options;
+  }
+
+  private eventMs(event: { readonly createdAt: string }): number {
+    const parsed = Date.parse(event.createdAt);
+    return Number.isFinite(parsed) ? parsed : this.options.nowMs();
+  }
+
+  /** Remembers the text T3 sent, consumed by the thread's next turn start. */
+  noteTurnInput(note: TurnInputNote): void {
+    const active = this.activeRun(note.threadId);
+    if (active) {
+      // A send while a turn runs is a steer into that turn.
+      this.addUserMessage(active, note);
+      return;
+    }
+    this.pendingInputs.set(note.threadId, note);
+  }
+
+  handle(event: ProviderRuntimeEvent): void {
+    switch (event.type) {
+      case "turn.started":
+        this.startRun(event);
+        return;
+      case "turn.completed":
+        this.finishRun(event, event.payload.state, event.payload);
+        return;
+      case "turn.aborted":
+        this.finishRun(event, "interrupted", { errorMessage: event.payload.reason });
+        return;
+      case "session.exited": {
+        const run = this.activeRun(event.threadId);
+        if (run) {
+          this.finishRun(
+            { ...event, turnId: run.turnId as never },
+            event.payload.exitKind === "error" ? "failed" : "interrupted",
+            { errorMessage: event.payload.reason ?? "Provider session exited" },
+          );
+        }
+        return;
+      }
+      default:
+        break;
+    }
+    const run = this.runFor(event);
+    if (!run) return;
+    const at = this.eventMs(event);
+    switch (event.type) {
+      case "content.delta":
+        this.onDelta(run, event, at);
+        return;
+      case "item.started":
+      case "item.updated":
+      case "item.completed":
+        this.onItem(run, event, at);
+        return;
+      case "thread.token-usage.updated":
+        this.onUsage(run, event, at);
+        return;
+      case "request.opened":
+      case "request.resolved":
+        this.onRequest(run, event, at);
+        return;
+      case "task.started":
+        this.onTaskStarted(run, event, at);
+        return;
+      case "task.completed":
+        this.onTaskCompleted(run, event, at);
+        return;
+      case "runtime.error":
+        run.span.event("runtime.error", toNanos(at), {
+          "error.message": event.payload.message,
+          ...(event.payload.class ? { "error.class": event.payload.class } : {}),
+        });
+        return;
+      case "runtime.warning":
+        run.span.event("runtime.warning", toNanos(at), {
+          message: event.payload.message,
+        });
+        return;
+      case "model.rerouted":
+        run.span.event("model.rerouted", toNanos(at), {
+          from: event.payload.fromModel,
+          to: event.payload.toModel,
+          reason: event.payload.reason,
+        });
+        return;
+      default:
+        return;
+    }
+  }
+
+  /** Ends every open span, for server shutdown. */
+  closeAll(reason: string): void {
+    const atMs = this.options.nowMs();
+    for (const run of Array.from(this.runs.values())) {
+      this.endRun(run, "interrupted", { errorMessage: reason }, atMs);
+    }
+  }
+
+  get openRunCount(): number {
+    return this.runs.size;
+  }
+
+  private activeRun(threadId: string): AgentRun | undefined {
+    for (const run of this.runs.values()) {
+      if (run.threadId === threadId) return run;
+    }
+    return undefined;
+  }
+
+  private runFor(event: ProviderRuntimeEvent): AgentRun | undefined {
+    if (event.turnId !== undefined) {
+      return this.runs.get(`${event.threadId}:${event.turnId}`);
+    }
+    return this.activeRun(event.threadId);
+  }
+
+  private startSpan(
+    name: string,
+    parent: Tracer.AnySpan | undefined,
+    startMs: number,
+    attributes: Record<string, unknown>,
+    links: Array<Tracer.SpanLink> = [],
+  ): Tracer.Span {
+    const span = this.options.tracer.span({
+      name,
+      parent: parent ? Option.some(parent) : Option.none(),
+      annotations: Context.empty(),
+      links,
+      startTime: toNanos(startMs),
+      kind: "internal",
+      root: parent === undefined,
+      sampled: true,
+    });
+    for (const [key, value] of Object.entries(attributes)) {
+      if (value !== undefined) span.attribute(key, value);
+    }
+    // Logfire shows a span only once it ends. A zero-length pending twin
+    // makes a long agent run or tool call visible while it is still running.
+    const pending = this.options.tracer.span({
+      name,
+      parent: Option.some(span),
+      annotations: Context.empty(),
+      links: [],
+      startTime: toNanos(startMs),
+      kind: "internal",
+      root: false,
+      sampled: true,
+    });
+    for (const [key, value] of Object.entries(attributes)) {
+      if (value !== undefined) pending.attribute(key, value);
+    }
+    pending.attribute("logfire.span_type", "pending_span");
+    pending.attribute("logfire.pending_parent_id", parent ? parent.spanId : "0000000000000000");
+    pending.end(toNanos(startMs), Exit.void);
+    return span;
+  }
+
+  private startRun(event: Extract<ProviderRuntimeEvent, { type: "turn.started" }>): void {
+    if (!event.turnId) return;
+    const existing = this.activeRun(event.threadId);
+    const at = this.eventMs(event);
+    if (existing) {
+      if (existing.turnId === event.turnId) return;
+      this.endRun(existing, "interrupted", { errorMessage: "Superseded by a new turn" }, at);
+    }
+    const identity = providerIdentity(event.provider);
+    const agentName = agentNameForDriver(event.provider);
+    const facts = this.options.sessionFacts?.(event.threadId);
+    const note = this.pendingInputs.get(event.threadId);
+    this.pendingInputs.delete(event.threadId);
+    const model = event.payload.model ?? note?.model ?? facts?.model;
+    const cwd = facts?.cwd;
+    const workspaceName = cwd ? cwd.split(/[\\/]/u).findLast((part) => part.length > 0) : undefined;
+    const span = this.startSpan(
+      `invoke_agent ${agentName}`,
+      undefined,
+      at,
+      {
+        "logfire.msg": `${agentName} run`,
+        "gen_ai.operation.name": "invoke_agent",
+        "gen_ai.agent.name": agentName,
+        "gen_ai.agent.call.id": event.turnId,
+        "gen_ai.conversation.id": event.threadId,
+        "gen_ai.provider.name": identity.genAiProvider,
+        "gen_ai.system": identity.genAiProvider,
+        "gen_ai.request.model": model,
+        "t3.provider.driver": event.provider,
+        "t3.provider.instance_id": event.providerInstanceId ?? facts?.instanceId,
+        "t3.thread.id": event.threadId,
+        "t3.turn.id": event.turnId,
+        "t3.workspace.name": workspaceName,
+        "t3.genai.content_captured": this.options.captureContent,
+        "logfire.json_schema": JSON_SCHEMA_AGENT,
+        ...this.options.staticAttributes,
+      },
+      note?.link ? [{ span: note.link, attributes: { "t3.link": "provider.sendTurn" } }] : [],
+    );
+    const run: AgentRun = {
+      threadId: event.threadId,
+      turnId: event.turnId,
+      driver: event.provider,
+      identity,
+      agentName,
+      span,
+      startMs: at,
+      model,
+      transcript: [],
+      newMessages: [],
+      output: undefined,
+      outputStartedMs: undefined,
+      requestStartMs: at,
+      requestStartSource: "turn_start",
+      tools: new Map(),
+      subagents: new Map(),
+      assistantText: new Map(),
+      reasoningText: new Map(),
+      lastAssistantText: undefined,
+      modelRequests: 0,
+      toolCallingRequests: 0,
+      toolCalls: 0,
+      failedToolCalls: 0,
+      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+      lastCodexTotal: undefined,
+    };
+    this.runs.set(`${event.threadId}:${event.turnId}`, run);
+    if (note) this.addUserMessage(run, note);
+  }
+
+  private addUserMessage(run: AgentRun, note: TurnInputNote): void {
+    const text = note.text ?? "";
+    const parts: Array<MessagePart> =
+      this.options.captureContent && text.length > 0
+        ? [{ type: "text", content: truncateText(text) }]
+        : [];
+    if (note.attachmentCount > 0) {
+      run.span.attribute("t3.input.attachment_count", note.attachmentCount);
+    }
+    run.span.attribute("t3.input.chars", text.length);
+    if (parts.length === 0) return;
+    const message: Message = { role: "user", parts };
+    run.transcript.push(message);
+    run.newMessages.push(message);
+  }
+
+  private currentOutput(run: AgentRun, at: number): Message {
+    if (!run.output) {
+      run.output = { role: "assistant", parts: [] };
+      run.outputStartedMs = at;
+      run.transcript.push(run.output);
+    }
+    return run.output;
+  }
+
+  private onDelta(
+    run: AgentRun,
+    event: Extract<ProviderRuntimeEvent, { type: "content.delta" }>,
+    at: number,
+  ): void {
+    const key = event.itemId ?? "default";
+    if (event.payload.streamKind === "assistant_text") {
+      this.currentOutput(run, at);
+      run.assistantText.set(key, (run.assistantText.get(key) ?? "") + event.payload.delta);
+    } else if (
+      event.payload.streamKind === "reasoning_text" ||
+      event.payload.streamKind === "reasoning_summary_text"
+    ) {
+      this.currentOutput(run, at);
+      run.reasoningText.set(key, (run.reasoningText.get(key) ?? "") + event.payload.delta);
+    }
+  }
+
+  private onItem(
+    run: AgentRun,
+    event: Extract<
+      ProviderRuntimeEvent,
+      { type: "item.started" | "item.updated" | "item.completed" }
+    >,
+    at: number,
+  ): void {
+    const payload = event.payload;
+    const itemId = event.itemId ?? "";
+    if (payload.itemType === "assistant_message" && event.type === "item.completed") {
+      const text = run.assistantText.get(itemId) ?? payload.detail ?? this.codexItemText(event);
+      run.assistantText.delete(itemId);
+      if (text && text.trim().length > 0) {
+        run.lastAssistantText = text;
+        const output = this.currentOutput(run, at);
+        if (this.options.captureContent) {
+          output.parts.push({ type: "text", content: truncateText(text) });
+        }
+      }
+      return;
+    }
+    if (payload.itemType === "reasoning" && event.type === "item.completed") {
+      const text = run.reasoningText.get(itemId) ?? payload.detail;
+      run.reasoningText.delete(itemId);
+      if (text && text.trim().length > 0 && this.options.captureContent) {
+        this.currentOutput(run, at).parts.push({ type: "thinking", content: truncateText(text) });
+      }
+      return;
+    }
+    if (!isToolItem(payload.itemType)) return;
+
+    const existing = run.tools.get(itemId);
+    const facts = readToolCall(run.driver, payload);
+    if (!existing) {
+      if (event.type === "item.completed" && payload.status === undefined) return;
+      const parent = (payload.agentId && run.subagents.get(payload.agentId)) || run.span;
+      const call: Extract<MessagePart, { type: "tool_call" }> = {
+        type: "tool_call",
+        id: itemId,
+        name: facts.name,
+      };
+      // Subagent tools belong to the subagent, not to the parent's model output.
+      if (!payload.agentId && !payload.parentToolUseId) {
+        const output = this.currentOutput(run, at);
+        output.parts.push(call);
+      }
+      const span = this.startSpan(`execute_tool ${facts.name}`, parent, at, {
+        "logfire.msg": `running tool: ${facts.name}`,
+        "gen_ai.operation.name": "execute_tool",
+        "gen_ai.tool.name": facts.name,
+        "gen_ai.tool.call.id": itemId,
+        "gen_ai.agent.name": run.agentName,
+        "gen_ai.conversation.id": run.threadId,
+        "t3.tool.item_type": payload.itemType,
+        "t3.turn.id": run.turnId,
+        "t3.subagent.id": payload.agentId,
+        "logfire.json_schema": JSON_SCHEMA_TOOL,
+      });
+      run.tools.set(itemId, {
+        span,
+        itemId,
+        name: facts.name,
+        startMs: at,
+        call,
+        approvalWaitMs: 0,
+        approvalOpenedAtMs: undefined,
+      });
+      run.toolCalls += 1;
+    }
+    const tool = run.tools.get(itemId)!;
+    if (facts.arguments !== undefined && this.options.captureContent) {
+      const args = sanitizeStructured(facts.arguments);
+      tool.call.arguments = args;
+      tool.span.attribute("gen_ai.tool.call.arguments", JSON.stringify(args));
+    }
+    if (event.type !== "item.completed") return;
+
+    run.tools.delete(itemId);
+    const status = payload.status ?? "completed";
+    const failed = status === "failed" || facts.error !== undefined;
+    const result =
+      typeof facts.result === "string"
+        ? truncateText(facts.result)
+        : facts.result === undefined
+          ? undefined
+          : sanitizeStructured(facts.result);
+    if (this.options.captureContent && result !== undefined) {
+      tool.span.attribute(
+        "gen_ai.tool.call.result",
+        typeof result === "string" ? result : JSON.stringify(result),
+      );
+    }
+    tool.span.attribute("t3.tool.status", status);
+    if (facts.providerDurationMs !== undefined) {
+      tool.span.attribute("t3.tool.provider_duration_ms", facts.providerDurationMs);
+    }
+    if (tool.approvalWaitMs > 0) {
+      tool.span.attribute("t3.tool.approval_wait_ms", tool.approvalWaitMs);
+    }
+    if (failed) run.failedToolCalls += 1;
+    if (!payload.agentId && !payload.parentToolUseId) {
+      const response: Message = {
+        role: "user",
+        parts: this.options.captureContent
+          ? [{ type: "tool_call_response", id: itemId, name: tool.name, result: result ?? null }]
+          : [],
+      };
+      if (response.parts.length > 0) {
+        run.transcript.push(response);
+        run.newMessages.push(response);
+      }
+      if (!run.output && at > run.requestStartMs) {
+        run.requestStartMs = at;
+        run.requestStartSource = "tool_result";
+      }
+    }
+    tool.span.end(
+      toNanos(Math.max(at, tool.startMs)),
+      status === "declined"
+        ? exitFailure("Tool call declined")
+        : failed
+          ? exitFailure(facts.error ?? `Tool ${status}`)
+          : Exit.void,
+    );
+  }
+
+  private codexItemText(event: { readonly payload: { readonly data?: unknown } }) {
+    return asString(asRecord(asRecord(event.payload.data)?.item)?.text);
+  }
+
+  private onUsage(
+    run: AgentRun,
+    event: Extract<ProviderRuntimeEvent, { type: "thread.token-usage.updated" }>,
+    at: number,
+  ): void {
+    const usage = readRequestUsage(event);
+    if (!usage) return;
+    if (usage.codexTotalKey !== undefined) {
+      // Codex repeats an unchanged snapshot at some boundaries.
+      if (usage.codexTotalKey === run.lastCodexTotal) return;
+      run.lastCodexTotal = usage.codexTotalKey;
+    }
+    this.closeRequest(run, at, usage);
+  }
+
+  /** Emits a `chat` span for the model response observed since the last one. */
+  private closeRequest(run: AgentRun, at: number, usage: RequestUsage | undefined): void {
+    const output = run.output ?? { role: "assistant" as const, parts: [] };
+    const toolCallCount = output.parts.filter((part) => part.type === "tool_call").length;
+    if (usage?.finishReason) output.finish_reason = usage.finishReason;
+    const startMs = Math.min(run.requestStartMs, at);
+    const model = run.model;
+    const span = this.options.tracer.span({
+      name: `chat ${model ?? "unknown"}`,
+      parent: Option.some(run.span),
+      annotations: Context.empty(),
+      links: [],
+      startTime: toNanos(startMs),
+      kind: "client",
+      root: false,
+      sampled: true,
+    });
+    const attributes: Record<string, unknown> = {
+      "logfire.msg": `chat ${model ?? "unknown"}`,
+      "gen_ai.operation.name": "chat",
+      "gen_ai.provider.name": run.identity.genAiProvider,
+      "gen_ai.system": run.identity.genAiProvider,
+      "gen_ai.request.model": model,
+      "gen_ai.agent.name": run.agentName,
+      "gen_ai.conversation.id": run.threadId,
+      "t3.turn.id": run.turnId,
+      "t3.genai.chat.start_source": run.requestStartSource,
+      "t3.genai.chat.output_tool_calls": toolCallCount,
+      "t3.genai.input_messages_scope": "new_since_previous_response",
+      "logfire.json_schema": JSON_SCHEMA_CHAT,
+    };
+    if (usage) {
+      attributes["gen_ai.usage.input_tokens"] = usage.input;
+      attributes["gen_ai.usage.output_tokens"] = usage.output;
+      if (usage.cacheRead) attributes["gen_ai.usage.cache_read.input_tokens"] = usage.cacheRead;
+      if (usage.cacheWrite) {
+        attributes["gen_ai.usage.cache_creation.input_tokens"] = usage.cacheWrite;
+      }
+      if (usage.reasoning) attributes["gen_ai.usage.details.reasoning_tokens"] = usage.reasoning;
+      if (usage.finishReason) attributes["gen_ai.response.finish_reasons"] = [usage.finishReason];
+      run.usage.input += usage.input;
+      run.usage.output += usage.output;
+      run.usage.cacheRead += usage.cacheRead ?? 0;
+      run.usage.cacheWrite += usage.cacheWrite ?? 0;
+    } else {
+      attributes["t3.genai.usage_reported"] = false;
+    }
+    if (this.options.captureContent) {
+      attributes["gen_ai.input.messages"] = JSON.stringify(run.newMessages);
+      attributes["gen_ai.output.messages"] = JSON.stringify([output]);
+    }
+    for (const [key, value] of Object.entries(attributes)) {
+      if (value !== undefined) span.attribute(key, value);
+    }
+    span.end(toNanos(at), Exit.void);
+
+    run.modelRequests += 1;
+    if (toolCallCount > 0) run.toolCallingRequests += 1;
+    run.output = undefined;
+    run.outputStartedMs = undefined;
+    run.newMessages = [];
+    run.requestStartMs = at;
+    run.requestStartSource = "previous_response";
+  }
+
+  private onRequest(
+    run: AgentRun,
+    event: Extract<ProviderRuntimeEvent, { type: "request.opened" | "request.resolved" }>,
+    at: number,
+  ): void {
+    const tool = event.itemId ? run.tools.get(event.itemId) : undefined;
+    const target = tool?.span ?? run.span;
+    if (event.type === "request.opened") {
+      if (tool) tool.approvalOpenedAtMs = at;
+      target.event("approval.requested", toNanos(at), {
+        "t3.request.type": event.payload.requestType,
+      });
+      return;
+    }
+    if (tool?.approvalOpenedAtMs !== undefined) {
+      tool.approvalWaitMs += at - tool.approvalOpenedAtMs;
+      tool.approvalOpenedAtMs = undefined;
+    }
+    target.event("approval.resolved", toNanos(at), {
+      "t3.request.type": event.payload.requestType,
+      ...(event.payload.decision ? { "t3.request.decision": event.payload.decision } : {}),
+    });
+  }
+
+  private onTaskStarted(
+    run: AgentRun,
+    event: Extract<ProviderRuntimeEvent, { type: "task.started" }>,
+    at: number,
+  ): void {
+    const payload = event.payload;
+    if (payload.agentKind === "background") return;
+    const agentId = payload.taskId;
+    if (run.subagents.has(agentId)) return;
+    const parentTool = payload.toolUseId ? run.tools.get(payload.toolUseId) : undefined;
+    const name = `${run.agentName} subagent`;
+    const span = this.startSpan(`invoke_agent ${name}`, parentTool?.span ?? run.span, at, {
+      "logfire.msg": `${payload.title ?? payload.description ?? "subagent"} run`,
+      "gen_ai.operation.name": "invoke_agent",
+      "gen_ai.agent.name": name,
+      "gen_ai.agent.call.id": agentId,
+      "gen_ai.conversation.id": run.threadId,
+      "gen_ai.provider.name": run.identity.genAiProvider,
+      "gen_ai.request.model": payload.model,
+      "t3.subagent.id": agentId,
+      "t3.subagent.type": payload.taskType,
+      "t3.subagent.role": payload.role,
+      "t3.turn.id": run.turnId,
+    });
+    run.subagents.set(agentId, span);
+  }
+
+  private onTaskCompleted(
+    run: AgentRun,
+    event: Extract<ProviderRuntimeEvent, { type: "task.completed" }>,
+    at: number,
+  ): void {
+    const span = run.subagents.get(event.payload.taskId);
+    if (!span) return;
+    run.subagents.delete(event.payload.taskId);
+    const usage = event.payload.typedUsage;
+    if (usage) {
+      if (usage.inputTokens !== undefined) {
+        span.attribute("gen_ai.aggregated_usage.input_tokens", usage.inputTokens);
+      }
+      if (usage.outputTokens !== undefined) {
+        span.attribute("gen_ai.aggregated_usage.output_tokens", usage.outputTokens);
+      }
+      span.attribute("t3.subagent.total_tokens", usage.totalTokens);
+      if (usage.toolUses !== undefined) span.attribute("t3.subagent.tool_uses", usage.toolUses);
+    }
+    if (event.payload.summary && this.options.captureContent) {
+      span.attribute("final_result", truncateText(event.payload.summary));
+    }
+    span.end(
+      toNanos(at),
+      event.payload.status === "failed"
+        ? exitFailure(event.payload.summary ?? "Subagent failed")
+        : event.payload.status === "stopped"
+          ? exitInterrupted()
+          : Exit.void,
+    );
+  }
+
+  private finishRun(
+    event: {
+      readonly threadId: string;
+      readonly turnId?: string | undefined;
+      readonly createdAt: string;
+    },
+    state: string,
+    details: {
+      readonly errorMessage?: string | undefined;
+      readonly stopReason?: string | null | undefined;
+      readonly totalCostUsd?: number | undefined;
+      readonly modelUsage?: Record<string, unknown> | undefined;
+      readonly tokenUsage?:
+        | {
+            readonly usageStatus: string;
+            readonly inputTokens?: number | undefined;
+            readonly outputTokens?: number | undefined;
+            readonly cachedInputTokens?: number | undefined;
+            readonly cacheCreationTokens?: number | undefined;
+          }
+        | undefined;
+    },
+  ): void {
+    const run = event.turnId
+      ? this.runs.get(`${event.threadId}:${event.turnId}`)
+      : this.activeRun(event.threadId);
+    if (!run) return;
+    this.endRun(run, state, details, this.eventMs(event));
+  }
+
+  private endRun(
+    run: AgentRun,
+    state: string,
+    details: Parameters<AgentTelemetryRecorder["finishRun"]>[2],
+    at: number,
+  ): void {
+    this.runs.delete(`${run.threadId}:${run.turnId}`);
+    const interrupted = state === "interrupted" || state === "cancelled";
+    // Output after the last usage report still came from a model response.
+    if (run.output && run.output.parts.length > 0 && run.identity.reportsRequestUsage) {
+      this.closeRequest(run, at, undefined);
+    }
+    for (const tool of run.tools.values()) {
+      tool.span.attribute("t3.tool.status", "unfinished");
+      tool.span.end(toNanos(Math.max(at, tool.startMs)), exitInterrupted());
+    }
+    for (const span of run.subagents.values()) span.end(toNanos(at), exitInterrupted());
+
+    const span = run.span;
+    span.attribute("t3.turn.state", state);
+    if (details.stopReason) span.attribute("t3.turn.stop_reason", details.stopReason);
+    span.attribute("t3.agent.tool_calls", run.toolCalls);
+    span.attribute("t3.agent.failed_tool_calls", run.failedToolCalls);
+    if (run.identity.reportsRequestUsage) {
+      span.attribute("t3.agent.model_requests", run.modelRequests);
+      span.attribute("t3.agent.tool_calling_requests", run.toolCallingRequests);
+    }
+    const turnUsage = details.tokenUsage;
+    if (turnUsage && turnUsage.usageStatus !== "unavailable") {
+      span.attribute("t3.usage.status", turnUsage.usageStatus);
+      if (turnUsage.inputTokens !== undefined) {
+        span.attribute("gen_ai.aggregated_usage.input_tokens", turnUsage.inputTokens);
+      }
+      if (turnUsage.outputTokens !== undefined) {
+        span.attribute("gen_ai.aggregated_usage.output_tokens", turnUsage.outputTokens);
+      }
+      if (turnUsage.cachedInputTokens !== undefined) {
+        span.attribute(
+          "gen_ai.aggregated_usage.cache_read.input_tokens",
+          turnUsage.cachedInputTokens,
+        );
+      }
+    } else if (run.modelRequests > 0) {
+      span.attribute("t3.usage.status", "summed_from_responses");
+      span.attribute("gen_ai.aggregated_usage.input_tokens", run.usage.input);
+      span.attribute("gen_ai.aggregated_usage.output_tokens", run.usage.output);
+    }
+    if (details.totalCostUsd !== undefined) {
+      span.attribute("t3.provider.reported_cost_usd", details.totalCostUsd);
+    }
+    const responseModels = details.modelUsage ? Object.keys(details.modelUsage) : [];
+    if (responseModels.length > 0) span.attribute("gen_ai.response.model", responseModels[0]);
+    if (this.options.captureContent) {
+      const inputs = run.transcript.filter((message) => message.role === "user");
+      span.attribute("gen_ai.input.messages", JSON.stringify(inputs.slice(0, 1)));
+      span.attribute(
+        "gen_ai.output.messages",
+        JSON.stringify(
+          run.lastAssistantText
+            ? [
+                {
+                  role: "assistant",
+                  parts: [{ type: "text", content: truncateText(run.lastAssistantText) }],
+                },
+              ]
+            : [],
+        ),
+      );
+      span.attribute("all_messages_events", JSON.stringify(run.transcript));
+      if (run.lastAssistantText)
+        span.attribute("final_result", truncateText(run.lastAssistantText));
+    }
+    span.end(
+      toNanos(Math.max(at, run.startMs)),
+      interrupted
+        ? exitInterrupted()
+        : state === "failed"
+          ? exitFailure(details.errorMessage ?? "Agent turn failed")
+          : Exit.void,
+    );
+  }
+}
+
+function isToolItem(itemType: string): boolean {
+  return (
+    itemType === "command_execution" ||
+    itemType === "file_change" ||
+    itemType === "mcp_tool_call" ||
+    itemType === "dynamic_tool_call" ||
+    itemType === "collab_agent_tool_call" ||
+    itemType === "web_search" ||
+    itemType === "image_view"
+  );
+}

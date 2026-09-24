@@ -81,6 +81,7 @@ import * as ProviderService from "../Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "../Services/ProviderSessionDirectory.ts";
 import { type EventNdjsonLogger } from "./EventNdjsonLogger.ts";
 import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
+import { AgentTurnInputs } from "../../observability/Layers/AgentTelemetry.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
@@ -468,6 +469,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   options?: ProviderServiceLiveOptions,
 ) {
   const analytics = yield* Effect.service(AnalyticsService.AnalyticsService);
+  const agentTurnInputs = yield* AgentTurnInputs;
   const serverConfig = yield* ServerConfig.ServerConfig;
   const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers;
   // Options-provided logger wins (test overrides); otherwise we take whatever
@@ -1732,6 +1734,12 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         }),
         (turnMetadata) =>
           Effect.gen(function* () {
+            yield* agentTurnInputs.noteTurnInput({
+              threadId: input.threadId,
+              text: input.input,
+              attachmentCount: attachments.length,
+              model: input.modelSelection?.model,
+            });
             const turn = yield* routed.adapter.sendTurn(input);
             yield* associateTurnAnalytics({
               providerInstanceId: routed.instanceId,

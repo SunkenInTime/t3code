@@ -567,6 +567,38 @@ machine that sets `OTEL_SDK_DISABLED` for everything else. It accepts the usual 
 OpenTelemetry specification and only `true` disables export, so `OTEL_SDK_DISABLED=1` does not.
 Values are case-insensitive and trimmed. An unrecognized value is ignored with a startup warning.
 
+### Agent Runs (GenAI Spans)
+
+When `T3CODE_OTLP_TRACES_URL` is set, the server also exports each provider turn as
+OpenTelemetry GenAI spans, which backends such as Pydantic Logfire read as agent runs. The mapping
+lives in `apps/server/src/observability/AgentTelemetry.ts` and reads only the canonical provider
+runtime events, so every adapter goes through the same code.
+
+- `invoke_agent T3 Code / <Provider>`: one per turn. `gen_ai.agent.name` is stable per provider
+  (`T3 Code / Claude`, `T3 Code / Codex`); thread, turn, model, workspace name, host, and app
+  version are attributes. `gen_ai.conversation.id` is the thread id.
+- `execute_tool <name>`: one per tool item, with arguments, result, status, and approval wait.
+- `chat <model>`: one per model response, for providers that report usage per response (Claude
+  and Codex). Neither reports when a request starts, so the span starts at the previous turn,
+  response, or tool-result boundary and says which in `t3.genai.chat.start_source`. Codex runs
+  tool calls before it reports usage, so Codex windows can include tool time.
+
+Long runs and tools also get a zero-length Logfire pending span, so they show in the live view
+before they finish. Agent spans skip the local trace file.
+
+Message text, tool arguments, and tool results are exported only with
+`OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT=true`. Structured tool arguments have
+sensitive-looking keys (Logfire's default patterns) redacted, and long text is truncated.
+
+Sending to Logfire needs only the existing variables:
+
+```bash
+export T3CODE_OTLP_TRACES_URL=https://logfire-us.pydantic.dev/v1/traces
+export T3CODE_OTLP_METRICS_URL=https://logfire-us.pydantic.dev/v1/metrics
+export T3CODE_OTLP_HEADERS="Authorization=<write token>"
+export OTEL_RESOURCE_ATTRIBUTES=deployment.environment.name=dev
+```
+
 ### What Is Instrumented Today
 
 Current high-value span and metric boundaries include:
