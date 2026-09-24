@@ -564,6 +564,7 @@ describe("AgentTelemetryRecorder", () => {
     const tools = named("execute_tool");
     assert.strictEqual(tools.length, 1);
     assert.strictEqual(tools[0]!.startTime, BigInt(Date.parse(isoAt(1))) * 1_000_000n);
+    assert.strictEqual(tools[0]!.attributes.get("t3.tool.duration_upper_bound"), true);
     const output = JSON.parse(
       named("chat ")[0]!.attributes.get("gen_ai.output.messages") as string,
     );
@@ -813,5 +814,46 @@ describe("AgentTelemetryRecorder", () => {
     const [task] = named("execute_tool Task");
     const [subagent] = named("invoke_agent T3 Code / Claude subagent");
     assert.strictEqual(Option.getOrUndefined(subagent!.parent)?.spanId, task!.spanId);
+  });
+
+  it("skips background tasks and keeps subagent descriptions out without capture", () => {
+    const { recorder, named } = makeRecorder(false);
+    recorder.handle(event("turn.started", 0, { payload: {} }));
+    recorder.handle(
+      event("task.started", 1, { payload: { taskId: "shell-1", taskType: "local_bash" } }),
+    );
+    recorder.handle(
+      event("task.started", 1, {
+        payload: { taskId: "agent-1", taskType: "local_agent", description: "Audit the auth code" },
+      }),
+    );
+    recorder.handle(event("turn.completed", 2, { payload: { state: "completed" } }));
+
+    const subagents = named("invoke_agent T3 Code / Claude subagent");
+    assert.strictEqual(subagents.length, 1);
+    assert.strictEqual(subagents[0]!.attributes.get("logfire.msg"), "subagent run");
+  });
+
+  it("ends a Codex child agent that fails through a task update", () => {
+    const { recorder, named } = makeRecorder();
+    const codex = (type: string, second: number, fields: Record<string, unknown> = {}) =>
+      ({ ...event(type, second, fields), provider: "codex" }) as ProviderRuntimeEvent;
+    recorder.handle(codex("turn.started", 0, { payload: {} }));
+    recorder.handle(
+      codex("task.started", 1, { payload: { taskId: "child-1", taskType: "agent" } }),
+    );
+    recorder.handle(
+      codex("task.updated", 2, { payload: { taskId: "child-1", status: "failed", error: "boom" } }),
+    );
+    recorder.handle(codex("turn.completed", 3, { payload: { state: "completed" } }));
+
+    const [child] = named("invoke_agent T3 Code / Codex subagent");
+    const exit = endExit(child!);
+    assert.isTrue(Exit.isFailure(exit));
+    assert.isFalse(Cause.hasInterruptsOnly((exit as Exit.Failure<unknown, unknown>).cause));
+    assert.strictEqual(
+      (child!.status as Extract<Tracer.SpanStatus, { _tag: "Ended" }>).endTime,
+      BigInt(Date.parse(isoAt(2))) * 1_000_000n,
+    );
   });
 });

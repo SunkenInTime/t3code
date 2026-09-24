@@ -23,7 +23,7 @@
  *
  * @module observability/AgentTelemetry
  */
-import type { ProviderRuntimeEvent } from "@t3tools/contracts";
+import { classifyTaskAgentKind, type ProviderRuntimeEvent } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Exit from "effect/Exit";
@@ -660,8 +660,21 @@ export class AgentTelemetryRecorder {
         this.onTaskStarted(run, event, at);
         return;
       case "task.completed":
-        this.onTaskCompleted(run, event, at);
+        this.endSubagent(run, event.payload.taskId, event.payload.status, at, {
+          summary: event.payload.summary,
+          usage: event.payload.typedUsage,
+        });
         return;
+      case "task.updated": {
+        // Codex can end a child agent with an update instead of a completion.
+        const status = event.payload.status;
+        if (status === "completed" || status === "failed") {
+          this.endSubagent(run, event.payload.taskId, status, at, { summary: event.payload.error });
+        } else if (status === "cancelled" || status === "interrupted") {
+          this.endSubagent(run, event.payload.taskId, "stopped", at, {});
+        }
+        return;
+      }
       case "runtime.error":
         run.span.event("runtime.error", toNanos(at), {
           "error.message": event.payload.message,
@@ -1082,6 +1095,12 @@ export class AgentTelemetryRecorder {
         run.requestStartSource = "tool_result";
       }
     }
+    if (!tool.span && run.identity.toolStartsWhileStreaming && !tool.nested) {
+      // It finished before its response ended, so it ran while the model was
+      // still streaming. When it began after its call finished streaming is
+      // unknown; the span starts at the call's first chunk, an upper bound.
+      tool.attributes.set("t3.tool.duration_upper_bound", true);
+    }
     this.openToolSpan(tool, tool.startMs).end(
       toNanos(Math.max(at, tool.startMs)),
       status === "declined"
@@ -1365,7 +1384,11 @@ export class AgentTelemetryRecorder {
     at: number,
   ): void {
     const payload = event.payload;
-    if (payload.agentKind === "background") return;
+    // `agentKind` is stamped later by ingestion, so classify here.
+    const kind =
+      payload.agentKind ??
+      classifyTaskAgentKind({ taskType: payload.taskType, agentId: payload.agentId });
+    if (kind === "background") return;
     const agentId = payload.taskId;
     if (run.subagents.has(agentId)) return;
     const parentTool = payload.toolUseId ? run.tools.get(payload.toolUseId) : undefined;
@@ -1373,7 +1396,9 @@ export class AgentTelemetryRecorder {
     // A subagent means its Task call finished streaming and is running.
     const parent = parentTool ? this.openToolSpan(parentTool, at) : run.span;
     const span = this.startSpan(`invoke_agent ${name}`, parent, at, {
-      "logfire.msg": `${payload.title ?? payload.description ?? "subagent"} run`,
+      "logfire.msg": this.options.captureContent
+        ? `${payload.title ?? payload.description ?? "subagent"} run`
+        : "subagent run",
       "gen_ai.operation.name": "invoke_agent",
       "gen_ai.agent.name": name,
       "gen_ai.agent.call.id": agentId,
@@ -1388,15 +1413,22 @@ export class AgentTelemetryRecorder {
     run.subagents.set(agentId, span);
   }
 
-  private onTaskCompleted(
+  private endSubagent(
     run: AgentRun,
-    event: Extract<ProviderRuntimeEvent, { type: "task.completed" }>,
+    taskId: string,
+    status: "completed" | "failed" | "stopped",
     at: number,
+    details: {
+      readonly summary?: string | undefined;
+      readonly usage?:
+        | Extract<ProviderRuntimeEvent, { type: "task.completed" }>["payload"]["typedUsage"]
+        | undefined;
+    },
   ): void {
-    const span = run.subagents.get(event.payload.taskId);
+    const span = run.subagents.get(taskId);
     if (!span) return;
-    run.subagents.delete(event.payload.taskId);
-    const usage = event.payload.typedUsage;
+    run.subagents.delete(taskId);
+    const usage = details.usage;
     if (usage) {
       if (usage.inputTokens !== undefined) {
         span.attribute("gen_ai.aggregated_usage.input_tokens", usage.inputTokens);
@@ -1407,14 +1439,14 @@ export class AgentTelemetryRecorder {
       span.attribute("t3.subagent.total_tokens", usage.totalTokens);
       if (usage.toolUses !== undefined) span.attribute("t3.subagent.tool_uses", usage.toolUses);
     }
-    if (event.payload.summary && this.options.captureContent) {
-      span.attribute("final_result", truncateText(event.payload.summary));
-    }
+    const summary =
+      details.summary && this.options.captureContent ? truncateText(details.summary) : undefined;
+    if (summary && status !== "failed") span.attribute("final_result", summary);
     span.end(
       toNanos(at),
-      event.payload.status === "failed"
-        ? exitFailure(event.payload.summary ?? "Subagent failed")
-        : event.payload.status === "stopped"
+      status === "failed"
+        ? exitFailure(summary ?? "Subagent failed")
+        : status === "stopped"
           ? exitInterrupted()
           : Exit.void,
     );
