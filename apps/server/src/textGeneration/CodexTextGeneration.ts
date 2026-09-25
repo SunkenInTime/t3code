@@ -1,4 +1,6 @@
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
+import * as Exit from "effect/Exit";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
@@ -17,6 +19,8 @@ import {
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from "@t3tools/shared/git";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 
+import { AgentTraceExporter } from "../observability/Layers/AgentTelemetry.ts";
+import { startThreadTitleTelemetry } from "../observability/ThreadTitleTelemetry.ts";
 import { resolveAttachmentPath } from "../attachmentStore.ts";
 import * as ServerConfig from "../config.ts";
 import { expandHomePath } from "../pathExpansion.ts";
@@ -54,6 +58,8 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
   const serverConfig = yield* Effect.service(ServerConfig.ServerConfig);
   const resolvedEnvironment = environment ?? process.env;
+  const titleTracer = yield* AgentTraceExporter;
+  const clock = yield* Clock.Clock;
 
   type MaterializedImageAttachments = {
     readonly imagePaths: ReadonlyArray<string>;
@@ -156,6 +162,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     cwd,
     prompt,
     outputSchemaJson,
+    onRawOutput,
     imagePaths = [],
     cleanupPaths = [],
     modelSelection,
@@ -168,6 +175,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     cwd: string;
     prompt: string;
     outputSchemaJson: S;
+    onRawOutput?: ((raw: string) => void) | undefined;
     imagePaths?: ReadonlyArray<string>;
     cleanupPaths?: ReadonlyArray<string>;
     modelSelection: ModelSelection;
@@ -296,6 +304,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
               cause,
             }),
         ),
+        Effect.tap((raw) => Effect.sync(() => onRawOutput?.(raw))),
         Effect.flatMap(decodeOutput),
         Effect.catchTags({
           SchemaError: (cause) =>
@@ -395,26 +404,63 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         "generateThreadTitle",
         input.attachments,
       );
+      const overridePath = resolvedEnvironment.T3CODE_LOGFIRE_TITLE_PROMPT;
+      if (overridePath !== undefined && !path.isAbsolute(overridePath)) {
+        return yield* new TextGenerationError({
+          operation: "generateThreadTitle",
+          detail: "T3CODE_LOGFIRE_TITLE_PROMPT must be an absolute path.",
+        });
+      }
+      const instructionsOverride =
+        overridePath === undefined
+          ? undefined
+          : yield* fileSystem.readFileString(overridePath).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new TextGenerationError({
+                    operation: "generateThreadTitle",
+                    detail: "Could not read title prompt override.",
+                    cause,
+                  }),
+              ),
+            );
       const { prompt, outputSchema } = buildThreadTitlePrompt({
         message: input.message,
         previousTitle: input.previousTitle,
         linkedContext: input.linkedContext,
         attachments: input.attachments,
+        instructionsOverride,
       });
-
-      const generated = yield* runCodexJson({
+      const telemetry = startThreadTitleTelemetry({
+        tracer: titleTracer,
+        nowMs: () => clock.currentTimeMillisUnsafe(),
+        captureContent:
+          resolvedEnvironment.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT === "true",
+        model: input.modelSelection.model,
+        prompt,
+        threadId: input.threadId,
+        requestId: input.requestId,
+      });
+      return yield* runCodexJson({
         operation: "generateThreadTitle",
         cwd: input.cwd,
         prompt,
         outputSchemaJson: outputSchema,
+        onRawOutput: telemetry.rawOutput,
         imagePaths,
         modelSelection: input.modelSelection,
-      });
-
-      return {
-        title: sanitizeThreadTitle(generated.title),
-        ...(generated.needsRefinement ? { needsRefinement: true } : {}),
-      } satisfies TextGeneration.ThreadTitleGenerationResult;
+      }).pipe(
+        Effect.map(
+          (generated) =>
+            ({
+              title: sanitizeThreadTitle(generated.title),
+              ...(generated.needsRefinement ? { needsRefinement: true } : {}),
+            }) satisfies TextGeneration.ThreadTitleGenerationResult,
+        ),
+        Effect.onExit((exit) =>
+          Effect.sync(() => telemetry.finish(Exit.isSuccess(exit) ? exit.value : undefined)),
+        ),
+      );
     });
 
   return {

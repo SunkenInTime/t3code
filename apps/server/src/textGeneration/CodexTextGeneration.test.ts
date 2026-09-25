@@ -6,6 +6,8 @@ import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Tracer from "effect/Tracer";
+import { AgentTraceExporter } from "../observability/Layers/AgentTelemetry.ts";
 import { createModelSelection } from "@t3tools/shared/model";
 import { expect } from "vite-plus/test";
 
@@ -16,6 +18,7 @@ import * as TextGeneration from "./TextGeneration.ts";
 import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
 import { writeFakeCli } from "../testUtils/fakeCli.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
+const encodeTestJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
   ProviderInstanceId.make("codex"),
@@ -395,6 +398,119 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
           expect(generated.title).toBe(
             "Investigate websocket reconnect regressions after worktree restore",
           );
+        }),
+    ),
+  );
+
+  it.effect("rereads demo instructions and correlates raw and sanitized output", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const overridePath = yield* fs.makeTempFileScoped();
+      yield* fs.writeFileString(overridePath, "First demo instructions");
+      const spans: Array<Tracer.NativeSpan> = [];
+      const tracer = Tracer.make({
+        span: (options) => {
+          const span = new Tracer.NativeSpan(options);
+          spans.push(span);
+          return span;
+        },
+      });
+      const raw = yield* encodeTestJson({
+        title: '  "Fix reconnect handling"  ',
+      });
+      yield* withFakeCodexEnv(
+        {
+          output: raw,
+          stdinMustNotContain: "Determine the title in this order",
+          environment: {
+            ...process.env,
+            T3CODE_LOGFIRE_TITLE_PROMPT: overridePath,
+            OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "true",
+          },
+        },
+        (generator) =>
+          Effect.gen(function* () {
+            const input = {
+              cwd: process.cwd(),
+              message: "Reconnect keeps failing",
+              previousTitle: "Old title",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+              threadId: "demo-thread",
+              requestId: "demo-request",
+            };
+            expect((yield* generator.generateThreadTitle(input)).title).toBe(
+              "Fix reconnect handling",
+            );
+            yield* fs.writeFileString(overridePath, "Second demo instructions");
+            yield* generator.generateThreadTitle(input);
+          }),
+      ).pipe(Effect.provideService(AgentTraceExporter, tracer));
+      expect(spans).toHaveLength(2);
+      expect(spans[0]!.attributes.get("gen_ai.input.messages")).toMatchObject([
+        { parts: [{ content: expect.stringContaining("First demo instructions") }] },
+      ]);
+      expect(spans[1]!.attributes.get("gen_ai.input.messages")).toMatchObject([
+        { parts: [{ content: expect.stringContaining("Second demo instructions") }] },
+      ]);
+      expect(spans[0]!.attributes.get("t3.title.raw_output")).toBe(raw + "\n");
+      expect(spans[0]!.attributes.get("t3.title.final")).toBe("Fix reconnect handling");
+      expect(spans[0]!.attributes.get("t3.thread.id")).toBe("demo-thread");
+      expect(spans[0]!.attributes.get("t3.request.id")).toBe("demo-request");
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("ends the title span when structured output cannot be decoded", () => {
+    const spans: Array<Tracer.NativeSpan> = [];
+    const tracer = Tracer.make({
+      span: (options) => {
+        const span = new Tracer.NativeSpan(options);
+        spans.push(span);
+        return span;
+      },
+    });
+    return withFakeCodexEnv(
+      {
+        output: "invalid JSON",
+        environment: {
+          ...process.env,
+          OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT: "false",
+        },
+      },
+      (generator) =>
+        Effect.gen(function* () {
+          const result = yield* generator
+            .generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Fix reconnects",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.result);
+          expect(Result.isFailure(result)).toBe(true);
+          expect(spans).toHaveLength(1);
+          expect(spans[0]!.status._tag).toBe("Ended");
+          expect(spans[0]!.attributes.get("t3.title.succeeded")).toBe(false);
+          expect(spans[0]!.attributes.has("t3.title.raw_output")).toBe(false);
+        }),
+    ).pipe(Effect.provideService(AgentTraceExporter, tracer));
+  });
+
+  it.effect("rejects relative demo prompt paths", () =>
+    withFakeCodexEnv(
+      {
+        output: '{"title":"unused"}',
+        environment: { ...process.env, T3CODE_LOGFIRE_TITLE_PROMPT: "relative.txt" },
+      },
+      (generator) =>
+        Effect.gen(function* () {
+          const result = yield* generator
+            .generateThreadTitle({
+              cwd: process.cwd(),
+              message: "Fix reconnects",
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            })
+            .pipe(Effect.result);
+          expect(Result.isFailure(result)).toBe(true);
+          if (Result.isFailure(result)) expect(result.failure.detail).toContain("absolute path");
         }),
     ),
   );

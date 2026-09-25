@@ -1,0 +1,111 @@
+{
+  "run_id": "baseline-01",
+  "created_at": "2026-09-25T03:08:04.834707+00:00",
+  "model": "gpt-6-luna",
+  "reasoning_effort": "low",
+  "repeat": 1,
+  "prompt_sha256": "f157e8bab62dd8348ca971bd7c72db4d92961f2cb94d55304dd88c355b1ab6dd",
+  "corpus_sha256": "2b5db20cce49f5b4433762497b02ea1f70e8f7e73ffe4e9fdc58956237319637",
+  "cases": [
+    {
+      "case_id": "photo-reconnect",
+      "thread_id": "logfire-title-photo-reconnect",
+      "request_id": "abe391bc-b7ac-4c9b-ae10-943c01e737c0",
+      "title": "Open the PR",
+      "checks": {
+        "identifies_subject": false,
+        "under_40_characters": true,
+        "three_to_eight_words": true
+      },
+      "trace_id": "1e6a5e727ce80531fc49f73d4dddf19a"
+    },
+    {
+      "case_id": "android-pairing",
+      "thread_id": "logfire-title-android-pairing",
+      "request_id": "9cf8d96c-2194-4306-9efb-71a99fb50364",
+      "title": "Open the PR",
+      "checks": {
+        "identifies_subject": false,
+        "under_40_characters": true,
+        "three_to_eight_words": true
+      },
+      "trace_id": "df125490a90ccfb8f0d5e50d09e398a0"
+    },
+    {
+      "case_id": "offline-search",
+      "thread_id": "logfire-title-offline-search",
+      "request_id": "10955f32-5c99-44d7-99d7-8d13e1ae38e9",
+      "title": "Open the PR",
+      "checks": {
+        "identifies_subject": false,
+        "under_40_characters": true,
+        "three_to_eight_words": true
+      },
+      "trace_id": "9e8d2766555754fd52f01732deff3db2"
+    },
+    {
+      "case_id": "modal-focus",
+      "thread_id": "logfire-title-modal-focus",
+      "request_id": "fb6e9a33-5e49-4c9f-937a-70041c8d50a1",
+      "title": "Open a PR for the focus fix",
+      "checks": {
+        "identifies_subject": false,
+        "under_40_characters": true,
+        "three_to_eight_words": true
+      },
+      "trace_id": "b53fc09c75d9aeb94bb8751646caa4f1"
+    },
+    {
+      "case_id": "chat-scroll",
+      "thread_id": "logfire-title-chat-scroll",
+      "request_id": "b944748f-c252-4f10-a49a-98d8514f5f84",
+      "title": "Continue chat auto-scroll fix",
+      "checks": {
+        "identifies_subject": true,
+        "under_40_characters": true,
+        "three_to_eight_words": true
+      },
+      "trace_id": "732567563e1ee80cb25ad5fe819f181b"
+    },
+    {
+      "case_id": "notification-sync",
+      "thread_id": "logfire-title-notification-sync",
+      "request_id": "dc71b5d3-03b2-4ca8-a25c-f0c3ce92f495",
+      "title": "Run remaining tests",
+      "checks": {
+        "identifies_subject": false,
+        "under_40_characters": true,
+        "three_to_eight_words": true
+      },
+      "trace_id": "fb91af0cd02acfc0fe0d2dab7d0002a6"
+    },
+    {
+      "case_id": "ci-workflow",
+      "thread_id": "logfire-title-ci-workflow",
+      "request_id": "a5416db2-a000-4764-990d-99c73707db73",
+      "title": "Rerun CI for Current Head",
+      "checks": {
+        "identifies_subject": true,
+        "under_40_characters": true,
+        "three_to_eight_words": true
+      },
+      "trace_id": "224802c70836e54bea653580520e9360"
+    },
+    {
+      "case_id": "explicit-pivot",
+      "thread_id": "logfire-title-explicit-pivot",
+      "request_id": "0ff9ae3a-7b1e-4671-8e9c-9831dca1f85b",
+      "title": "Add CSV export cancellation",
+      "checks": {
+        "identifies_subject": true,
+        "under_40_characters": true,
+        "three_to_eight_words": true
+      },
+      "trace_id": "1083bac6b62a43826270018985dfc2a3"
+    }
+  ],
+  "notes": "Constructed conversations, real T3 title regeneration. Subject checks use readable vocabulary groups, not an exact title or an LLM judge. Review titles yourself. This measures title quality, not independent agent repair success.",
+  "eval_url": "https://logfire-us.pydantic.dev/sunken-in-time/starter-project/evals/T3%20sidebar%20titles/compare?experiment=01a0d688cd7af28ffd6f0fd26e03c6c9-ac280416eb2ef7fd",
+  "subject_passes": 3,
+  "total": 8
+}

@@ -1,5 +1,9 @@
 # Logfire agent demo
 
+For the reproducible title-generation investigation, use the
+[eight-thread T3 demo](../../demos/logfire-titles/README.md). It includes recorded
+Luna titles, a fresh runtime evaluation, and the Logfire MCP investigator handoff.
+
 Use `demo/logfire-live` with Node 24, `vp`, and an authenticated Codex or Claude CLI.
 This branch records agent turns, model responses, tool calls, and subagents. It does
 not record or export background server/browser traces, write a local trace file,

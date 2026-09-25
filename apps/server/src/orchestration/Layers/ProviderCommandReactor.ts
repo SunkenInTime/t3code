@@ -970,6 +970,7 @@ const make = Effect.gen(function* () {
         const generated = yield* textGeneration
           .generateThreadTitle({
             cwd: input.cwd,
+            threadId: input.threadId,
             message: input.messageText,
             ...(attachments.length > 0 ? { attachments } : {}),
             modelSelection,
@@ -1067,6 +1068,8 @@ const make = Effect.gen(function* () {
     ).settings;
     const generated = yield* textGeneration.generateThreadTitle({
       cwd,
+      threadId: thread.id,
+      requestId,
       message,
       previousTitle,
       ...(attachments.length > 0 ? { attachments } : {}),

@@ -1,0 +1,177 @@
+[
+  {
+    "id": "photo-reconnect",
+    "previous_title": "Prevent duplicate photo uploads",
+    "subject_groups": [
+      ["photo", "image", "upload"],
+      ["duplicate", "dedup", "reconnect"]
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "text": "When the phone reconnects, queued photos upload twice. Fix upload deduplication so reconnecting cannot create duplicate photos."
+      },
+      {
+        "role": "assistant",
+        "text": "The upload queue now retains the idempotency key across reconnects. The regression test reconnects midway through an upload and checks that only one photo is stored."
+      },
+      {
+        "role": "user",
+        "text": "Great, open the PR."
+      }
+    ],
+    "baseline_title": "Open the PR"
+  },
+  {
+    "id": "android-pairing",
+    "previous_title": "Fix expired Android pairing",
+    "subject_groups": [
+      ["android", "pairing"],
+      ["expir", "token"]
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "text": "Android pairing gets stuck when the QR token expires while the scanner is open. Let the user request a fresh pairing token without restarting the app."
+      },
+      {
+        "role": "assistant",
+        "text": "The scanner now detects expired pairing tokens and offers a fresh QR code. The Android pairing regression passes."
+      },
+      {
+        "role": "user",
+        "text": "Looks good. Open the PR."
+      }
+    ],
+    "baseline_title": "Open the PR"
+  },
+  {
+    "id": "offline-search",
+    "previous_title": "Search notes while offline",
+    "subject_groups": [["offline"], ["search", "note"]],
+    "messages": [
+      {
+        "role": "user",
+        "text": "Implement offline search for saved notes. A user on a plane should be able to find a note by words in its body, with no network connection."
+      },
+      {
+        "role": "assistant",
+        "text": "Saved note bodies are indexed on the device. Airplane-mode tests find notes by body text without making network requests."
+      },
+      {
+        "role": "user",
+        "text": "Ship it. Open the PR."
+      }
+    ],
+    "baseline_title": "Open the PR"
+  },
+  {
+    "id": "modal-focus",
+    "previous_title": "Restore screen reader modal focus",
+    "subject_groups": [
+      ["focus", "screen reader", "accessib"],
+      ["modal", "dialog"]
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "text": "Fix keyboard focus after dismissing the settings modal. Screen reader users currently lose their place; focus should return to the exact button that opened the dialog."
+      },
+      {
+        "role": "assistant",
+        "text": "The settings dialog now restores focus to its trigger after Escape, outside click, and the close button. The focus restoration tests pass."
+      },
+      {
+        "role": "user",
+        "text": "Nice. Open a PR for this."
+      }
+    ],
+    "baseline_title": "Open a PR for the focus fix"
+  },
+  {
+    "id": "chat-scroll",
+    "previous_title": "Keep chat scroll position",
+    "subject_groups": [
+      ["scroll", "jump", "auto-scroll", "autoscroll"],
+      ["chat", "manual", "position", "jump", "history"]
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "text": "Stop chat from jumping to the bottom while I am reading older messages. New streamed text should only auto-scroll when I was already at the bottom."
+      },
+      {
+        "role": "assistant",
+        "text": "I separated manual scroll position from the streaming follow state. Reading older chat messages no longer jumps when tokens arrive."
+      },
+      {
+        "role": "user",
+        "text": "Okay, keep going."
+      }
+    ],
+    "baseline_title": "Continue chat auto-scroll fix"
+  },
+  {
+    "id": "notification-sync",
+    "previous_title": "Sync notification preferences",
+    "subject_groups": [["notification"], ["sync", "preference", "setting", "device"]],
+    "messages": [
+      {
+        "role": "user",
+        "text": "Notification preferences changed on desktop never reach mobile. Sync notification settings across devices, including turning notifications back on."
+      },
+      {
+        "role": "assistant",
+        "text": "Preference updates now publish to the other device and both enabled and disabled states persist after reconnect. I still need the final regression check."
+      },
+      {
+        "role": "user",
+        "text": "Run the remaining tests."
+      }
+    ],
+    "baseline_title": "Run remaining tests"
+  },
+  {
+    "id": "ci-workflow",
+    "previous_title": "Fix flaky pull request CI",
+    "subject_groups": [
+      ["ci", "check", "workflow"],
+      ["flak", "rerun", "retry", "pull request", "head", "sha", "commit", "stale"]
+    ],
+    "messages": [
+      {
+        "role": "user",
+        "text": "Our pull request CI workflow is flaky. A successful job from the previous commit sometimes marks the new commit green. Tie every result and rerun to the current head SHA."
+      },
+      {
+        "role": "assistant",
+        "text": "The workflow checks the head SHA before publishing its status and discards results from older commits."
+      },
+      {
+        "role": "user",
+        "text": "Finish fixing the flaky PR checks and rerun CI."
+      }
+    ],
+    "baseline_title": "Rerun CI for Current Head"
+  },
+  {
+    "id": "explicit-pivot",
+    "previous_title": "Add export cancellation",
+    "subject_groups": [["export"], ["cancel"]],
+    "messages": [
+      {
+        "role": "user",
+        "text": "Start by polishing the search input styles."
+      },
+      {
+        "role": "assistant",
+        "text": "The search input spacing and focus outline are updated."
+      },
+      {
+        "role": "user",
+        "text": "New task: forget the search polish. Add a cancel button for long-running CSV exports; cancelling must stop the export job, not just hide its progress."
+      }
+    ],
+    "baseline_title": "Add CSV export cancellation"
+  }
+]

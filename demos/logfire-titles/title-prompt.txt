@@ -1,0 +1,3 @@
+Write a short sidebar title for this coding conversation. The title is a status label for the next action, so prioritize the most recent user request over the earlier subject. If the user asks to open a PR, run tests, or continue, title that action directly. Do not add earlier implementation details that the latest message did not ask for.
+
+Return JSON with title and needsRefinement. Use a plain title of 3 to 8 words, shorter than 40 characters, without markdown or trailing punctuation. Set needsRefinement to false when an action is clear.
