@@ -41,17 +41,23 @@ title calls export; background HTTP, VCS, and browser activity stay out of Logfi
 ## Give it to an agent
 
 Connect the [Logfire MCP](https://pydantic.dev/docs/logfire/guides/mcp-server/) to
-your coding agent, or sign into the official CLI used by the tested handoff:
+Codex and complete the browser login before starting a fresh investigator thread:
 
 ```sh
-uvx --from logfire-cli==0.1.7 logfire --region us --org YOUR_ORG auth login
+codex mcp add logfire --url https://logfire-us.pydantic.dev/mcp
+# If it is already configured but needs authentication: codex mcp login logfire
 T3_DEMO_LOGFIRE_PROJECT=YOUR_ORG/YOUR_PROJECT node apps/server/scripts/logfire-title-demo.mjs investigate
 ```
 
 The second command opens a new Astra Medium thread in T3 and sends
 [`investigate.md`](investigate.md). You can also paste that handoff into a new T3
-thread yourself. The CLI's `mcp query` commands call Pydantic's hosted MCP server;
-they are not a separate local log-analysis tool.
+thread yourself. Native calls appear in T3 with the Pydantic mark, the Logfire MCP
+name, tool name, and call status. Expand a call to inspect its arguments and result.
+Keep the investigator thread beside Logfire's trace or experiment view while filming.
+
+The earlier rehearsals used the official Logfire CLI's hosted `mcp query` commands.
+Those remain ordinary shell activity in T3. Use the native connection above when
+demonstrating visible MCP tool usage.
 
 The agent must inspect failing calls and controls through MCP, change only
 `title-prompt.txt`, and run Pydantic Evals again. The server rereads the prompt on

@@ -1,6 +1,6 @@
 Eight conversations in T3's “Title generation demo” project have generated titles that make the sidebar hard to navigate. Diagnose and fix title generation, keeping Luna as the model.
 
-Start with Logfire MCP evidence before editing. Use the connected Logfire MCP tools. If this session exposes MCP through the official Logfire CLI, use `uvx --from logfire-cli==0.1.7 logfire mcp query schema` and `logfire mcp query run --help` through that CLI; those commands call the hosted MCP server. Select the supplied project and region. Do not print credentials or inspect private auth files.
+Start with Logfire MCP evidence before editing. Use the connected native Logfire MCP tools so each call is visible in T3's activity. Select the supplied project and region. If the tools are unavailable or authentication fails, report that the operator must connect Logfire before continuing. Keep credentials private and leave auth files untouched.
 
 Find recent `generate thread title` spans for `t3.thread.id` starting with `logfire-title-`. Compare at least two bad titles and the CI/topic-change controls. Inspect the actual model input, raw response, displayed title, model, and prompt hash. Explain what the traces establish about model behavior versus context loss or output cleanup. Cite trace IDs or links.
 
