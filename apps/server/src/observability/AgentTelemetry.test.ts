@@ -120,6 +120,134 @@ const endExit = (span: Tracer.NativeSpan) => {
 };
 
 describe("AgentTelemetryRecorder", () => {
+  it("exports readable messages while the run is active and a native conversation on completion", () => {
+    const { recorder, named } = makeRecorder();
+    const prompt = `Implement offline search. ${"diagnostics ".repeat(1_500)}End of report.`;
+    recorder.bindTurnInput(
+      recorder.noteTurnInput({
+        threadId: THREAD,
+        text: prompt,
+        attachmentCount: 0,
+        model: "claude-sonnet-5",
+        link: undefined,
+      }),
+      TURN,
+    );
+    recorder.handle(event("turn.started", 0, { payload: {} }));
+    const agent = named("invoke_agent")[0]!;
+    const input = named("user message")[0]!;
+    assert.strictEqual(agent.status._tag, "Started");
+    assert.strictEqual(input.status._tag, "Ended");
+    assert.strictEqual(Option.getOrUndefined(input.parent)?.spanId, agent.spanId);
+    assert.strictEqual(
+      JSON.parse(String(input.attributes.get("gen_ai.input.messages")))[0].parts[0].content,
+      prompt,
+    );
+    recorder.handle(
+      event("content.delta", 1, {
+        itemId: "text-1",
+        payload: { streamKind: "assistant_text", delta: "I will inspect the input." },
+      }),
+    );
+    assert.strictEqual(named("assistant message").length, 0);
+    recorder.handle(
+      event("item.completed", 2, {
+        itemId: "text-1",
+        payload: { itemType: "assistant_message", status: "completed" },
+      }),
+    );
+    const output = named("assistant message")[0]!;
+    assert.strictEqual(agent.status._tag, "Started");
+    assert.strictEqual(output.status._tag, "Ended");
+    assert.include(
+      String(output.attributes.get("gen_ai.output.messages")),
+      "I will inspect the input.",
+    );
+    recorder.handle(claudeResponse(3, 10, 5, "end_turn"));
+    recorder.handle(event("turn.completed", 4, { payload: { state: "completed" } }));
+    const conversation = JSON.parse(String(agent.attributes.get("pydantic_ai.all_messages")));
+    assert.deepStrictEqual(
+      conversation.map((message: { role: string }) => message.role),
+      ["user", "assistant"],
+    );
+    assert.strictEqual(conversation[0].parts[0].content, prompt);
+    assert.strictEqual(conversation[1].parts[0].content, "I will inspect the input.");
+    assert.isFalse(agent.attributes.has("all_messages_events"));
+    assert.isFalse(agent.attributes.has("gen_ai.input.messages"));
+    assert.isFalse(agent.attributes.has("gen_ai.output.messages"));
+    assert.strictEqual(agent.attributes.get("t3.genai.system_instructions_captured"), false);
+    assert.strictEqual(named("chat ").length, 1);
+  });
+
+  it("gives an MCP call inside exec native arguments and results without counting it as a model call", () => {
+    const { recorder, named, spans } = makeRecorder();
+    const codex = (type: string, second: number, fields: Record<string, unknown> = {}) =>
+      ({ ...event(type, second, fields), provider: "codex" }) as ProviderRuntimeEvent;
+    recorder.handle(codex("turn.started", 0, { payload: {} }));
+    recorder.handle(
+      codex("model.tool_call.started", 1, {
+        payload: { callId: "exec-1", name: "exec", arguments: "tools.query_run(...)" },
+      }),
+    );
+    const item = {
+      type: "mcpToolCall",
+      server: "logfire",
+      tool: "query_run",
+      arguments: JSON.stringify({
+        query: "SELECT span_name FROM records LIMIT 1",
+        api_key: "private-key",
+      }),
+    };
+    recorder.handle(
+      codex("item.started", 2, {
+        itemId: "mcp-1",
+        payload: { itemType: "mcp_tool_call", status: "inProgress", data: { item } },
+      }),
+    );
+    const tool = named("execute_tool logfire.query_run")[0]!;
+    const call = named("execute_tool exec")[0]!;
+    assert.strictEqual(Option.getOrUndefined(tool.parent)?.spanId, call.spanId);
+    const pending = spans.find(
+      (span) =>
+        span.name === tool.name && span.attributes.get("logfire.span_type") === "pending_span",
+    )!;
+    assert.include(
+      String(pending.attributes.get("gen_ai.tool.call.arguments")),
+      "SELECT span_name",
+    );
+    assert.notInclude(String(pending.attributes.get("gen_ai.tool.call.arguments")), "private-key");
+    recorder.handle(
+      codex("item.completed", 3, {
+        itemId: "mcp-1",
+        payload: {
+          itemType: "mcp_tool_call",
+          status: "completed",
+          data: {
+            item: {
+              ...item,
+              result: { content: [{ type: "text", text: "generate thread title" }] },
+            },
+          },
+        },
+      }),
+    );
+    assert.deepStrictEqual(JSON.parse(String(tool.attributes.get("gen_ai.tool.call.result"))), {
+      content: [{ type: "text", text: "generate thread title" }],
+    });
+    recorder.handle(
+      codex("model.tool_call.completed", 4, {
+        payload: { callId: "exec-1", output: "one matching span" },
+      }),
+    );
+    assert.strictEqual(
+      JSON.parse(String(call.attributes.get("gen_ai.tool.call.result"))),
+      "one matching span",
+    );
+    recorder.handle(codex("turn.completed", 5, { payload: { state: "completed" } }));
+    assert.strictEqual(named("invoke_agent")[0]!.attributes.get("t3.agent.tool_calls"), 1);
+    assert.strictEqual(named("invoke_agent")[0]!.attributes.get("t3.agent.tool_executions"), 1);
+  });
+
   it("records a Claude turn as agent, chat, and tool spans", () => {
     const { recorder, spans, named } = makeRecorder();
     recorder.bindTurnInput(
@@ -329,6 +457,7 @@ describe("AgentTelemetryRecorder", () => {
         "gen_ai.output.messages",
         "gen_ai.tool.call.arguments",
         "gen_ai.tool.call.result",
+        "pydantic_ai.all_messages",
         "final_result",
       ]) {
         assert.isFalse(span.attributes.has(key), `${span.name} carried ${key}`);
@@ -529,10 +658,11 @@ describe("AgentTelemetryRecorder", () => {
     );
     assert.strictEqual(call!.attributes.get("t3.tool.failed_executions"), 1);
 
-    const execution = real().find((span) => span.name === "tool execution command_execution");
+    const execution = real().find((span) => span.name === "execute_tool command_execution");
     assert.isDefined(execution);
     assert.strictEqual(Option.getOrUndefined(execution!.parent)?.spanId, call!.spanId);
-    assert.isFalse(execution!.attributes.has("gen_ai.operation.name"));
+    assert.strictEqual(execution!.attributes.get("gen_ai.operation.name"), "execute_tool");
+    assert.strictEqual(execution!.attributes.get("t3.tool.nested_execution"), true);
     assert.isTrue(Exit.isFailure(endExit(execution!)));
 
     // The model's call and its result share one id in the transcript.
@@ -609,7 +739,7 @@ describe("AgentTelemetryRecorder", () => {
     recorder.handle(codex("turn.completed", 3, { payload: { state: "completed" } }));
     assert.strictEqual(real().filter((span) => span.name.includes("command_execution")).length, 1);
 
-    const execution = real().find((span) => span.name.startsWith("tool execution"));
+    const execution = real().find((span) => span.name === "execute_tool command_execution");
     assert.strictEqual(execution!.attributes.get("t3.tool.status"), "running_when_call_returned");
     assert.isTrue(Exit.isSuccess(endExit(execution!)));
     assert.strictEqual(
@@ -653,7 +783,7 @@ describe("AgentTelemetryRecorder", () => {
         span.name.startsWith("invoke_agent") &&
         span.attributes.get("logfire.span_type") !== "pending_span",
     );
-    assert.notInclude(String(agent!.attributes.get("gen_ai.input.messages")), "failed to send");
+    assert.notInclude(String(agent!.attributes.get("pydantic_ai.all_messages")), "failed to send");
   });
 
   it("keeps a prompt first when it is bound after its turn started", () => {
@@ -700,7 +830,7 @@ describe("AgentTelemetryRecorder", () => {
     recorder.bindTurnInput(noteId, TURN);
 
     const agent = named("invoke_agent")[0]!;
-    assert.include(String(agent.attributes.get("gen_ai.input.messages")), "Quick question");
+    assert.include(String(agent.attributes.get("pydantic_ai.all_messages")), "Quick question");
   });
 
   it("keeps every send noted before its turn started, in order", () => {
@@ -750,8 +880,11 @@ describe("AgentTelemetryRecorder", () => {
     } as ProviderRuntimeEvent);
 
     const [first, second] = named("invoke_agent");
-    assert.notInclude(String(first!.attributes.get("gen_ai.input.messages")), "For the next turn");
-    assert.include(String(second!.attributes.get("gen_ai.input.messages")), "For the next turn");
+    assert.notInclude(
+      String(first!.attributes.get("pydantic_ai.all_messages")),
+      "For the next turn",
+    );
+    assert.include(String(second!.attributes.get("pydantic_ai.all_messages")), "For the next turn");
   });
 
   it("ends a held run when its send fails instead of binding", () => {
@@ -772,7 +905,7 @@ describe("AgentTelemetryRecorder", () => {
     assert.strictEqual(recorder.openRunCount, 0);
     const [agent] = named("invoke_agent");
     assert.strictEqual(agent!.status._tag, "Ended");
-    assert.notInclude(String(agent!.attributes.get("gen_ai.input.messages")), "Never bound");
+    assert.notInclude(String(agent!.attributes.get("pydantic_ai.all_messages")), "Never bound");
   });
 
   it("labels responses after a reroute with the new model", () => {

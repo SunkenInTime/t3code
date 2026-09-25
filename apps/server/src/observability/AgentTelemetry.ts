@@ -32,8 +32,8 @@ import * as Tracer from "effect/Tracer";
 
 const AGENT_NAME_PREFIX = "T3 Code";
 
-const MAX_TEXT_CHARS = 8_000;
-const MAX_JSON_STRING_CHARS = 4_000;
+const MAX_TEXT_CHARS = 32_000;
+const MAX_JSON_STRING_CHARS = 16_000;
 const STREAM_TRUNCATED_MARKER = "… [truncated]";
 /** How long a sent prompt waits for its turn to start before it is dropped. */
 const PENDING_INPUT_TTL_MS = 5 * 60_000;
@@ -128,8 +128,8 @@ interface ToolRun {
   readonly spanName: string;
   /**
    * An execution inside a model tool call that the adapter reported
-   * separately (a Codex `exec` script running shell commands). It is not a
-   * tool call of its own, so it carries no `gen_ai.tool.*` attributes.
+   * separately (a Codex `exec` script running shell or MCP tools). It has
+   * native tool details but is not counted as another direct model call.
    */
   readonly nested: boolean;
   readonly parent: Tracer.AnySpan;
@@ -274,6 +274,17 @@ function sanitizeStructured(value: unknown, depth = 0): unknown {
     out[key] = match ? `[Scrubbed due to '${match[0]}']` : sanitizeStructured(entry, depth + 1);
   }
   return out;
+}
+
+function sanitizeArguments(value: unknown): unknown {
+  if (typeof value === "string") {
+    try {
+      return sanitizeStructured(JSON.parse(value));
+    } catch {
+      // Custom tools such as Codex exec accept code rather than JSON.
+    }
+  }
+  return sanitizeStructured(value);
 }
 
 function toolResultText(value: unknown): string | undefined {
@@ -459,9 +470,7 @@ function readRequestUsage(
 const JSON_SCHEMA_AGENT = JSON.stringify({
   type: "object",
   properties: {
-    "gen_ai.input.messages": { type: "array" },
-    "gen_ai.output.messages": { type: "array" },
-    all_messages_events: { type: "array" },
+    "pydantic_ai.all_messages": { type: "array" },
   },
 });
 const JSON_SCHEMA_CHAT = JSON.stringify({
@@ -577,7 +586,12 @@ export class AgentTelemetryRecorder {
       ]);
     }
     // The first send is the turn's prompt; later ones steer it.
-    this.addUserMessage(run, pending.note, !run.promptRecorded);
+    this.addUserMessage(
+      run,
+      pending.note,
+      !run.promptRecorded,
+      this.heldRuns.get(key)?.atMs ?? this.options.nowMs(),
+    );
     this.releaseHeldRuns(pending.note.threadId);
   }
 
@@ -827,6 +841,11 @@ export class AgentTelemetryRecorder {
         "t3.turn.id": event.turnId,
         "t3.workspace.name": workspaceName,
         "t3.genai.content_captured": this.options.captureContent,
+        "t3.genai.transcript_scope": "observed provider events in this turn",
+        "t3.genai.system_instructions_captured": false,
+        "t3.genai.provider_history_captured": false,
+        "t3.genai.message_character_limit": MAX_TEXT_CHARS,
+        "t3.genai.tool_string_character_limit": MAX_JSON_STRING_CHARS,
         "logfire.json_schema": JSON_SCHEMA_AGENT,
         ...this.options.staticAttributes,
       },
@@ -865,10 +884,10 @@ export class AgentTelemetryRecorder {
       promptRecorded: false,
     };
     this.runs.set(`${event.threadId}:${event.turnId}`, run);
-    notes.forEach((entry, index) => this.addUserMessage(run, entry, index === 0));
+    notes.forEach((entry, index) => this.addUserMessage(run, entry, index === 0, at));
   }
 
-  private addUserMessage(run: AgentRun, note: TurnInputNote, isPrompt: boolean): void {
+  private addUserMessage(run: AgentRun, note: TurnInputNote, isPrompt: boolean, at: number): void {
     if (isPrompt) run.promptRecorded = true;
     const text = note.text ?? "";
     const parts: Array<MessagePart> =
@@ -889,6 +908,38 @@ export class AgentTelemetryRecorder {
       run.transcript.push(message);
       run.newMessages.push(message);
     }
+    this.emitMessage(run, message, at);
+  }
+
+  /** Export completed messages immediately; no span per streamed token. */
+  private emitMessage(run: AgentRun, message: Message, at: number): void {
+    if (!this.options.captureContent || message.parts.length === 0) return;
+    const preview = message.parts
+      .flatMap((part) => (part.type === "text" ? [part.content] : []))
+      .join(" ")
+      .replace(/\s+/gu, " ");
+    const span = this.options.tracer.span({
+      name: `${message.role} message`,
+      parent: Option.some(run.span),
+      annotations: Context.empty(),
+      links: [],
+      startTime: toNanos(at),
+      kind: "internal",
+      root: false,
+      sampled: true,
+    });
+    const key = message.role === "user" ? "gen_ai.input.messages" : "gen_ai.output.messages";
+    span.attribute("logfire.span_type", "log");
+    span.attribute("logfire.level_num", 9);
+    span.attribute(
+      "logfire.msg",
+      `${message.role}: ${preview.length > 160 ? `${preview.slice(0, 160)}…` : preview}`,
+    );
+    span.attribute("logfire.json_schema", JSON_SCHEMA_CHAT);
+    span.attribute(key, JSON.stringify([message]));
+    span.attribute("gen_ai.conversation.id", run.threadId);
+    span.attribute("t3.turn.id", run.turnId);
+    span.end(toNanos(at), Exit.void);
   }
 
   private currentOutput(run: AgentRun, at: number): Message {
@@ -948,7 +999,9 @@ export class AgentTelemetryRecorder {
         run.lastAssistantText = text;
         const output = this.currentOutput(run, at);
         if (this.options.captureContent) {
-          output.parts.push({ type: "text", content: truncateText(text) });
+          const part = { type: "text" as const, content: truncateText(text) };
+          output.parts.push(part);
+          this.emitMessage(run, { role: "assistant", parts: [part] }, at);
         }
       }
       return;
@@ -972,6 +1025,9 @@ export class AgentTelemetryRecorder {
         type: "tool_call",
         id: itemId,
         name: facts.name,
+        ...(this.options.captureContent && facts.arguments !== undefined
+          ? { arguments: sanitizeArguments(facts.arguments) }
+          : {}),
       };
       // While a model tool call is open, an item is one of its executions.
       // With several calls open the owner is ambiguous, so it goes under the
@@ -994,33 +1050,26 @@ export class AgentTelemetryRecorder {
         output.parts.push(call);
       }
       const attributes = new Map<string, unknown>(
-        Object.entries(
-          nested
-            ? {
-                "logfire.msg": `running ${facts.name}`,
-                "t3.tool.name": facts.name,
-                "t3.tool.item_id": itemId,
-                "t3.tool.parent_call_id": owner?.[0],
-                "t3.tool.item_type": payload.itemType,
-                "t3.turn.id": run.turnId,
-              }
-            : {
-                "logfire.msg": `running tool: ${facts.name}`,
-                "gen_ai.operation.name": "execute_tool",
-                "gen_ai.tool.name": facts.name,
-                "gen_ai.tool.call.id": itemId,
-                "gen_ai.agent.name": run.agentName,
-                "gen_ai.conversation.id": run.threadId,
-                "t3.tool.item_type": payload.itemType,
-                "t3.turn.id": run.turnId,
-                "t3.subagent.id": payload.agentId,
-                "logfire.json_schema": JSON_SCHEMA_TOOL,
-              },
-        ).filter(([, value]) => value !== undefined),
+        Object.entries({
+          "logfire.msg": `running tool: ${facts.name}`,
+          "gen_ai.operation.name": "execute_tool",
+          "gen_ai.tool.name": facts.name,
+          "gen_ai.tool.call.id": itemId,
+          "gen_ai.tool.call.arguments":
+            call.arguments === undefined ? undefined : JSON.stringify(call.arguments),
+          "gen_ai.agent.name": run.agentName,
+          "gen_ai.conversation.id": run.threadId,
+          "t3.tool.item_type": payload.itemType,
+          "t3.turn.id": run.turnId,
+          "t3.subagent.id": payload.agentId,
+          "t3.tool.nested_execution": nested,
+          "t3.tool.parent_call_id": owner?.[0],
+          "logfire.json_schema": JSON_SCHEMA_TOOL,
+        }).filter(([, value]) => value !== undefined),
       );
       const newTool: ToolRun = {
         span: undefined,
-        spanName: nested ? `tool execution ${facts.name}` : `execute_tool ${facts.name}`,
+        spanName: `execute_tool ${facts.name}`,
         nested,
         parent,
         attributes,
@@ -1048,13 +1097,9 @@ export class AgentTelemetryRecorder {
     }
     const tool = run.tools.get(itemId)!;
     if (facts.arguments !== undefined && this.options.captureContent) {
-      const args = sanitizeStructured(facts.arguments);
+      const args = sanitizeArguments(facts.arguments);
       tool.call.arguments = args;
-      setToolAttribute(
-        tool,
-        tool.nested ? "t3.tool.arguments" : "gen_ai.tool.call.arguments",
-        JSON.stringify(args),
-      );
+      setToolAttribute(tool, "gen_ai.tool.call.arguments", JSON.stringify(args));
     }
     if (event.type !== "item.completed") return;
 
@@ -1068,11 +1113,7 @@ export class AgentTelemetryRecorder {
           ? undefined
           : sanitizeStructured(facts.result);
     if (this.options.captureContent && result !== undefined) {
-      setToolAttribute(
-        tool,
-        tool.nested ? "t3.tool.result" : "gen_ai.tool.call.result",
-        typeof result === "string" ? result : JSON.stringify(result),
-      );
+      setToolAttribute(tool, "gen_ai.tool.call.result", JSON.stringify(result));
     }
     setToolAttribute(tool, "t3.tool.status", status);
     if (facts.providerDurationMs !== undefined) {
@@ -1193,7 +1234,7 @@ export class AgentTelemetryRecorder {
     if (run.modelCalls.has(callId)) return;
     const args =
       event.payload.arguments !== undefined && this.options.captureContent
-        ? sanitizeStructured(event.payload.arguments)
+        ? sanitizeArguments(event.payload.arguments)
         : undefined;
     const span = this.startSpan(`execute_tool ${name}`, run.span, at, {
       "logfire.msg": `running tool: ${name}`,
@@ -1202,8 +1243,7 @@ export class AgentTelemetryRecorder {
       "gen_ai.tool.call.id": callId,
       "gen_ai.agent.name": run.agentName,
       "gen_ai.conversation.id": run.threadId,
-      "gen_ai.tool.call.arguments":
-        args === undefined ? undefined : typeof args === "string" ? args : JSON.stringify(args),
+      "gen_ai.tool.call.arguments": args === undefined ? undefined : JSON.stringify(args),
       "t3.turn.id": run.turnId,
       "logfire.json_schema": JSON_SCHEMA_TOOL,
     });
@@ -1245,10 +1285,7 @@ export class AgentTelemetryRecorder {
           ? truncateText(toolResult.output)
           : sanitizeStructured(toolResult.output);
     if (this.options.captureContent && result !== undefined) {
-      call.span.attribute(
-        "gen_ai.tool.call.result",
-        typeof result === "string" ? result : JSON.stringify(result),
-      );
+      call.span.attribute("gen_ai.tool.call.result", JSON.stringify(result));
       const response: Message = {
         role: "user",
         parts: [{ type: "tool_call_response", id: toolResult.id, name: call.name, result }],
@@ -1581,22 +1618,9 @@ export class AgentTelemetryRecorder {
     const responseModels = details.modelUsage ? Object.keys(details.modelUsage) : [];
     if (responseModels.length > 0) span.attribute("gen_ai.response.model", responseModels[0]);
     if (this.options.captureContent) {
-      const inputs = run.transcript.filter((message) => message.role === "user");
-      span.attribute("gen_ai.input.messages", JSON.stringify(inputs.slice(0, 1)));
-      span.attribute(
-        "gen_ai.output.messages",
-        JSON.stringify(
-          run.lastAssistantText
-            ? [
-                {
-                  role: "assistant",
-                  parts: [{ type: "text", content: truncateText(run.lastAssistantText) }],
-                },
-              ]
-            : [],
-        ),
-      );
-      span.attribute("all_messages_events", JSON.stringify(run.transcript));
+      // Logfire prefers gen_ai.input/output.messages when present. Those belong
+      // on model spans; a first/last summary here hides the intervening conversation.
+      span.attribute("pydantic_ai.all_messages", JSON.stringify(run.transcript));
       if (run.lastAssistantText)
         span.attribute("final_result", truncateText(run.lastAssistantText));
     }

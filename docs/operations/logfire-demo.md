@@ -41,10 +41,15 @@ Start a new Codex or Claude thread in T3 Code and send:
 > Run `git status --short --branch`, then read `package.json` and summarize the
 > available development commands. Do not modify files.
 
-Watch Logfire Live or Agents. Expect an agent run with model responses and tool
-calls beneath it. Long operations appear before they finish. A fresh Codex thread
+Watch Logfire Live or Agents. Open the agent's **Agent Run** tab for its observed
+conversation, including intermediate replies and tool calls. Prompts and completed
+assistant messages also appear in Live while the agent is running. MCP calls inside
+Codex's `exec` wrapper are nested tools with native argument and result fields.
+Long operations appear before they finish. A fresh Codex thread
 provides the richest model/tool detail; resumed Codex threads have less timing
-information. See [Agent runs](observability.md#agent-runs-genai-spans).
+information. Captured messages cover the current turn, not the provider's hidden
+system instructions or full request history. Text is capped at 32,000 characters
+per message and 16,000 per structured tool string; truncated values are marked.
 
 The view is empty while idle. Old background records already in the Logfire project
 remain in history; move the time range past the restart or use a fresh project.
