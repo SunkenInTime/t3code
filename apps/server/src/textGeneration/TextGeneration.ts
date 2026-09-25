@@ -60,6 +60,9 @@ export interface BranchNameGenerationResult {
 }
 
 export interface ThreadTitleGenerationInput {
+  context?: ReturnType<
+    typeof import("./ThreadTitleContext.ts").formatThreadTitleContext
+  >["context"];
   threadId?: string | undefined;
   requestId?: string | undefined;
   linkedContext?: string | undefined;

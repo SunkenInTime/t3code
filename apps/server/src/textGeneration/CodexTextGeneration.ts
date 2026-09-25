@@ -163,6 +163,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     prompt,
     outputSchemaJson,
     onRawOutput,
+    telemetry,
     imagePaths = [],
     cleanupPaths = [],
     modelSelection,
@@ -176,6 +177,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     prompt: string;
     outputSchemaJson: S;
     onRawOutput?: ((raw: string) => void) | undefined;
+    telemetry?: ReturnType<typeof startThreadTitleTelemetry> | undefined;
     imagePaths?: ReadonlyArray<string>;
     cleanupPaths?: ReadonlyArray<string>;
     modelSelection: ModelSelection;
@@ -201,10 +203,12 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         getModelSelectionStringOptionValue(modelSelection, "reasoningEffort") ??
         DEFAULT_TEXT_GENERATION_REASONING_EFFORT;
       const serviceTier = getCodexServiceTierOptionValue(modelSelection);
+      telemetry?.providerStarted({ model, reasoningEffort });
       const spawnCommand = yield* resolveSpawnCommand(
         codexConfig.binaryPath || "codex",
         [
           "exec",
+          ...(telemetry ? ["--json"] : []),
           ...codexExecLaunchArgs(launchArgs),
           "--ephemeral",
           "--skip-git-repo-check",
@@ -246,7 +250,20 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
 
       const [stdout, stderr, exitCode] = yield* Effect.all(
         [
-          readStreamAsString(operation, child.stdout),
+          telemetry
+            ? child.stdout.pipe(
+                Stream.decodeText(),
+                Stream.splitLines,
+                Stream.tap((line) => Effect.sync(() => telemetry.event(line))),
+                Stream.runFold(
+                  () => "",
+                  (tail, line) => `${tail}\n${line}`.slice(-8_000),
+                ),
+                Effect.mapError((cause) =>
+                  normalizeCliError("codex", operation, cause, "Failed to read Codex events"),
+                ),
+              )
+            : readStreamAsString(operation, child.stdout),
           readStreamAsString(operation, child.stderr),
           child.exitCode.pipe(
             Effect.mapError((cause) =>
@@ -429,7 +446,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         previousTitle: input.previousTitle,
         linkedContext: input.linkedContext,
         attachments: input.attachments,
-        instructionsOverride,
+        instructionsOverride: instructionsOverride?.trim() || undefined,
       });
       const telemetry = startThreadTitleTelemetry({
         tracer: titleTracer,
@@ -438,6 +455,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           resolvedEnvironment.OTEL_INSTRUMENTATION_GENAI_CAPTURE_MESSAGE_CONTENT === "true",
         model: input.modelSelection.model,
         prompt,
+        promptSource: instructionsOverride?.trim() ? "override" : "builtin",
+        conversation: input.message,
+        context: input.context,
         threadId: input.threadId,
         requestId: input.requestId,
       });
@@ -447,6 +467,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         prompt,
         outputSchemaJson: outputSchema,
         onRawOutput: telemetry.rawOutput,
+        telemetry: titleTracer ? telemetry : undefined,
         imagePaths,
         modelSelection: input.modelSelection,
       }).pipe(

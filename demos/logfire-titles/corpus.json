@@ -20,7 +20,7 @@
         "text": "Great, open the PR."
       }
     ],
-    "baseline_title": "Open the PR"
+    "baseline_title": "Prevent Duplicate Photo Uploads on Reconnect"
   },
   {
     "id": "android-pairing",
@@ -43,7 +43,7 @@
         "text": "Looks good. Open the PR."
       }
     ],
-    "baseline_title": "Open the PR"
+    "baseline_title": "Refresh Expired Android Pairing Tokens"
   },
   {
     "id": "offline-search",
@@ -63,15 +63,12 @@
         "text": "Ship it. Open the PR."
       }
     ],
-    "baseline_title": "Open the PR"
+    "baseline_title": "Search Saved Notes Offline"
   },
   {
     "id": "modal-focus",
     "previous_title": "Restore screen reader modal focus",
-    "subject_groups": [
-      ["focus", "screen reader", "accessib"],
-      ["modal", "dialog"]
-    ],
+    "subject_groups": [["focus", "screen reader", "accessib"]],
     "messages": [
       {
         "role": "user",
@@ -86,15 +83,12 @@
         "text": "Nice. Open a PR for this."
       }
     ],
-    "baseline_title": "Open a PR for the focus fix"
+    "baseline_title": "Restore Settings Dialog Focus"
   },
   {
     "id": "chat-scroll",
     "previous_title": "Keep chat scroll position",
-    "subject_groups": [
-      ["scroll", "jump", "auto-scroll", "autoscroll"],
-      ["chat", "manual", "position", "jump", "history"]
-    ],
+    "subject_groups": [["scroll", "jump"]],
     "messages": [
       {
         "role": "user",
@@ -109,7 +103,7 @@
         "text": "Okay, keep going."
       }
     ],
-    "baseline_title": "Continue chat auto-scroll fix"
+    "baseline_title": "Keep Chat Scroll Position"
   },
   {
     "id": "notification-sync",
@@ -129,7 +123,7 @@
         "text": "Run the remaining tests."
       }
     ],
-    "baseline_title": "Run remaining tests"
+    "baseline_title": "Sync Notification Preferences Across Devices"
   },
   {
     "id": "ci-workflow",
@@ -152,7 +146,7 @@
         "text": "Finish fixing the flaky PR checks and rerun CI."
       }
     ],
-    "baseline_title": "Rerun CI for Current Head"
+    "baseline_title": "Tie PR Checks to Current Head SHA"
   },
   {
     "id": "explicit-pivot",
@@ -172,6 +166,126 @@
         "text": "New task: forget the search polish. Add a cancel button for long-running CSV exports; cancelling must stop the export job, not just hide its progress."
       }
     ],
-    "baseline_title": "Add CSV export cancellation"
+    "baseline_title": "Add CSV Export Cancellation"
+  },
+  {
+    "id": "long-pivot-export",
+    "previous_title": "Polish search input styles",
+    "subject_groups": [["export"], ["cancel"]],
+    "messages": [
+      {
+        "role": "user",
+        "text": "Polish the search input spacing and keyboard focus outline."
+      },
+      {
+        "role": "assistant",
+        "text": "The change is implemented and the focused regression passes."
+      },
+      {
+        "role": "user",
+        "text": "That is done. New task: add cancellation for CSV exports. The cancel button must stop the export job itself, not just hide the progress bar."
+      },
+      {
+        "role": "assistant",
+        "text": "I will implement the new request, then validate the state transition and the interrupted operation."
+      },
+      {
+        "role": "user",
+        "text": "Here is the output from attempt 1. Keep the behavior we agreed on and work through the remaining validation failures.\n\n```text\n  test 001: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 002: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 003: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 004: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 005: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 006: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 007: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 008: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 009: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 010: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 011: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 012: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 013: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 014: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 015: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\n  test 016: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=35ms\n  test 017: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=36ms\n  test 018: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 019: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 020: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 021: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 022: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 023: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 024: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 025: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 026: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 027: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 028: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 029: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 030: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 031: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 032: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\nFAIL lifecycle.test.ts > pending operation > releases resources\nAssertionError: expected active handles 0, received 1\n```\nFix the remaining failure and rerun the focused tests."
+      },
+      {
+        "role": "assistant",
+        "text": "The active handle belongs to a deferred cleanup callback. I am adjusting the cancellation boundary and checking the restart path."
+      },
+      {
+        "role": "user",
+        "text": "Here is the output from attempt 2. Keep the behavior we agreed on and work through the remaining validation failures.\n\n```text\n  test 001: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 002: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 003: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 004: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 005: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 006: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 007: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 008: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 009: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 010: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 011: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 012: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 013: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 014: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 015: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\n  test 016: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=35ms\n  test 017: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=36ms\n  test 018: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 019: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 020: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 021: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 022: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 023: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 024: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 025: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 026: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 027: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 028: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 029: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 030: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 031: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 032: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\nFAIL lifecycle.test.ts > pending operation > releases resources\nAssertionError: expected active handles 0, received 1\n```\nFix the remaining failure and rerun the focused tests."
+      },
+      {
+        "role": "assistant",
+        "text": "The active handle belongs to a deferred cleanup callback. I am adjusting the cancellation boundary and checking the restart path."
+      },
+      {
+        "role": "user",
+        "text": "Here is the output from attempt 3. Keep the behavior we agreed on and work through the remaining validation failures.\n\n```text\n  test 001: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 002: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 003: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 004: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 005: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 006: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 007: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 008: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 009: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 010: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 011: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 012: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 013: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 014: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 015: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\n  test 016: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=35ms\n  test 017: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=36ms\n  test 018: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 019: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 020: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 021: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 022: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 023: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 024: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 025: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 026: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 027: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 028: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 029: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 030: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 031: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 032: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\nFAIL lifecycle.test.ts > pending operation > releases resources\nAssertionError: expected active handles 0, received 1\n```\nFix the remaining failure and rerun the focused tests."
+      },
+      {
+        "role": "assistant",
+        "text": "The active handle belongs to a deferred cleanup callback. I am adjusting the cancellation boundary and checking the restart path."
+      },
+      {
+        "role": "user",
+        "text": "Here is the output from attempt 4. Keep the behavior we agreed on and work through the remaining validation failures.\n\n```text\n  test 001: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 002: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 003: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 004: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 005: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 006: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 007: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 008: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 009: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 010: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 011: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 012: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 013: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 014: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 015: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\n  test 016: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=35ms\n  test 017: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=36ms\n  test 018: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 019: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 020: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 021: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 022: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 023: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 024: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 025: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 026: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 027: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 028: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 029: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 030: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 031: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 032: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\nFAIL lifecycle.test.ts > pending operation > releases resources\nAssertionError: expected active handles 0, received 1\n```\nFix the remaining failure and rerun the focused tests."
+      },
+      {
+        "role": "assistant",
+        "text": "The active handle belongs to a deferred cleanup callback. I am adjusting the cancellation boundary and checking the restart path."
+      },
+      {
+        "role": "user",
+        "text": "Looks good. Open the PR."
+      }
+    ],
+    "baseline_title": "Fix Deferred Cleanup Handle Leak"
+  },
+  {
+    "id": "long-pivot-notifications",
+    "previous_title": "Refresh expired pairing tokens",
+    "subject_groups": [["notification"], ["sync", "preference", "setting"]],
+    "messages": [
+      {
+        "role": "user",
+        "text": "Fix pairing when the Android QR code expires."
+      },
+      {
+        "role": "assistant",
+        "text": "The change is implemented and the focused regression passes."
+      },
+      {
+        "role": "user",
+        "text": "Pairing is sorted. Switch to notification preferences: changes on desktop must sync to mobile. Include turning notifications back on."
+      },
+      {
+        "role": "assistant",
+        "text": "I will implement the new request, then validate the state transition and the interrupted operation."
+      },
+      {
+        "role": "user",
+        "text": "Here is the output from attempt 1. Keep the behavior we agreed on and work through the remaining validation failures.\n\n```text\n  test 001: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 002: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 003: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 004: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 005: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 006: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 007: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 008: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 009: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 010: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 011: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 012: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 013: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 014: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 015: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\n  test 016: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=35ms\n  test 017: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=36ms\n  test 018: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 019: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 020: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 021: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 022: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 023: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 024: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 025: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 026: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 027: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 028: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 029: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 030: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 031: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 032: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\nFAIL lifecycle.test.ts > pending operation > releases resources\nAssertionError: expected active handles 0, received 1\n```\nFix the remaining failure and rerun the focused tests."
+      },
+      {
+        "role": "assistant",
+        "text": "The active handle belongs to a deferred cleanup callback. I am adjusting the cancellation boundary and checking the restart path."
+      },
+      {
+        "role": "user",
+        "text": "Here is the output from attempt 2. Keep the behavior we agreed on and work through the remaining validation failures.\n\n```text\n  test 001: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 002: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 003: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 004: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 005: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 006: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 007: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 008: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 009: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 010: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 011: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 012: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 013: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 014: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 015: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\n  test 016: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=35ms\n  test 017: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=36ms\n  test 018: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 019: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 020: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 021: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 022: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 023: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 024: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 025: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 026: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 027: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 028: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 029: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 030: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 031: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 032: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\nFAIL lifecycle.test.ts > pending operation > releases resources\nAssertionError: expected active handles 0, received 1\n```\nFix the remaining failure and rerun the focused tests."
+      },
+      {
+        "role": "assistant",
+        "text": "The active handle belongs to a deferred cleanup callback. I am adjusting the cancellation boundary and checking the restart path."
+      },
+      {
+        "role": "user",
+        "text": "Here is the output from attempt 3. Keep the behavior we agreed on and work through the remaining validation failures.\n\n```text\n  test 001: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 002: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 003: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 004: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 005: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 006: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 007: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 008: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 009: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 010: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 011: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 012: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 013: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 014: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 015: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\n  test 016: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=35ms\n  test 017: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=36ms\n  test 018: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 019: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 020: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 021: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 022: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 023: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 024: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 025: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 026: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 027: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 028: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 029: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 030: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 031: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 032: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\nFAIL lifecycle.test.ts > pending operation > releases resources\nAssertionError: expected active handles 0, received 1\n```\nFix the remaining failure and rerun the focused tests."
+      },
+      {
+        "role": "assistant",
+        "text": "The active handle belongs to a deferred cleanup callback. I am adjusting the cancellation boundary and checking the restart path."
+      },
+      {
+        "role": "user",
+        "text": "Here is the output from attempt 4. Keep the behavior we agreed on and work through the remaining validation failures.\n\n```text\n  test 001: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 002: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 003: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 004: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 005: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 006: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 007: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 008: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 009: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 010: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 011: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 012: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 013: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 014: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 015: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\n  test 016: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=35ms\n  test 017: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=36ms\n  test 018: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=20ms\n  test 019: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=21ms\n  test 020: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=22ms\n  test 021: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=23ms\n  test 022: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=24ms\n  test 023: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=25ms\n  test 024: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=26ms\n  test 025: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=27ms\n  test 026: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=28ms\n  test 027: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=29ms\n  test 028: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=30ms\n  test 029: worker=0 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=31ms\n  test 030: worker=1 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=32ms\n  test 031: worker=2 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=33ms\n  test 032: worker=3 state=running -> stopped; expected cleanup=1 observed cleanup=1 elapsed=34ms\nFAIL lifecycle.test.ts > pending operation > releases resources\nAssertionError: expected active handles 0, received 1\n```\nFix the remaining failure and rerun the focused tests."
+      },
+      {
+        "role": "assistant",
+        "text": "The active handle belongs to a deferred cleanup callback. I am adjusting the cancellation boundary and checking the restart path."
+      },
+      {
+        "role": "user",
+        "text": "Looks good. Open the PR."
+      }
+    ],
+    "baseline_title": "Fix Pending Operation Cleanup Lifecycle"
   }
 ]

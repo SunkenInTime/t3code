@@ -19,6 +19,7 @@ import { makeCodexTextGeneration } from "./CodexTextGeneration.ts";
 import { writeFakeCli } from "../testUtils/fakeCli.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 const encodeTestJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeTestJson = Schema.decodeEffect(Schema.fromJsonString(Schema.Unknown));
 
 const DEFAULT_TEST_MODEL_SELECTION = createModelSelection(
   ProviderInstanceId.make("codex"),
@@ -33,6 +34,7 @@ interface FakeCodexInput {
   output: string;
   exitCode?: number;
   stderr?: string;
+  events?: ReadonlyArray<unknown>;
   requireImage?: boolean;
   requireServiceTier?: string;
   requireReasoningEffort?: string;
@@ -58,6 +60,7 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
     stdinMustContain: input.stdinMustContain ?? null,
     stdinMustNotContain: input.stdinMustNotContain ?? null,
     stderr: input.stderr ?? null,
+    events: input.events ?? [],
     output: input.output,
     exitCode: input.exitCode ?? 0,
   });
@@ -126,6 +129,7 @@ function makeFakeCodexBinary(dir: string, input: FakeCodexInput) {
         "}",
         'if (check.stderr !== null) process.stderr.write(check.stderr + "\\n");',
         'if (outputPath !== null) NodeFS.writeFileSync(outputPath, check.output + "\\n");',
+        'for (const event of check.events) process.stdout.write(JSON.stringify(event) + "\\n");',
         "process.exitCode = check.exitCode;",
         "",
       ].join("\n"),
@@ -421,6 +425,8 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
       yield* withFakeCodexEnv(
         {
           output: raw,
+          requireArg: "--json",
+          events: [{ type: "turn.completed", usage: { input_tokens: 120, output_tokens: 12 } }],
           stdinMustNotContain: "Determine the title in this order",
           environment: {
             ...process.env,
@@ -445,17 +451,23 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             yield* generator.generateThreadTitle(input);
           }),
       ).pipe(Effect.provideService(AgentTraceExporter, tracer));
-      expect(spans).toHaveLength(2);
-      expect(spans[0]!.attributes.get("gen_ai.input.messages")).toMatchObject([
+      expect(spans).toHaveLength(4);
+      expect(
+        yield* decodeTestJson(String(spans[0]!.attributes.get("gen_ai.input.messages"))),
+      ).toMatchObject([
         { parts: [{ content: expect.stringContaining("First demo instructions") }] },
       ]);
-      expect(spans[1]!.attributes.get("gen_ai.input.messages")).toMatchObject([
+      expect(
+        yield* decodeTestJson(String(spans[2]!.attributes.get("gen_ai.input.messages"))),
+      ).toMatchObject([
         { parts: [{ content: expect.stringContaining("Second demo instructions") }] },
       ]);
       expect(spans[0]!.attributes.get("t3.title.raw_output")).toBe(raw + "\n");
       expect(spans[0]!.attributes.get("t3.title.final")).toBe("Fix reconnect handling");
       expect(spans[0]!.attributes.get("t3.thread.id")).toBe("demo-thread");
       expect(spans[0]!.attributes.get("t3.request.id")).toBe("demo-request");
+      expect(spans[1]!.attributes.get("gen_ai.aggregated_usage.input_tokens")).toBe(120);
+      expect(spans[0]!.attributes.get("t3.title.provider_events_complete")).toBe(true);
     }).pipe(Effect.scoped),
   );
 
@@ -486,7 +498,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             })
             .pipe(Effect.result);
           expect(Result.isFailure(result)).toBe(true);
-          expect(spans).toHaveLength(1);
+          expect(spans).toHaveLength(2);
           expect(spans[0]!.status._tag).toBe("Ended");
           expect(spans[0]!.attributes.get("t3.title.succeeded")).toBe(false);
           expect(spans[0]!.attributes.has("t3.title.raw_output")).toBe(false);

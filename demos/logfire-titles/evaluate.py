@@ -11,6 +11,7 @@ import hashlib
 import json
 from pathlib import Path
 import subprocess
+import uuid
 from urllib.parse import quote
 
 import logfire
@@ -56,7 +57,12 @@ async def main(args):
     result = {
         "run_id": run_id, "created_at": datetime.now(timezone.utc).isoformat(),
         "model": "gpt-6-luna", "reasoning_effort": "low", "repeat": args.repeat,
-        "prompt_sha256": hashlib.sha256((DEMO / "title-prompt.txt").read_bytes()).hexdigest(),
+        "prompt_source": "override" if (DEMO / "title-prompt.txt").read_text().strip() else "builtin",
+        "source_sha256": {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in [
+            "demos/logfire-titles/title-prompt.txt",
+            "apps/server/src/textGeneration/TextGenerationPrompts.ts",
+            "apps/server/src/textGeneration/ThreadTitleContext.ts",
+        ]},
         "corpus_sha256": hashlib.sha256(json.dumps([
             {key: case[key] for key in ("id", "messages", "subject_groups")} for case in corpus
         ], sort_keys=True).encode()).hexdigest(),
@@ -72,8 +78,15 @@ async def main(args):
     save()
 
     async def generate(case):
+        request_id = str(uuid.uuid4())
+        with logfire.span("T3 title case {case_id}", case_id=case["id"], run_id=run_id, **{
+            "t3.request.id": request_id, "t3.thread.id": "logfire-title-" + case["id"],
+        }):
+            return await generate_case(case, request_id)
+
+    async def generate_case(case, request_id):
         process = await asyncio.create_subprocess_exec(
-            "node", "apps/server/scripts/logfire-title-demo.mjs", "generate", case["id"],
+            "node", "apps/server/scripts/logfire-title-demo.mjs", "generate", case["id"], request_id,
             cwd=ROOT, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         try:
@@ -88,14 +101,16 @@ async def main(args):
         output["checks"] = checks(case, output["title"])
         result["cases"].append(output)
         save()
-        logfire.info("T3 title evaluated", **output, prompt_sha256=result["prompt_sha256"])
+        logfire.info("T3 title evaluated", **output, run_id=run_id, expected_subject_groups=case["subject_groups"],
+                     prompt_source=result["prompt_source"], source_sha256=result["source_sha256"],
+                     **{"t3.request.id": request_id, "t3.thread.id": output["thread_id"]})
         print(f'{case["id"]}: {output["title"]} | subject={output["checks"]["identifies_subject"]}', flush=True)
         return output
 
-    dataset_name = "T3 sidebar titles"
+    dataset_name = "T3 title pipeline"
     dataset = Dataset(name=dataset_name, cases=[Case(name=case["id"], inputs=case) for case in corpus], evaluators=[TitleQuality()])
     report = await dataset.evaluate(generate, name=run_id, repeat=args.repeat, max_concurrency=1, progress=False, task_name="generate_chat_title",
-                                    metadata={"prompt_sha256": result["prompt_sha256"], "model": "gpt-6-luna"})
+                                    metadata={"prompt_source": result["prompt_source"], "source_sha256": result["source_sha256"], "model": "gpt-6-luna", "corpus_sha256": result["corpus_sha256"]})
     report.print(include_input=False, include_output=False)
     url = logfire.url_from_eval(report)
     if url:

@@ -54,7 +54,7 @@ const dispatch = (command) =>
 const corpus = JSON.parse(
   await NodeFSP.readFile(`${root}demos/logfire-titles/corpus.json`, "utf8"),
 );
-const [action, caseId] = process.argv.slice(2);
+const [action, caseId, suppliedRequestId] = process.argv.slice(2);
 
 const protocol = RpcClient.layerProtocolSocket().pipe(
   Layer.provide(
@@ -93,42 +93,32 @@ if (action === "reset") {
     JSON.stringify(shell.threads.filter((thread) => thread.projectId === "logfire-title-demo")),
   );
 } else if (action === "investigate") {
+  const runDirectory = `${root}.t3/title-evals`;
+  const runs = await Promise.all(
+    (await NodeFSP.readdir(runDirectory)).map(async (name) => {
+      try {
+        return JSON.parse(await NodeFSP.readFile(`${runDirectory}/${name}/results.json`, "utf8"));
+      } catch {
+        return undefined;
+      }
+    }),
+  );
+  const latestRun = runs
+    .filter((run) => run?.source_sha256 && run.total === corpus.length && run.task_errors === 0)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
+  if (!latestRun)
+    throw new Error("Run uv run demos/logfire-titles/evaluate.py --name baseline first.");
   const threadId = NodeCrypto.randomUUID();
-  const modelSelection = {
-    instanceId: "codex",
-    model: "gpt-6-astra",
-    options: [{ id: "reasoningEffort", value: "medium" }],
-  };
   const prompt =
     (await NodeFSP.readFile(`${root}demos/logfire-titles/investigate.md`, "utf8")) +
-    `\n\nThis run's T3_DEMO_ORIGIN=${origin}. Logfire project: ${process.env.T3_DEMO_LOGFIRE_PROJECT ?? "use the authenticated project"}. Run name: repair-${threadId.slice(0, 8)}.`;
-  await dispatch({
-    type: "thread.create",
-    threadId,
-    projectId: "logfire-title-demo",
-    title: "Diagnose titles with Logfire",
-    modelSelection,
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    branch: null,
-    worktreePath: null,
-    createdAt: new Date().toISOString(),
-  });
-  await dispatch({
-    type: "thread.turn.start",
-    threadId,
-    message: { messageId: NodeCrypto.randomUUID(), role: "user", text: prompt, attachments: [] },
-    modelSelection,
-    runtimeMode: "full-access",
-    interactionMode: "default",
-    createdAt: new Date().toISOString(),
-  });
-  const { environmentId } = await request("/.well-known/t3/environment");
+    `\n\nThis run's T3_DEMO_ORIGIN=${origin}. Logfire project: ${process.env.T3_DEMO_LOGFIRE_PROJECT ?? "use the authenticated project"}. Dataset: T3 title pipeline. Baseline: ${latestRun.run_id}, beginning ${latestRun.created_at}. Baseline evaluation: ${latestRun.eval_url}. Candidate run name: repair-${threadId.slice(0, 8)}.`;
+  // Keep the investigator on the installed T3 host: editing demo server code
+  // restarts this development server and would otherwise kill its own agent.
   console.log(
-    JSON.stringify({
-      threadId,
-      url: `${connection.webOrigin ?? origin}/${environmentId}/${threadId}`,
-    }),
+    prompt +
+      "\n\nWorkspace: " +
+      root +
+      "\nRun this investigation in a fresh Astra Medium thread on your regular T3 Code host, with this checkout open. Keep the demo web app beside it; the demo server may restart during a code fix.",
   );
 } else if (action === "wait") {
   const threadId = caseId;
@@ -167,8 +157,10 @@ if (action === "reset") {
   const item = corpus.find((item) => item.id === caseId);
   if (!item) throw new Error(`Unknown corpus case ${caseId}`);
   const threadId = `logfire-title-${item.id}`;
-  const requestId = NodeCrypto.randomUUID();
-  await dispatch({ type: "thread.meta.update", threadId, title: "New thread" });
+  const requestId = suppliedRequestId ?? NodeCrypto.randomUUID();
+  if (!/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(requestId))
+    throw new Error("Request ID must be a UUID.");
+  await dispatch({ type: "thread.meta.update", threadId, title: item.previous_title });
   const result = await Effect.runPromise(
     Effect.scoped(
       Effect.gen(function* () {
