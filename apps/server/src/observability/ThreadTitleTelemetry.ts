@@ -149,7 +149,8 @@ export function startThreadTitleTelemetry(input: {
       "t3.title.supplied_prompt_characters": input.prompt.length,
       "t3.title.context_truncated":
         input.prompt.includes("[Earlier content truncated]") ||
-        input.prompt.includes("[Content truncated]"),
+        input.prompt.includes("[Content truncated]") ||
+        input.prompt.includes("[truncated]"),
       "t3.title.source_message_count":
         input.context?.sourceMessageCount ?? (input.conversation === undefined ? undefined : 1),
       "t3.title.retained_message_count": input.context?.retainedMessageCount,
