@@ -456,6 +456,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         model: input.modelSelection.model,
         prompt,
         promptSource: instructionsOverride?.trim() ? "override" : "builtin",
+        generationMode: input.previousTitle === undefined ? "initial" : "regenerate",
         conversation: input.message,
         context: input.context,
         threadId: input.threadId,

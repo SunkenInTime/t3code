@@ -8,7 +8,6 @@
  */
 import * as Schema from "effect/Schema";
 import * as Effect from "effect/Effect";
-import { limitTitleMessage } from "./ThreadTitleContext.ts";
 import type { ChatAttachment } from "@t3tools/contracts";
 
 import { limitSection } from "./TextGenerationUtils.ts";
@@ -322,7 +321,7 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput) {
         : `\nThe previous title was ${JSON.stringify(input.previousTitle)}.`;
     prompt = `${input.instructionsOverride}${previous}\nReturn JSON with keys title and needsRefinement.\n\nThread contents:\n${input.message}${threadTitlePromptSuffix(input)}`;
   } else if (input.previousTitle === undefined) {
-    const message = limitTitleMessage(input.message, 8_000);
+    const message = preserveMessageEnd(input.message);
     prompt = `${INITIAL_THREAD_TITLE_PROMPT}\n\nUser message:\n${message}${threadTitlePromptSuffix(input)}`;
   } else {
     const message = preserveMessageEnd(input.message);

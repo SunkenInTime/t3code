@@ -76,6 +76,7 @@ export function startThreadTitleTelemetry(input: {
   nowMs: () => number;
   prompt: string;
   promptSource?: string;
+  generationMode?: "initial" | "regenerate";
   conversation?: string;
   context?: ThreadTitleGenerationInput["context"];
   threadId?: string | undefined;
@@ -144,10 +145,13 @@ export function startThreadTitleTelemetry(input: {
       "gen_ai.conversation.id": input.threadId,
       "t3.title.prompt_sha256": NodeCrypto.createHash("sha256").update(input.prompt).digest("hex"),
       "t3.title.prompt_source": input.promptSource ?? "unknown",
+      "t3.title.generation_mode": input.generationMode,
       "t3.title.supplied_prompt_characters": input.prompt.length,
       "t3.title.context_truncated":
-        input.conversation?.includes("[Earlier content truncated]") ?? false,
-      "t3.title.source_message_count": input.context?.sourceMessageCount,
+        input.prompt.includes("[Earlier content truncated]") ||
+        input.prompt.includes("[Content truncated]"),
+      "t3.title.source_message_count":
+        input.context?.sourceMessageCount ?? (input.conversation === undefined ? undefined : 1),
       "t3.title.retained_message_count": input.context?.retainedMessageCount,
       "t3.title.dropped_message_indices": input.context?.droppedMessageIndices,
       "t3.title.truncated_message_indices": input.context?.truncatedMessageIndices,
@@ -157,7 +161,11 @@ export function startThreadTitleTelemetry(input: {
       { role: "user", parts: [{ type: "text", content: input.prompt }] },
     ]);
     // Bound diagnostic history separately from the actual supplied model input.
-    const source = input.context?.sourceMessages;
+    const source =
+      input.context?.sourceMessages ??
+      (input.conversation === undefined
+        ? undefined
+        : [{ index: 0, role: "user", text: input.conversation }]);
     if (source) {
       let budget = 64_000;
       const captured = source.flatMap((message) => {

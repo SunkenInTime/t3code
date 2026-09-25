@@ -14,7 +14,10 @@ const home = `${workspace}/.t3`;
 const origin = "http://127.0.0.1:14242";
 const webOrigin = "http://localhost:6202";
 const projectId = "logfire-title-demo";
-const investigatorId = "logfire-title-investigation";
+const previousRecording = await NodeFSP.readFile(`${workspace}/recording.json`, "utf8")
+  .then(JSON.parse)
+  .catch(() => null);
+const investigatorId = previousRecording?.investigatorId ?? "logfire-title-investigation";
 const modelSelection = {
   instanceId: "codex",
   model: "gpt-6-astra",
@@ -162,7 +165,7 @@ try {
   );
   console.log(`Recording desktop ready: ${url}`);
   console.log(
-    "Paste: These thread titles are bad. Can you use Logfire to figure out why and fix it?",
+    `Paste: ${(await NodeFSP.readFile(`${root}demos/logfire-titles/investigate.md`, "utf8")).trim()}`,
   );
 } catch (error) {
   stop();

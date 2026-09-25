@@ -45,6 +45,35 @@ describe("thread title telemetry", () => {
     expect(span.attributes.has("gen_ai.input.messages")).toBe(false);
     expect(span.status._tag).toBe("Ended");
   });
+
+  it("captures the original first message separately from a truncated supplied prompt", () => {
+    const spans: Array<Tracer.NativeSpan> = [];
+    const recorder = startThreadTitleTelemetry({
+      tracer: Tracer.make({
+        span: (options) => {
+          const span = new Tracer.NativeSpan(options);
+          spans.push(span);
+          return span;
+        },
+      }),
+      captureContent: true,
+      nowMs: () => 1000,
+      model: "gpt-6-luna",
+      conversation: "Implement offline search. Background label-color logs follow.",
+      prompt: "User message: [Earlier content truncated]\nLabelPalette color=gray",
+    });
+    recorder.finish({ title: "Fix Label Colors" });
+    const root = spans[0]!;
+    expect(root.attributes.get("t3.title.context_truncated")).toBe(true);
+    expect(JSON.parse(String(root.attributes.get("t3.title.source_messages")))).toEqual([
+      {
+        index: 0,
+        role: "user",
+        text: "Implement offline search. Background label-color logs follow.",
+      },
+    ]);
+    expect(root.attributes.get("gen_ai.input.messages")).not.toContain("Implement offline search");
+  });
   it("redacts credentials and tolerates exporter failures", () => {
     const { recorder, spans } = setup(true);
     recorder.rawOutput("password=hunter2 sk-abcdefghijklmnop");

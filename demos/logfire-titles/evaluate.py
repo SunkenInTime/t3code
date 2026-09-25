@@ -2,7 +2,7 @@
 # requires-python = ">=3.12"
 # dependencies = ["logfire==5.1.0", "pydantic-evals==2.47.0"]
 # ///
-"""Evaluate real T3 title regenerations and publish a Pydantic Evals experiment."""
+"""Evaluate real T3 first-message titles and publish a Pydantic Evals experiment."""
 import argparse
 import asyncio
 from dataclasses import dataclass
@@ -26,8 +26,6 @@ def checks(case, title):
     text = title.casefold()
     return {
         "identifies_subject": all(any(term in text for term in group) for group in case["subject_groups"]),
-        "under_40_characters": len(title) < 40,
-        "three_to_eight_words": 3 <= len(title.split()) <= 8,
     }
 
 
@@ -61,13 +59,14 @@ async def main(args):
         "source_sha256": {name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest() for name in [
             "demos/logfire-titles/title-prompt.txt",
             "apps/server/src/textGeneration/TextGenerationPrompts.ts",
-            "apps/server/src/textGeneration/ThreadTitleContext.ts",
+            "apps/server/src/textGeneration/CodexTextGeneration.ts",
+            "apps/server/scripts/logfire-title-initial.mjs",
         ]},
         "corpus_sha256": hashlib.sha256(json.dumps([
             {key: case[key] for key in ("id", "messages", "subject_groups")} for case in corpus
         ], sort_keys=True).encode()).hexdigest(),
         "cases": [],
-        "notes": "Constructed conversations, real T3 title regeneration. Subject checks use readable vocabulary groups, not an exact title or an LLM judge. Review titles yourself. This measures title quality, not independent agent repair success.",
+        "notes": "Three constructed first messages, real T3 title generation through the production prompt builder and Codex adapter. No prior title or later messages. The demo branch deliberately reproduces a truncation regression. Subject checks use vocabulary groups; format counts are observations. This is not a model benchmark or an agent repair success-rate measurement.",
     }
 
     def save():
@@ -86,7 +85,7 @@ async def main(args):
 
     async def generate_case(case, request_id):
         process = await asyncio.create_subprocess_exec(
-            "node", "apps/server/scripts/logfire-title-demo.mjs", "generate", case["id"], request_id,
+            "node", "apps/server/scripts/logfire-title-initial.mjs", case["id"], request_id,
             cwd=ROOT, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         )
         try:
@@ -99,6 +98,9 @@ async def main(args):
             raise RuntimeError(stderr.decode()[-2000:])
         output = json.loads(stdout)
         output["checks"] = checks(case, output["title"])
+        output["format_observations"] = {
+            "characters": len(output["title"]), "words": len(output["title"].split()),
+        }
         result["cases"].append(output)
         save()
         logfire.info("T3 title evaluated", **output, run_id=run_id, expected_subject_groups=case["subject_groups"],
@@ -107,7 +109,7 @@ async def main(args):
         print(f'{case["id"]}: {output["title"]} | subject={output["checks"]["identifies_subject"]}', flush=True)
         return output
 
-    dataset_name = "T3 title pipeline"
+    dataset_name = "T3 first-message titles"
     dataset = Dataset(name=dataset_name, cases=[Case(name=case["id"], inputs=case) for case in corpus], evaluators=[TitleQuality()])
     report = await dataset.evaluate(generate, name=run_id, repeat=args.repeat, max_concurrency=1, progress=False, task_name="generate_chat_title",
                                     metadata={"prompt_source": result["prompt_source"], "source_sha256": result["source_sha256"], "model": "gpt-6-luna", "corpus_sha256": result["corpus_sha256"]})

@@ -1,12 +1,16 @@
-# Investigate T3 titles with Pydantic
+# Investigate wrong T3 titles with Pydantic
 
-Ten constructed conversations exercise T3's real title-generation pipeline with
-Luna and the built-in title instructions. The saved baseline has seven titles
-that fail the subject check and three healthy controls. This corpus was chosen
-to make the problem easy to see; its failure rate describes this demo, not Luna
-in general. Titles and evaluation results come from real model calls.
+Three constructed first messages exercise T3's real initial-title prompt builder
+and Codex adapter with Luna. There are no later messages, previous titles, or topic
+changes. The branch intentionally reproduces an input-truncation regression; it
+is a sponsor demo, not a claim about the released app or a model benchmark.
 
-## Start
+The visible problem: the user asks for offline search, but the generated title is
+about label colors. The request includes a long diagnostic export. The live
+investigation measures whether the title names the requested subject. Character
+and word counts remain visible as observations.
+
+## Prepare before recording
 
 Use Node 24, `vp`, `uv`, and an authenticated Codex CLI with Luna and Astra access:
 
@@ -17,8 +21,8 @@ cp docs/operations/logfire-demo.env.example .env.local
 node demos/logfire-titles/start.mjs
 ```
 
-Open the printed pairing URL. The isolated state stays in this checkout's `.t3`.
-Saved titles appear immediately; generate fresh evidence in your Logfire project:
+Open the printed pairing URL. State stays in this checkout's `.t3`. In another
+terminal, publish the baseline once before filming:
 
 ```sh
 uv run demos/logfire-titles/evaluate.py --name baseline
@@ -26,19 +30,8 @@ codex mcp add logfire --url https://logfire-us.pydantic.dev/mcp
 # If configured but unauthenticated: codex mcp login logfire
 ```
 
-Open this checkout in a fresh Astra Medium thread in your regular T3 Code
-installation and ask:
-
-> These thread titles are bad. Can you use Logfire to figure out why and fix it?
-
-Keep the demo app and Logfire beside it. Use the regular T3 host because changes
-to demo server code restart the development server. If your MCP account has
-multiple projects, name the project that receives this demo's telemetry.
-Native MCP calls show the Pydantic mark, tool name, status, and expandable details.
-The agent discovers the cause and decides how to fix and verify it.
-
-For a separate recording desktop containing just the ten examples and an empty
-Astra Medium investigation thread, keep `start.mjs` running and use a second terminal:
+For a separate recording desktop with the examples and an empty Astra Medium
+thread, keep `start.mjs` running:
 
 ```sh
 vp run build:desktop
@@ -46,33 +39,48 @@ node demos/logfire-titles/desktop.mjs
 ```
 
 The recording desktop uses `.t3/recording-desktop` and ports 14242/6202. Its built
-backend stays running while the agent edits the checkout. Evaluations run against
-the editable server started above and copy their actual title results into the
-recording desktop. Show the before/after measurements in Logfire Evals. Subsequent
-launches retain the recording threads; they do not reset an investigation.
+backend stays running while the agent edits the checkout. Evaluations load the checkout's first-message prompt builder and production Codex
+adapter in a fresh process, then copy the actual results into the recording sidebar.
+They do not send a coding-agent turn or call title regeneration. Subsequent
+launches preserve the investigation. Alternatively, investigate from a fresh
+Astra Medium thread in your regular T3 installation, bound to this checkout.
 
-## What to inspect
+## Record
 
-Start with an unhelpful title, open its conversation, then follow the investigator's
-MCP calls. Ask it to explain its evidence and show whether its fix improved the
-titles. The recorded data includes supplied inputs, outputs, source conversation,
-and actual CLI tool events and aggregate token usage. The CLI does not expose its
-complete system context or individual model requests; the telemetry labels those limits.
+Open the offline-search example. Keep its opening sentence and the wrong title
+visible together. Ask:
 
-Pydantic Evals publishes to the **T3 title pipeline** dataset. Compare runs with
-the same corpus hash and evaluator definitions. `identifies_subject` is a vocabulary-based
-signal, not a semantic verdict. Read the titles, including controls and format
-failures, alongside the score. Use `--repeat 2` to measure output variation.
+> I asked for offline search, but the title is about label colors. Can you use Logfire to find out why, fix it, and check the three demo chats?
 
-`title-prompt.txt` starts empty, which selects the built-in instructions. An
-optional prompt experiment can fill it; the server rereads it on each call.
-Source hashes in each evaluation identify the prompt and context-builder versions.
-Only title and agent activity export. Background HTTP, VCS, and browser traces stay off.
+Use the recorded baseline as the before measurement. After the fix, run one pass:
+
+```sh
+uv run demos/logfire-titles/evaluate.py --name after
+```
+
+The finish line is a Logfire trace explaining the wrong subject, a focused fix,
+and three subject checks passing in **T3 first-message titles**. A regression test belongs
+with the fix. Prompt style tuning, repeated benchmark runs, and broader cleanup
+are outside this short investigation. The default is one call per case; do not
+repeat the already-recorded baseline during filming.
+
+Keep Logfire beside the agent. Native MCP calls show the Pydantic mark, tool name,
+status, and expandable details. The agent chooses its queries and implementation.
+If its MCP account has several projects, name the one receiving this demo's traces.
+
+The traces record supplied inputs, outputs, source conversation, actual CLI tool
+events and aggregate token usage. Full system context and individual model requests
+are not exposed by the CLI; the telemetry labels those limits. Only title and agent
+activity export. `title-prompt.txt` starts empty to use the built-in instructions.
+
+Compare experiments with matching corpus hashes and evaluator definitions. The
+subject check uses vocabulary groups, so read the outputs too. Earlier **T3 title pipeline** and **T3 title subject** datasets used multi-message
+regeneration and are separate experiments.
 
 ## Replay
 
-Save any investigator changes you want to keep, then restore the files it changed
-to this branch's baseline. Reset titles and generate fresh evidence:
+Save the investigator's changes, restore its changed files to the branch baseline,
+and prepare a fresh baseline before the next recording:
 
 ```sh
 node apps/server/scripts/logfire-title-demo.mjs reset
@@ -80,6 +88,4 @@ uv run demos/logfire-titles/evaluate.py --name baseline-take-2
 ```
 
 Run names must be unique. Reset restores saved titles; evaluation makes fresh calls
-and exact wording can vary. The earlier eight-case "T3 sidebar titles" dataset used
-a deliberately bad prompt and is not comparable to this scenario. Credentials and
-local run artifacts stay untracked.
+and wording can vary. Credentials and local run artifacts stay untracked.

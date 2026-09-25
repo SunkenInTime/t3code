@@ -1,132 +1,61 @@
 {
-  "run_id": "seven-failures-baseline-2",
-  "created_at": "2026-09-25T16:05:48.012630+00:00",
+  "run_id": "initial-baseline-20260925",
+  "created_at": "2026-09-25T18:39:02.284986+00:00",
   "model": "gpt-6-luna",
   "reasoning_effort": "low",
   "repeat": 1,
   "prompt_source": "builtin",
   "source_sha256": {
     "demos/logfire-titles/title-prompt.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-    "apps/server/src/textGeneration/TextGenerationPrompts.ts": "f2f5d4449db08e374945a515109f78db4f41a1d5c210a06641b426d26ebe968c",
+    "apps/server/src/textGeneration/TextGenerationPrompts.ts": "3ba9c8868703e3a1a2f883cb821c2abb4197e9d9bafeba14658d66a1d2e1cd22",
     "apps/server/src/textGeneration/ThreadTitleContext.ts": "b1d974a68af46844d05504df577af0a5635e5f90885fb363c84de56c4bf02856"
   },
-  "corpus_sha256": "0202ddf6dff22e32fca7e3d63333936cb47416deba717629bdf0ad17b3cf719e",
+  "corpus_sha256": "6da6c090c762533f857738a8f629c7c56ca12acabf9a034a57672bf8817771fd",
   "cases": [
     {
-      "case_id": "offline-search",
-      "thread_id": "logfire-title-offline-search",
-      "request_id": "7dbf15a8-9bc5-4423-b874-e15ec433c6cb",
-      "title": "Search Saved Notes Offline",
+      "case_id": "initial-offline-search",
+      "thread_id": "logfire-title-initial-offline-search",
+      "request_id": "fe20c520-7eec-48d7-a89c-ac594053701b",
+      "title": "Debugging Stale Label Palette Colors",
       "checks": {
-        "identifies_subject": true,
-        "under_40_characters": true,
-        "three_to_eight_words": true
+        "identifies_subject": false
+      },
+      "format_observations": {
+        "characters": 36,
+        "words": 5
       }
     },
     {
-      "case_id": "long-photo-dedup",
-      "thread_id": "logfire-title-long-photo-dedup",
-      "request_id": "b1d30186-0420-4af1-9e3e-a3b37731576d",
-      "title": "Make Retry Requests Idempotent",
+      "case_id": "initial-draft-recovery",
+      "thread_id": "logfire-title-initial-draft-recovery",
+      "request_id": "fe2ea1f1-4c69-4dcb-93cc-83bcec276366",
+      "title": "Connection Badge Stays Offline",
       "checks": {
-        "identifies_subject": false,
-        "under_40_characters": true,
-        "three_to_eight_words": true
+        "identifies_subject": false
+      },
+      "format_observations": {
+        "characters": 30,
+        "words": 4
       }
     },
     {
-      "case_id": "long-pivot-export",
-      "thread_id": "logfire-title-long-pivot-export",
-      "request_id": "866d9f1c-fff9-4081-9b06-27d18b3732aa",
-      "title": "Fix Pending Operation Cleanup Lifecycle",
+      "case_id": "initial-checkout",
+      "thread_id": "logfire-title-initial-checkout",
+      "request_id": "63b86d63-36bd-4a1e-bed9-48d25ae186f3",
+      "title": "Prevent Duplicate Charges on Retry",
       "checks": {
-        "identifies_subject": false,
-        "under_40_characters": true,
-        "three_to_eight_words": true
-      }
-    },
-    {
-      "case_id": "ci-workflow",
-      "thread_id": "logfire-title-ci-workflow",
-      "request_id": "71ab61bd-5f8c-4ce8-94c5-669b356515e7",
-      "title": "Tie PR Checks to Current Head SHA",
-      "checks": {
-        "identifies_subject": true,
-        "under_40_characters": true,
-        "three_to_eight_words": true
-      }
-    },
-    {
-      "case_id": "long-chat-scroll",
-      "thread_id": "logfire-title-long-chat-scroll",
-      "request_id": "db2cb0e5-a175-4209-a350-1ac7c6aaf55b",
-      "title": "Fix Scheduled Callbacks After Node Replacement",
-      "checks": {
-        "identifies_subject": false,
-        "under_40_characters": false,
-        "three_to_eight_words": true
-      }
-    },
-    {
-      "case_id": "long-modal-focus",
-      "thread_id": "logfire-title-long-modal-focus",
-      "request_id": "428f5547-2507-41c9-a24d-98489df995d0",
-      "title": "Retain Portal Owner Through Teardown",
-      "checks": {
-        "identifies_subject": false,
-        "under_40_characters": true,
-        "three_to_eight_words": true
-      }
-    },
-    {
-      "case_id": "long-pivot-notifications",
-      "thread_id": "logfire-title-long-pivot-notifications",
-      "request_id": "b9c2cc63-5de9-47ae-aeef-b35f85bc2493",
-      "title": "Fix Pending Operation Cleanup Leaks",
-      "checks": {
-        "identifies_subject": false,
-        "under_40_characters": true,
-        "three_to_eight_words": true
-      }
-    },
-    {
-      "case_id": "explicit-pivot",
-      "thread_id": "logfire-title-explicit-pivot",
-      "request_id": "eaadc941-87e1-418d-a9f3-fe0a7306bd34",
-      "title": "Add CSV Export Cancellation",
-      "checks": {
-        "identifies_subject": true,
-        "under_40_characters": true,
-        "three_to_eight_words": true
-      }
-    },
-    {
-      "case_id": "long-offline-search",
-      "thread_id": "logfire-title-long-offline-search",
-      "request_id": "6e0abbf4-7467-4fd7-9ae5-c1322c873d8e",
-      "title": "Customize Label Colors",
-      "checks": {
-        "identifies_subject": false,
-        "under_40_characters": true,
-        "three_to_eight_words": true
-      }
-    },
-    {
-      "case_id": "long-draft-recovery",
-      "thread_id": "logfire-title-long-draft-recovery",
-      "request_id": "5569ee1c-730d-4a23-b8bb-1f2abd6dee5a",
-      "title": "Persist Queued Writes Through Shutdown",
-      "checks": {
-        "identifies_subject": false,
-        "under_40_characters": true,
-        "three_to_eight_words": true
+        "identifies_subject": true
+      },
+      "format_observations": {
+        "characters": 34,
+        "words": 5
       }
     }
   ],
-  "notes": "Constructed conversations, real T3 title regeneration. Subject checks use readable vocabulary groups, not an exact title or an LLM judge. Review titles yourself. This measures title quality, not independent agent repair success.",
-  "eval_url": "https://logfire-us.pydantic.dev/sunken-in-time/starter-project/evals/T3%20title%20pipeline/compare?experiment=01a0d950d37a4b6ee74c6239b14a6a43-54ae0463dc5256ac",
-  "subject_passes": 3,
-  "total": 10,
-  "all_checks_passes": 3,
+  "notes": "Three constructed first messages, real T3 title generation through the production prompt builder and Codex adapter. No prior title or later messages. The demo branch deliberately reproduces a truncation regression. Subject checks use vocabulary groups; format counts are observations. This is not a model benchmark or an agent repair success-rate measurement.",
+  "eval_url": "https://logfire-us.pydantic.dev/sunken-in-time/starter-project/evals/T3%20first-message%20titles/compare?experiment=01a0d9dd1e97f186f55a432080fdf59b-5f9e5d862df81c53",
+  "subject_passes": 1,
+  "total": 3,
+  "all_checks_passes": 1,
   "task_errors": 0
 }
