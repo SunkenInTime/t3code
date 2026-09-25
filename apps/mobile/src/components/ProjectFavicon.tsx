@@ -83,8 +83,12 @@ function ProjectIconGlyphView(props: { readonly glyph: ProjectIconGlyph; readonl
       <View style={{ width: size, height: size, alignItems: "center", justifyContent: "center" }}>
         <AppText
           allowFontScaling={false}
-          numberOfLines={1}
-          style={{ fontSize: size * 0.7, lineHeight: size, textAlign: "center" }}
+          style={{
+            fontSize: size * 0.8,
+            lineHeight: size,
+            textAlign: "center",
+            includeFontPadding: false,
+          }}
         >
           {glyph.emoji}
         </AppText>
@@ -110,9 +114,10 @@ function ProjectIconGlyphView(props: { readonly glyph: ProjectIconGlyph; readonl
         className={`font-mono ${colors.text}`}
         style={{
           fontWeight: "700",
-          fontSize: size * (countGlyphs(glyph.text) === 1 ? 0.6 : 0.48),
+          fontSize: size * (countGlyphs(glyph.text) === 1 ? 0.6 : 0.515625),
           lineHeight: size,
           textAlign: "center",
+          includeFontPadding: false,
         }}
       >
         {glyph.text}
@@ -163,7 +168,7 @@ function ProjectFaviconImage(props: {
       {!showImage ? (
         <SymbolView
           name={{ ios: "folder.fill", android: props.open ? "folder_open" : "folder" }}
-          size={props.size * 0.78}
+          size={props.size}
           tintColorClassName={"accent-icon-subtle"}
           type="monochrome"
         />
