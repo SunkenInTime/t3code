@@ -1,6 +1,6 @@
 {
-  "run_id": "pipeline-baseline-20260925-144717",
-  "created_at": "2026-09-25T14:47:18.126274+00:00",
+  "run_id": "seven-failures-baseline-2",
+  "created_at": "2026-09-25T16:05:48.012630+00:00",
   "model": "gpt-6-luna",
   "reasoning_effort": "low",
   "repeat": 1,
@@ -10,34 +10,12 @@
     "apps/server/src/textGeneration/TextGenerationPrompts.ts": "f2f5d4449db08e374945a515109f78db4f41a1d5c210a06641b426d26ebe968c",
     "apps/server/src/textGeneration/ThreadTitleContext.ts": "b1d974a68af46844d05504df577af0a5635e5f90885fb363c84de56c4bf02856"
   },
-  "corpus_sha256": "d3f08e0110b7759eac55e4d5b18201641aaee148977800837f4fad9cf726e57a",
+  "corpus_sha256": "0202ddf6dff22e32fca7e3d63333936cb47416deba717629bdf0ad17b3cf719e",
   "cases": [
-    {
-      "case_id": "photo-reconnect",
-      "thread_id": "logfire-title-photo-reconnect",
-      "request_id": "46a7f69d-24ec-43db-9638-33a083fdd1cf",
-      "title": "Prevent Duplicate Photo Uploads on Reconnect",
-      "checks": {
-        "identifies_subject": true,
-        "under_40_characters": false,
-        "three_to_eight_words": true
-      }
-    },
-    {
-      "case_id": "android-pairing",
-      "thread_id": "logfire-title-android-pairing",
-      "request_id": "f1e06b46-207e-4f07-a353-7b5744647954",
-      "title": "Refresh Expired Android Pairing Tokens",
-      "checks": {
-        "identifies_subject": true,
-        "under_40_characters": true,
-        "three_to_eight_words": true
-      }
-    },
     {
       "case_id": "offline-search",
       "thread_id": "logfire-title-offline-search",
-      "request_id": "7831d43f-c545-4011-b4d4-699bf50ebc53",
+      "request_id": "7dbf15a8-9bc5-4423-b874-e15ec433c6cb",
       "title": "Search Saved Notes Offline",
       "checks": {
         "identifies_subject": true,
@@ -46,42 +24,31 @@
       }
     },
     {
-      "case_id": "modal-focus",
-      "thread_id": "logfire-title-modal-focus",
-      "request_id": "f2fb0567-d2dd-4141-82e9-d79e7974a0e5",
-      "title": "Restore Settings Dialog Focus",
+      "case_id": "long-photo-dedup",
+      "thread_id": "logfire-title-long-photo-dedup",
+      "request_id": "b1d30186-0420-4af1-9e3e-a3b37731576d",
+      "title": "Make Retry Requests Idempotent",
       "checks": {
-        "identifies_subject": true,
+        "identifies_subject": false,
         "under_40_characters": true,
         "three_to_eight_words": true
       }
     },
     {
-      "case_id": "chat-scroll",
-      "thread_id": "logfire-title-chat-scroll",
-      "request_id": "9aad6be2-0a74-4ba5-9c06-afd3c0c3b5ce",
-      "title": "Keep Chat Scroll Position",
+      "case_id": "long-pivot-export",
+      "thread_id": "logfire-title-long-pivot-export",
+      "request_id": "866d9f1c-fff9-4081-9b06-27d18b3732aa",
+      "title": "Fix Pending Operation Cleanup Lifecycle",
       "checks": {
-        "identifies_subject": true,
+        "identifies_subject": false,
         "under_40_characters": true,
-        "three_to_eight_words": true
-      }
-    },
-    {
-      "case_id": "notification-sync",
-      "thread_id": "logfire-title-notification-sync",
-      "request_id": "16df5415-b337-4e86-91fa-74fbc4ba3209",
-      "title": "Sync Notification Preferences Across Devices",
-      "checks": {
-        "identifies_subject": true,
-        "under_40_characters": false,
         "three_to_eight_words": true
       }
     },
     {
       "case_id": "ci-workflow",
       "thread_id": "logfire-title-ci-workflow",
-      "request_id": "ac3425c3-fbed-4176-b587-8c7da9428929",
+      "request_id": "71ab61bd-5f8c-4ce8-94c5-669b356515e7",
       "title": "Tie PR Checks to Current Head SHA",
       "checks": {
         "identifies_subject": true,
@@ -90,21 +57,21 @@
       }
     },
     {
-      "case_id": "explicit-pivot",
-      "thread_id": "logfire-title-explicit-pivot",
-      "request_id": "f8190619-29c8-4337-8e0b-939411bbeb90",
-      "title": "Add CSV Export Cancellation",
+      "case_id": "long-chat-scroll",
+      "thread_id": "logfire-title-long-chat-scroll",
+      "request_id": "db2cb0e5-a175-4209-a350-1ac7c6aaf55b",
+      "title": "Fix Scheduled Callbacks After Node Replacement",
       "checks": {
-        "identifies_subject": true,
-        "under_40_characters": true,
+        "identifies_subject": false,
+        "under_40_characters": false,
         "three_to_eight_words": true
       }
     },
     {
-      "case_id": "long-pivot-export",
-      "thread_id": "logfire-title-long-pivot-export",
-      "request_id": "545b68ca-c8e6-48d0-ae87-1e0846b7f00f",
-      "title": "Fix Deferred Cleanup Handle Leak",
+      "case_id": "long-modal-focus",
+      "thread_id": "logfire-title-long-modal-focus",
+      "request_id": "428f5547-2507-41c9-a24d-98489df995d0",
+      "title": "Retain Portal Owner Through Teardown",
       "checks": {
         "identifies_subject": false,
         "under_40_characters": true,
@@ -114,8 +81,41 @@
     {
       "case_id": "long-pivot-notifications",
       "thread_id": "logfire-title-long-pivot-notifications",
-      "request_id": "a08b5db9-2223-4e7b-ad12-ea58608be6ef",
-      "title": "Fix Pending Operation Cleanup Lifecycle",
+      "request_id": "b9c2cc63-5de9-47ae-aeef-b35f85bc2493",
+      "title": "Fix Pending Operation Cleanup Leaks",
+      "checks": {
+        "identifies_subject": false,
+        "under_40_characters": true,
+        "three_to_eight_words": true
+      }
+    },
+    {
+      "case_id": "explicit-pivot",
+      "thread_id": "logfire-title-explicit-pivot",
+      "request_id": "eaadc941-87e1-418d-a9f3-fe0a7306bd34",
+      "title": "Add CSV Export Cancellation",
+      "checks": {
+        "identifies_subject": true,
+        "under_40_characters": true,
+        "three_to_eight_words": true
+      }
+    },
+    {
+      "case_id": "long-offline-search",
+      "thread_id": "logfire-title-long-offline-search",
+      "request_id": "6e0abbf4-7467-4fd7-9ae5-c1322c873d8e",
+      "title": "Customize Label Colors",
+      "checks": {
+        "identifies_subject": false,
+        "under_40_characters": true,
+        "three_to_eight_words": true
+      }
+    },
+    {
+      "case_id": "long-draft-recovery",
+      "thread_id": "logfire-title-long-draft-recovery",
+      "request_id": "5569ee1c-730d-4a23-b8bb-1f2abd6dee5a",
+      "title": "Persist Queued Writes Through Shutdown",
       "checks": {
         "identifies_subject": false,
         "under_40_characters": true,
@@ -124,9 +124,9 @@
     }
   ],
   "notes": "Constructed conversations, real T3 title regeneration. Subject checks use readable vocabulary groups, not an exact title or an LLM judge. Review titles yourself. This measures title quality, not independent agent repair success.",
-  "eval_url": "https://logfire-us.pydantic.dev/sunken-in-time/starter-project/evals/T3%20title%20pipeline/compare?experiment=01a0d908f579fdd69e0b9d45a37d2f91-33b0c109aef8388e",
-  "subject_passes": 8,
+  "eval_url": "https://logfire-us.pydantic.dev/sunken-in-time/starter-project/evals/T3%20title%20pipeline/compare?experiment=01a0d950d37a4b6ee74c6239b14a6a43-54ae0463dc5256ac",
+  "subject_passes": 3,
   "total": 10,
-  "all_checks_passes": 6,
+  "all_checks_passes": 3,
   "task_errors": 0
 }

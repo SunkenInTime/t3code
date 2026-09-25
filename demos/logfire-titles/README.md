@@ -1,10 +1,10 @@
 # Investigate T3 titles with Pydantic
 
 Ten constructed conversations exercise T3's real title-generation pipeline with
-Luna and the built-in title instructions. The corpus includes short controls,
-genuine topic changes, and longer conversations with pasted test output. Titles
-and evaluation results come from real model calls. There is no deliberately
-incorrect system prompt.
+Luna and the built-in title instructions. The saved baseline has seven titles
+that fail the subject check and three healthy controls. This corpus was chosen
+to make the problem easy to see; its failure rate describes this demo, not Luna
+in general. Titles and evaluation results come from real model calls.
 
 ## Start
 
