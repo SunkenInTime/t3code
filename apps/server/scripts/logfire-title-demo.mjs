@@ -93,32 +93,10 @@ if (action === "reset") {
     JSON.stringify(shell.threads.filter((thread) => thread.projectId === "logfire-title-demo")),
   );
 } else if (action === "investigate") {
-  const runDirectory = `${root}.t3/title-evals`;
-  const runs = await Promise.all(
-    (await NodeFSP.readdir(runDirectory)).map(async (name) => {
-      try {
-        return JSON.parse(await NodeFSP.readFile(`${runDirectory}/${name}/results.json`, "utf8"));
-      } catch {
-        return undefined;
-      }
-    }),
-  );
-  const latestRun = runs
-    .filter((run) => run?.source_sha256 && run.total === corpus.length && run.task_errors === 0)
-    .sort((a, b) => b.created_at.localeCompare(a.created_at))[0];
-  if (!latestRun)
-    throw new Error("Run uv run demos/logfire-titles/evaluate.py --name baseline first.");
-  const threadId = NodeCrypto.randomUUID();
-  const prompt =
-    (await NodeFSP.readFile(`${root}demos/logfire-titles/investigate.md`, "utf8")) +
-    `\n\nThis run's T3_DEMO_ORIGIN=${origin}. Logfire project: ${process.env.T3_DEMO_LOGFIRE_PROJECT ?? "use the authenticated project"}. Dataset: T3 title pipeline. Baseline: ${latestRun.run_id}, beginning ${latestRun.created_at}. Baseline evaluation: ${latestRun.eval_url}. Candidate run name: repair-${threadId.slice(0, 8)}.`;
   // Keep the investigator on the installed T3 host: editing demo server code
   // restarts this development server and would otherwise kill its own agent.
   console.log(
-    prompt +
-      "\n\nWorkspace: " +
-      root +
-      "\nRun this investigation in a fresh Astra Medium thread on your regular T3 Code host, with this checkout open. Keep the demo web app beside it; the demo server may restart during a code fix.",
+    (await NodeFSP.readFile(`${root}demos/logfire-titles/investigate.md`, "utf8")).trim(),
   );
 } else if (action === "wait") {
   const threadId = caseId;

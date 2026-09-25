@@ -24,30 +24,29 @@ Saved titles appear immediately; generate fresh evidence in your Logfire project
 uv run demos/logfire-titles/evaluate.py --name baseline
 codex mcp add logfire --url https://logfire-us.pydantic.dev/mcp
 # If configured but unauthenticated: codex mcp login logfire
-T3_DEMO_LOGFIRE_PROJECT=YOUR_ORG/YOUR_PROJECT node apps/server/scripts/logfire-title-demo.mjs investigate
 ```
 
-The last command prints [the investigation prompt](investigate.md) with the latest
-completed evaluation filled in. Paste it into a fresh Astra Medium thread in your
-regular T3 Code installation, with this checkout open. Keep the demo app and
-Logfire beside it. The investigator must run on the regular host: changes to demo
-server code restart the development server.
+Open this checkout in a fresh Astra Medium thread in your regular T3 Code
+installation and ask:
+
+> These thread titles are bad. Can you use Logfire to figure out why and fix it?
+
+Keep the demo app and Logfire beside it. Use the regular T3 host because changes
+to demo server code restart the development server. If your MCP account has
+multiple projects, name the project that receives this demo's telemetry.
 Native MCP calls show the Pydantic mark, tool name, status, and expandable details.
-The agent can inspect and fix the pipeline; its answer is not prescribed.
+The agent discovers the cause and decides how to fix and verify it.
 
 ## What to inspect
 
 Start with an unhelpful title, open its conversation, then follow the investigator's
-MCP calls. In Logfire, compare the original messages with the input T3 supplied,
-the raw response, and the final title. The context-selection metadata identifies
-omitted and shortened messages. Provider child spans record actual CLI tool events
-and aggregate token usage. The CLI does not expose its complete system context or
-individual model requests; the telemetry labels those limits.
+MCP calls. Ask it to explain its evidence and show whether its fix improved the
+titles. The recorded data includes supplied inputs, outputs, source conversation,
+and actual CLI tool events and aggregate token usage. The CLI does not expose its
+complete system context or individual model requests; the telemetry labels those limits.
 
-Pydantic Evals publishes to the **T3 title pipeline** dataset. Evaluation spans and
-title spans share `t3.request.id`; the evaluated log contains the title, checks,
-and expected vocabulary groups, so an MCP investigator can join outcomes to traces.
-Compare runs with the same corpus hash. `identifies_subject` is a vocabulary-based
+Pydantic Evals publishes to the **T3 title pipeline** dataset. Compare runs with
+the same corpus hash and evaluator definitions. `identifies_subject` is a vocabulary-based
 signal, not a semantic verdict. Read the titles, including controls and format
 failures, alongside the score. Use `--repeat 2` to measure output variation.
 
@@ -58,13 +57,10 @@ Only title and agent activity export. Background HTTP, VCS, and browser traces s
 
 ## Replay
 
-Save any investigator changes you want to keep, then restore the affected source
-files to this branch's baseline. For the context-budget repair, reset with:
+Save any investigator changes you want to keep, then restore the files it changed
+to this branch's baseline. Reset titles and generate fresh evidence:
 
 ```sh
-git restore apps/server/src/textGeneration/ThreadTitleContext.ts \
-  apps/server/src/textGeneration/ThreadTitleContext.test.ts \
-  demos/logfire-titles/title-prompt.txt
 node apps/server/scripts/logfire-title-demo.mjs reset
 uv run demos/logfire-titles/evaluate.py --name baseline-take-2
 ```
