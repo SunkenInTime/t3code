@@ -128,6 +128,13 @@ async def main(args):
     if url: print(f"Pydantic Evals: {url}")
     if result["task_errors"]:
         raise SystemExit("Some T3 requests failed; this is an incomplete evaluation.")
+    if (ROOT / ".t3/recording-desktop/recording.json").exists():
+        mirror = await asyncio.create_subprocess_exec(
+            "node", "demos/logfire-titles/sync-desktop.mjs", str(output_dir / "results.json"),
+            cwd=ROOT,
+        )
+        if await mirror.wait():
+            print("Evaluation saved; the recording desktop was unavailable for title updates.")
 
 
 if __name__ == "__main__":

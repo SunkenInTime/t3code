@@ -37,6 +37,20 @@ multiple projects, name the project that receives this demo's telemetry.
 Native MCP calls show the Pydantic mark, tool name, status, and expandable details.
 The agent discovers the cause and decides how to fix and verify it.
 
+For a separate recording desktop containing just the ten examples and an empty
+Astra Medium investigation thread, keep `start.mjs` running and use a second terminal:
+
+```sh
+vp run build:desktop
+node demos/logfire-titles/desktop.mjs
+```
+
+The recording desktop uses `.t3/recording-desktop` and ports 14242/6202. Its built
+backend stays running while the agent edits the checkout. Evaluations run against
+the editable server started above and copy their actual title results into the
+recording desktop. Show the before/after measurements in Logfire Evals. Subsequent
+launches retain the recording threads; they do not reset an investigation.
+
 ## What to inspect
 
 Start with an unhelpful title, open its conversation, then follow the investigator's
