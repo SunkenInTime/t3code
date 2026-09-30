@@ -131,6 +131,12 @@ On web and desktop, open the command palette with `Cmd/Ctrl+K` to search threads
 across connected environments. Message search starts after two characters and
 includes your messages and final agent responses.
 
+Narrow thread results with filters in the same search: `in:` for a project,
+`provider:` for a provider, and `before:`, `after:`, or `on:` with a day
+(`2026-08-01`, `today`, or `yesterday`) to check each thread's last activity.
+Typing `in:` or `provider:` suggests values. Quote names with spaces, like
+`in:"My Project"`.
+
 Use **Settings → Keybindings** to find or customize shortcuts for searching files
 and copying a thread reference. A copied reference uses the thread's pull request
 link when available, otherwise its thread ID. See [keybindings](./keybindings.md)
