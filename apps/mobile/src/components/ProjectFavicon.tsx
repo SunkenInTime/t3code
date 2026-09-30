@@ -2,7 +2,7 @@ import { SymbolView } from "./AppSymbol";
 import { AppText } from "./AppText";
 import { Image } from "expo-image";
 import { useLayoutEffect, useMemo, useState } from "react";
-import { View } from "react-native";
+import { useColorScheme, View } from "react-native";
 import type { EnvironmentId, ProjectIconOverride } from "@t3tools/contracts";
 import {
   getProjectFaviconCacheKey,
@@ -11,6 +11,7 @@ import {
 } from "@t3tools/shared/projectFavicon";
 import { useAtomValue } from "@effect/atom-react";
 import { Atom } from "effect/unstable/reactivity";
+import { resolveProjectFaviconColorScheme } from "../lib/projectFaviconColorScheme";
 import { projectFaviconUrlAtom } from "../state/assets";
 import {
   countGlyphs,
@@ -154,6 +155,14 @@ function ProjectFaviconImage(props: {
 
   const requestIsActive = faviconRequest !== null && activeFaviconRequest === faviconRequest;
   const showImage = requestIsActive && status === "loaded";
+  // The app forces the native color scheme to its own appearance setting.
+  const themeAppearance = useColorScheme() === "dark" ? "dark" : "light";
+  const faviconUri = useMemo(
+    () =>
+      faviconRequest &&
+      resolveProjectFaviconColorScheme(faviconRequest.faviconUrl, themeAppearance),
+    [faviconRequest, themeAppearance],
+  );
 
   return (
     <View
@@ -175,13 +184,13 @@ function ProjectFaviconImage(props: {
       ) : null}
 
       {/* Favicon image (hidden until loaded) */}
-      {requestIsActive ? (
+      {requestIsActive && faviconUri ? (
         <Image
           key={faviconRequest.faviconUrl}
           source={
             faviconRequest.faviconUrl.startsWith("data:")
-              ? { uri: faviconRequest.faviconUrl }
-              : { uri: faviconRequest.faviconUrl, cacheKey: faviconRequest.cacheKey }
+              ? { uri: faviconUri }
+              : { uri: faviconUri, cacheKey: faviconRequest.cacheKey }
           }
           cachePolicy={faviconRequest.faviconUrl.startsWith("data:") ? "memory" : "memory-disk"}
           recyclingKey={faviconRequest.cacheKey}
