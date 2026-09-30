@@ -118,7 +118,7 @@ import {
   selectActiveRightPanel,
   useRightPanelStore,
 } from "../rightPanelStore";
-import { getLatestThreadForProject, sortThreads } from "../lib/threadSort";
+import { getLatestThreadForProject, getThreadSortTimestamp, sortThreads } from "../lib/threadSort";
 import {
   cn,
   getLocalFileManagerName,
@@ -146,6 +146,7 @@ import {
   buildLinkedThreadActionItems,
   enumerateCommandPaletteItems,
   type CommandPaletteActionItem,
+  type CommandPaletteGroup,
   type CommandPaletteOpenIntent,
   type CommandPaletteSubmenuItem,
   type CommandPaletteView,
@@ -158,6 +159,12 @@ import {
   reduceCommandPaletteUiState,
   type SearchOverlayMode,
 } from "./CommandPalette.logic";
+import {
+  applyThreadSearchOperatorCompletion,
+  getThreadSearchOperatorCompletion,
+  matchesThreadSearchOperators,
+  parseThreadSearchOperators,
+} from "./threadSearchOperators.logic";
 import { orderItemsByPreferredIds, sortLogicalProjectsForSidebar } from "./Sidebar.logic";
 import { resolveEnvironmentOptionLabel } from "./BranchToolbar.logic";
 import { CommandPaletteContent } from "./CommandPaletteContent";
@@ -176,6 +183,7 @@ import {
   ThreadCommandSubtitle,
 } from "./ThreadCommandSubtitle";
 import { ThreadRowLeadingStatus, ThreadRowTrailingStatus } from "./ThreadStatusIndicators";
+import { ProviderInstanceIcon } from "./chat/ProviderInstanceIcon";
 import { primaryServerKeybindingsAtom, primaryServerProvidersAtom } from "../state/server";
 import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../providerInstances";
 import { resolveShortcutCommand, threadJumpIndexFromCommand } from "../keybindings";
@@ -823,7 +831,17 @@ function OpenCommandPaletteDialog(props: {
         .map((environment) => environment.environmentId),
     [environments],
   );
-  const threadSearchQuery = currentView === null && !isActionsOnly ? deferredQuery : "";
+  // Operators (in:, provider:, before:/after:/on:) only apply to the root search.
+  const searchOperators = useMemo(
+    () =>
+      currentView === null && !isActionsOnly
+        ? parseThreadSearchOperators(deferredQuery, new Date())
+        : null,
+    [currentView, deferredQuery, isActionsOnly],
+  );
+  // Message search only sees the free text left after the operators.
+  const threadSearchQuery =
+    currentView === null && !isActionsOnly ? (searchOperators?.text ?? deferredQuery) : "";
   const threadSearch = useThreadSearch(environmentIds, threadSearchQuery);
   const threadContentMatchByKey = useMemo(
     () =>
@@ -1331,10 +1349,41 @@ function OpenCommandPaletteDialog(props: {
     ],
   );
 
+  // Recent threads only render for an empty query, so operators can narrow the shared list.
+  const searchThreads = useMemo(() => {
+    if (searchOperators === null) return threads;
+    const projectLabelsByKey = new Map(
+      projectGroups.flatMap((group) =>
+        group.memberProjects.map(
+          (project) =>
+            [
+              `${project.environmentId}:${project.id}`,
+              [group.displayName, project.title, project.workspaceRoot],
+            ] as const,
+        ),
+      ),
+    );
+    return threads.filter((thread) => {
+      const instanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
+      const provider = providerEntryByEnvironmentAndInstanceId.get(
+        `${thread.environmentId}:${instanceId}`,
+      );
+      return matchesThreadSearchOperators(searchOperators, {
+        projectLabels: projectLabelsByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? [],
+        providerLabels: [
+          instanceId,
+          thread.session?.providerName,
+          provider?.displayName,
+          provider?.driverKind,
+        ],
+        activityMs: getThreadSortTimestamp(thread, "updated_at"),
+      });
+    });
+  }, [projectGroups, providerEntryByEnvironmentAndInstanceId, searchOperators, threads]);
   const allThreadItems = useMemo(
     () =>
       buildThreadActionItems({
-        threads,
+        threads: searchThreads,
         ...(activeThreadId ? { activeThreadId } : {}),
         projectTitleById,
         sortOrder: clientSettings.sidebarThreadSortOrder,
@@ -1395,9 +1444,9 @@ function OpenCommandPaletteDialog(props: {
       projectEnvironmentLocationById,
       projectTitleById,
       providerEntryByEnvironmentAndInstanceId,
+      searchThreads,
       threadContentMatchByKey,
       threadSearchQuery,
-      threads,
     ],
   );
   const recentThreadItems = allThreadItems.slice(0, RECENT_THREAD_LIMIT);
@@ -2125,27 +2174,111 @@ function OpenCommandPaletteDialog(props: {
           ? changeAppearanceItem.groups
           : (currentView?.groups ?? rootGroups);
 
-  const filteredGroups = filterCommandPaletteGroups({
-    activeGroups,
-    query: deferredQuery,
-    isInSubmenu: currentView !== null,
-    projectSearchItems: projectSearchItems,
-    settingsSearchItems,
-    threadSearchItems:
-      linkedThreadSearch?.linkedThreads && deferredQuery === linkedThreadSearch.query
-        ? buildLinkedThreadActionItems({
-            ...linkedThreadSearch.linkedThreads,
-            query: linkedThreadSearch.query,
-            icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
-            runThread: async (thread) => {
-              await navigate({
-                to: "/$environmentId/$threadId",
-                params: buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id)),
-              });
+  // With operators the palette only searches threads; the free text ranks within them.
+  const searchGroups =
+    searchOperators === null
+      ? filterCommandPaletteGroups({
+          activeGroups,
+          query: deferredQuery,
+          isInSubmenu: currentView !== null,
+          projectSearchItems: projectSearchItems,
+          settingsSearchItems,
+          threadSearchItems:
+            linkedThreadSearch?.linkedThreads && deferredQuery === linkedThreadSearch.query
+              ? buildLinkedThreadActionItems({
+                  ...linkedThreadSearch.linkedThreads,
+                  query: linkedThreadSearch.query,
+                  icon: <MessageSquareIcon className={ITEM_ICON_CLASS} />,
+                  runThread: async (thread) => {
+                    await navigate({
+                      to: "/$environmentId/$threadId",
+                      params: buildThreadRouteParams(
+                        scopeThreadRef(thread.environmentId, thread.id),
+                      ),
+                    });
+                  },
+                })
+              : allThreadItems,
+        })
+      : filterCommandPaletteGroups({
+          activeGroups:
+            allThreadItems.length > 0
+              ? [{ value: "threads-search", label: "Threads", items: allThreadItems }]
+              : [],
+          query: searchOperators.text,
+          isInSubmenu: false,
+          projectSearchItems: [],
+          threadSearchItems: [],
+        });
+
+  // While an in: or provider: value is being typed, its completions lead the
+  // list so Enter commits the value and keeps the palette open.
+  const operatorCompletion =
+    currentView === null && !isActionsOnly ? getThreadSearchOperatorCompletion(query) : null;
+  const operatorCompletionGroups: CommandPaletteGroup[] = [];
+  if (operatorCompletion !== null) {
+    const options =
+      operatorCompletion.keyword === "in"
+        ? projectGroups.map((group) => ({
+            name: group.displayName,
+            searchTerms: [group.displayName, group.workspaceRoot],
+            description: group.workspaceRoot,
+            icon: projectFavicon(group),
+          }))
+        : [
+            // One option per name; the same provider is usually set up on every environment.
+            ...new Map(
+              [...providerEntryByEnvironmentAndInstanceId.values()].map((entry) => [
+                entry.displayName,
+                entry,
+              ]),
+            ).values(),
+          ].map((entry) => ({
+            name: entry.displayName,
+            searchTerms: [entry.displayName, entry.instanceId, entry.driverKind],
+            description: undefined,
+            icon: (
+              <ProviderInstanceIcon
+                driverKind={entry.driverKind}
+                displayName={entry.displayName}
+                iconClassName="size-4"
+              />
+            ),
+          }));
+    const items = options.map((option, index): CommandPaletteActionItem => ({
+      kind: "action",
+      value: `search-operator:${index}`,
+      searchTerms: option.searchTerms,
+      title: option.name,
+      ...(option.description ? { description: option.description } : {}),
+      icon: option.icon,
+      keepOpen: true,
+      run: async () => {
+        handleQueryChange(
+          applyThreadSearchOperatorCompletion(query, operatorCompletion, option.name),
+        );
+      },
+    }));
+    if (items.length > 0) {
+      operatorCompletionGroups.push(
+        ...filterCommandPaletteGroups({
+          activeGroups: [
+            {
+              value: "search-operator-completions",
+              label:
+                operatorCompletion.keyword === "in" ? "Filter by project" : "Filter by provider",
+              items,
             },
-          })
-        : allThreadItems,
-  });
+          ],
+          query: operatorCompletion.partial,
+          isInSubmenu: true,
+          projectSearchItems: [],
+          threadSearchItems: [],
+        }),
+      );
+    }
+  }
+  const filteredGroups = [...operatorCompletionGroups, ...searchGroups];
 
   const handleAddProjectForEnvironment = useCallback(
     async (input: {
