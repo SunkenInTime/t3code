@@ -55,6 +55,14 @@ describe("mobile project icon thumbnails", () => {
       expect((await call.value).release).toHaveBeenCalledOnce();
   });
 
+  it("works with React Native's AbortSignal, which lacks throwIfAborted", async () => {
+    const signal = new AbortController().signal;
+    Object.defineProperty(signal, "throwIfAborted", { value: undefined });
+    await expect(downscaleProjectFavicon(image, signal)).resolves.toBe(
+      `data:image/png;base64,${png}`,
+    );
+  });
+
   it("releases a decoded image when its request was canceled", async () => {
     const controller = new AbortController();
     const release = vi.fn();

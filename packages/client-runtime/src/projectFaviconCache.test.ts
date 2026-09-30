@@ -269,6 +269,13 @@ describe("project favicon image loader", () => {
     expect(downscale).not.toHaveBeenCalled();
   });
 
+  it("inlines icons with React Native's AbortSignal, which lacks throwIfAborted", async () => {
+    const { load } = loader(new Response(svg, { headers: { "content-type": "image/svg+xml" } }));
+    const nativeSignal = signal();
+    Object.defineProperty(nativeSignal, "throwIfAborted", { value: undefined });
+    expect(await load(url, nativeSignal)).toBe(`data:image/svg+xml;base64,${svgBase64}`);
+  });
+
   it("falls back to the file extension when the response has no image type", async () => {
     const { load } = loader(new Response(svg, { headers: { "content-type": "text/plain" } }));
     expect(await load(url, signal())).toBe(`data:image/svg+xml;base64,${svgBase64}`);
