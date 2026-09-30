@@ -10,7 +10,6 @@ import {
   type EnvironmentThreadSearchMatch,
 } from "@t3tools/client-runtime/state/thread-search";
 import { LegendList } from "@legendapp/list/react-native";
-import type { MenuAction } from "@react-native-menu/menu";
 import { useAtomValue } from "@effect/atom-react";
 import { type EnvironmentId, resolveEnvironmentMachineKind } from "@t3tools/contracts";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -24,6 +23,8 @@ import type { SearchBarCommands } from "react-native-screens";
 import { AppText as Text } from "../../components/AppText";
 import { CompactBrandTitle } from "../../components/CompactBrandTitle";
 import { ControlPillMenu } from "../../components/ControlPill";
+import type { AndroidMenuAction } from "../../components/MaterialMenuPopup";
+import { ProjectFavicon } from "../../components/ProjectFavicon";
 import { SymbolView } from "../../components/AppSymbol";
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
 import { NativeStackScreenOptions } from "../../native/StackHeader";
@@ -134,7 +135,7 @@ function ThreadNavigationSidebarPane(
   const drawerColor = materialTheme["--color-drawer"];
 
   const insets = useSafeAreaInsets();
-  const { fabClearance } = useAndroidControlSizing();
+  const { fabClearance, iconSize } = useAndroidControlSizing();
   const projects = useProjects();
   const threads = useThreadShells();
   const { environments: workspaceEnvironments, state: catalogState } = useWorkspaceState();
@@ -219,6 +220,7 @@ function ThreadNavigationSidebarPane(
       projectScopes.map((scope) => ({
         key: scope.key,
         label: scope.title,
+        representative: scope.representative,
       })),
     [projectScopes],
   );
@@ -529,7 +531,7 @@ function ThreadNavigationSidebarPane(
     snoozeEnvironmentIds,
     threadListV2Layout,
   ]);
-  const listMenuActions = useMemo<MenuAction[]>(
+  const listMenuActions = useMemo<AndroidMenuAction[]>(
     () => [
       {
         id: "environment",
@@ -568,12 +570,24 @@ function ThreadNavigationSidebarPane(
                   id: `project:${project.key}`,
                   title: project.label,
                   state: selectedProjectKey === project.key ? ("on" as const) : ("off" as const),
+                  // iOS hands these actions to the native menu, which can't draw a view.
+                  leading:
+                    Platform.OS === "android" ? (
+                      <ProjectFavicon
+                        environmentId={project.representative.environmentId}
+                        faviconPath={project.representative.faviconPath}
+                        projectIcon={project.representative.projectIcon}
+                        projectTitle={project.label}
+                        size={iconSize}
+                        workspaceRoot={project.representative.workspaceRoot}
+                      />
+                    ) : undefined,
                 })),
               ],
             },
-          ] satisfies MenuAction[])),
+          ] satisfies AndroidMenuAction[])),
     ],
-    [environments, options, projectFilterOptions, selectedProjectKey],
+    [environments, iconSize, options, projectFilterOptions, selectedProjectKey],
   );
   const handleListMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) => {

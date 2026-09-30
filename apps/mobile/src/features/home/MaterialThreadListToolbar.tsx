@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ComponentProps } from "react";
 import { BackHandler, Keyboard, type TextInput, View, type LayoutChangeEvent } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import type { MenuAction } from "@react-native-menu/menu";
 
 import { AndroidHeaderIconButton } from "../../components/AndroidScreenHeader";
 import { CompactBrandTitle } from "../../components/CompactBrandTitle";
 import { MaterialFloatingActionButton } from "../../components/MaterialFloatingActionButton";
 import { AndroidAnchoredMenu } from "../../components/AndroidAnchoredMenu";
+import type { AndroidMenuAction } from "../../components/MaterialMenuPopup";
 import { ControlPillMenu } from "../../components/ControlPill";
 import { MaterialSearchField } from "../../components/MaterialSearchField";
 import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
@@ -19,7 +19,7 @@ import { useMaterialToolbarLayout } from "../../components/useMaterialToolbarLay
 export function MaterialThreadListToolbar(props: {
   readonly searchQuery: string;
   readonly onSearchQueryChange: (query: string) => void;
-  readonly filterActions: MenuAction[];
+  readonly filterActions: AndroidMenuAction[];
   readonly filterCustomized: boolean;
   readonly onFilterAction: NonNullable<ComponentProps<typeof ControlPillMenu>["onPressAction"]>;
   readonly onOpenSettings: () => void;
