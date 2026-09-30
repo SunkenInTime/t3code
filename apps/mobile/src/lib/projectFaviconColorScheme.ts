@@ -11,7 +11,9 @@ const ROOT_COLOR_ATTRIBUTE_RE = /^<svg\b[^>]*?\scolor\s*=\s*["']([^"']*)["']/i;
 const INLINE_COLOR_RE = /\s(?:color\s*=|style\s*=\s*["'][^"']*(?<![-\w])color\s*:)/gi;
 const PAINT_ATTRIBUTE_RE =
   /(\s(?:fill|stroke|stop-color|flood-color|lighting-color)\s*=\s*["'])\s*currentColor\s*(["'])/gi;
-const CSS_VALUE_RE = /(:\s*)currentColor(?=\s*[;}"'])/gi;
+const STYLE_ATTRIBUTE_RE = /(\sstyle\s*=\s*(["']))([\s\S]*?)(\2)/gi;
+const PAINT_DECLARATION_RE =
+  /((?:^|[;{\s])(?:fill|stroke|stop-color|flood-color|lighting-color)\s*:\s*)currentColor(?=\s*(?:!important\s*)?(?:[;}]|$))/gi;
 
 /**
  * Native SVG decoders ignore `prefers-color-scheme` media queries, and CoreSVG
@@ -61,7 +63,14 @@ export function resolveSvgColorScheme(svg: string, scheme: "light" | "dark"): st
 
   const color = rootColors[":root"] ?? rootColors.svg ?? attributeColor;
   if (!color || /^(?:currentcolor|inherit|initial|unset|revert)$/i.test(color)) return resolved;
-  return resolved.replace(PAINT_ATTRIBUTE_RE, `$1${color}$2`).replace(CSS_VALUE_RE, `$1${color}`);
+  const bakeCss = (css: string) => css.replace(PAINT_DECLARATION_RE, `$1${color}`);
+  return resolved
+    .replace(PAINT_ATTRIBUTE_RE, `$1${color}$2`)
+    .replace(STYLE_RE, (_, open: string, css: string, close: string) => open + bakeCss(css) + close)
+    .replace(
+      STYLE_ATTRIBUTE_RE,
+      (_, open: string, _quote: string, css: string, close: string) => open + bakeCss(css) + close,
+    );
 }
 
 /** Applies `resolveSvgColorScheme` to an inline SVG icon; other sources pass through. */

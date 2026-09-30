@@ -39,10 +39,10 @@ describe("resolveSvgColorScheme", () => {
   it("only rewrites currentColor where it is a paint value", () => {
     const svg = adaptive(
       "svg{color:#111}@media (prefers-color-scheme: dark){svg{color:#eee}}",
-      '<linearGradient id="currentColor"/><path fill="url(#currentColor)" style="stroke: currentColor"/>',
+      '<linearGradient id="paint:currentColor"/><path fill="url(#paint:currentColor)" style="stroke: currentColor !important"/>',
     );
     expect(resolveSvgColorScheme(svg, "dark")).toContain(
-      '<linearGradient id="currentColor"/><path fill="url(#currentColor)" style="stroke: #eee"/>',
+      '<linearGradient id="paint:currentColor"/><path fill="url(#paint:currentColor)" style="stroke: #eee !important"/>',
     );
   });
 
