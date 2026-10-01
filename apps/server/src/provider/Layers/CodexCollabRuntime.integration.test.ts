@@ -62,6 +62,12 @@ function buildScript() {
         },
       },
     },
+    // Background memory work can reach this connection with no thread/started
+    // announcing it. Its output belongs to another thread; only its approval
+    // cleanup still matters to the parent.
+    ...agentMessage(MEMORY, "memory-message", "internal memory update"),
+    { method: "warning", params: { threadId: MEMORY, message: "internal memory warning" } },
+    { method: "serverRequest/resolved", params: { threadId: MEMORY, requestId: "memory-req" } },
     // Child terminal lifecycle AFTER the receiver map knows the children —
     // pre-fix, the legacy suppressor dropped these before interception saw
     // them, so no synthetic agent events were emitted.
@@ -81,6 +87,32 @@ function buildScript() {
     rootThreadId: ROOT,
     notifications: [...captured.filter((entry) => entry.method !== "turn/completed"), ...extras],
   };
+}
+
+/** An agent message streamed on `threadId`: started, one delta, completed. */
+function agentMessage(threadId: string, itemId: string, text: string) {
+  const turnId = `${threadId}-turn`;
+  return [
+    {
+      method: "item/started",
+      params: {
+        threadId,
+        turnId,
+        startedAtMs: 0,
+        item: { type: "agentMessage", id: itemId, text: "" },
+      },
+    },
+    { method: "item/agentMessage/delta", params: { threadId, turnId, itemId, delta: text } },
+    {
+      method: "item/completed",
+      params: {
+        threadId,
+        turnId,
+        completedAtMs: 0,
+        item: { type: "agentMessage", id: itemId, text },
+      },
+    },
+  ];
 }
 
 function capturedStartedActivity(childId = CHILD_A) {
@@ -467,6 +499,479 @@ describe("CodexSessionRuntime collab integration", () => {
         leaked.map((event) => event.method),
         [],
         "child thread/* lifecycle must not appear as parent events",
+      );
+
+      const addressedToMemory = events
+        .filter(
+          (event) => (event.payload as { threadId?: string } | undefined)?.threadId === MEMORY,
+        )
+        .map((event) => event.method);
+      assert.deepEqual(
+        addressedToMemory.filter((method) => method !== "serverRequest/resolved"),
+        [],
+        "unannounced memory output must not appear as parent events",
+      );
+      assert.include(
+        addressedToMemory,
+        "serverRequest/resolved",
+        "approval cleanup for an unidentified thread must not be held",
+      );
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("delivers a child's output that precedes its registration to the child", () =>
+    Effect.gen(function* () {
+      // Codex can stream a v2 child's items before the parent's
+      // subAgentActivity registers it. Those items must reach the child path
+      // in order once it registers, ahead of its later output.
+      const script = {
+        rootThreadId: ROOT,
+        notifications: [
+          ...agentMessage(CHILD_A, "early-message", "early child reply"),
+          capturedStartedActivity(CHILD_A),
+          ...agentMessage(CHILD_A, "later-message", "later child reply"),
+        ],
+      };
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      NodeFS.writeFileSync(scriptPath, JSON.stringify(script), "utf8");
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(scriptPath, { force: true })),
+      );
+
+      const runtime = yield* makeCodexSessionRuntime({
+        threadId: ThreadId.make("thread-collab-early-child"),
+        binaryPath: peerPath,
+        cwd: NodeOS.tmpdir(),
+        runtimeMode: "full-access",
+        environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+      });
+      const eventsFiber = yield* runtime.events.pipe(
+        Stream.takeUntil((event) => event.method === "turn/completed"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "fan out" });
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+
+      assert.deepEqual(
+        events
+          .filter(
+            (event) =>
+              (event.method === "collabAgent/activity" || event.method === "collabAgent/item") &&
+              (event.payload as { agentThreadId?: string }).agentThreadId === CHILD_A,
+          )
+          .map((event) => {
+            const item = (event.payload as { item?: { id: string; text: string } }).item;
+            return item ? `${item.id}: ${item.text}` : event.method;
+          }),
+        [
+          "collabAgent/activity",
+          "early-message: ",
+          "early-message: early child reply",
+          "later-message: ",
+          "later-message: later child reply",
+        ],
+      );
+      assert.deepEqual(
+        events
+          .filter(
+            (event) => (event.payload as { threadId?: string } | undefined)?.threadId === CHILD_A,
+          )
+          .map((event) => event.method),
+        [],
+        "child output must not appear as parent events",
+      );
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keeps announced subagent and receiver-map child output on the parent path", () =>
+    Effect.gen(function* () {
+      const REVIEW = "review-subagent-thread";
+      const RECEIVER = "receiver-child-thread";
+      const rootThreadStarted = wireFixture.notifications.find(
+        (entry) => entry.method === "thread/started",
+      );
+      const collabToolCall = wireFixture.notifications.find(
+        (entry) =>
+          entry.method === "item/started" &&
+          (entry.params as { item?: { type?: string } }).item?.type === "collabAgentToolCall",
+      );
+      assert.isDefined(rootThreadStarted);
+      assert.isDefined(collabToolCall);
+      const script = {
+        rootThreadId: ROOT,
+        notifications: [
+          {
+            ...rootThreadStarted,
+            params: {
+              thread: {
+                ...rootThreadStarted.params.thread,
+                id: REVIEW,
+                sessionId: REVIEW,
+                source: { subAgent: "review" },
+              },
+            },
+          },
+          ...agentMessage(REVIEW, "review-message", "review finding"),
+          {
+            ...collabToolCall,
+            params: {
+              ...collabToolCall.params,
+              item: { ...collabToolCall.params.item, receiverThreadIds: [RECEIVER] },
+            },
+          },
+          ...agentMessage(RECEIVER, "receiver-message", "receiver reply"),
+        ],
+      };
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      NodeFS.writeFileSync(scriptPath, JSON.stringify(script), "utf8");
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(scriptPath, { force: true })),
+      );
+
+      const runtime = yield* makeCodexSessionRuntime({
+        threadId: ThreadId.make("thread-collab-announced"),
+        binaryPath: peerPath,
+        cwd: NodeOS.tmpdir(),
+        runtimeMode: "full-access",
+        environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+      });
+      const eventsFiber = yield* runtime.events.pipe(
+        Stream.takeUntil((event) => event.method === "turn/completed"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "review and delegate" });
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+      const parentEventsFor = (threadId: string) =>
+        events
+          .filter(
+            (event) => (event.payload as { threadId?: string } | undefined)?.threadId === threadId,
+          )
+          .map((event) => `${event.method} ${event.turnId}`);
+
+      assert.deepEqual(parentEventsFor(REVIEW), [
+        `item/started ${REVIEW}-turn`,
+        `item/agentMessage/delta ${REVIEW}-turn`,
+        `item/completed ${REVIEW}-turn`,
+      ]);
+      // Receiver-map children are stamped with the parent turn that spawned them.
+      const parentTurnId = (collabToolCall.params as { turnId: string }).turnId;
+      assert.deepEqual(parentEventsFor(RECEIVER), [
+        `item/started ${parentTurnId}`,
+        `item/agentMessage/delta ${parentTurnId}`,
+        `item/completed ${parentTurnId}`,
+      ]);
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("keeps the newest receiver turn when a child's held tool call replays", () =>
+    Effect.gen(function* () {
+      // Child A names receiver R before A registers, so that tool call is
+      // held. The root then names R in its own turn. Registering A replays
+      // the old call, which must not point R back at A's older turn.
+      const RECEIVER = "receiver-child-thread";
+      const collabToolCall = wireFixture.notifications.find(
+        (entry) =>
+          entry.method === "item/started" &&
+          (entry.params as { item?: { type?: string } }).item?.type === "collabAgentToolCall",
+      );
+      assert.isDefined(collabToolCall);
+      const toolCall = (threadId: string, turnId: string) => ({
+        ...collabToolCall,
+        params: {
+          ...collabToolCall.params,
+          threadId,
+          turnId,
+          item: {
+            ...collabToolCall.params.item,
+            id: `${threadId}-call`,
+            senderThreadId: threadId,
+            receiverThreadIds: [RECEIVER],
+          },
+        },
+      });
+      const rootTurnId = wireFixture.responses.turnStart.turn.id;
+      const script = {
+        rootThreadId: ROOT,
+        notifications: [
+          toolCall(CHILD_A, `${CHILD_A}-older-turn`),
+          toolCall(ROOT, rootTurnId),
+          capturedStartedActivity(CHILD_A),
+          ...agentMessage(RECEIVER, "receiver-message", "receiver reply"),
+        ],
+      };
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      NodeFS.writeFileSync(scriptPath, JSON.stringify(script), "utf8");
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(scriptPath, { force: true })),
+      );
+
+      const runtime = yield* makeCodexSessionRuntime({
+        threadId: ThreadId.make("thread-collab-receiver-replay"),
+        binaryPath: peerPath,
+        cwd: NodeOS.tmpdir(),
+        runtimeMode: "full-access",
+        environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+      });
+      const eventsFiber = yield* runtime.events.pipe(
+        Stream.takeUntil((event) => event.method === "turn/completed"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "delegate twice" });
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+
+      assert.deepEqual(
+        events
+          .filter(
+            (event) => (event.payload as { threadId?: string } | undefined)?.threadId === RECEIVER,
+          )
+          .map((event) => `${event.method} ${event.turnId}`),
+        [
+          `item/started ${rootTurnId}`,
+          `item/agentMessage/delta ${rootTurnId}`,
+          `item/completed ${rootTurnId}`,
+        ],
+      );
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  it.effect("delivers the new root's output sent before a resume fallback opens it", () =>
+    Effect.gen(function* () {
+      // The stored cursor names a thread Codex no longer has, so the open
+      // falls back to thread/start. Codex streams the new root's output before
+      // answering, while the stale cursor is still the known root. The peer
+      // answers only after the runtime looks up SYNC_CHILD, which it does once
+      // everything before that registration has been routed.
+      const STALE = "stale-root-thread";
+      const SYNC_CHILD = "sync-child-thread";
+      const script = {
+        rootThreadId: ROOT,
+        childResumeSnapshots: { [STALE]: { error: `thread not found: ${STALE}` } },
+        threadStartNotifications: [
+          ...agentMessage(ROOT, "early-root", "before the open response"),
+          capturedStartedActivity(SYNC_CHILD),
+        ],
+        threadStartAfterResumeOf: SYNC_CHILD,
+        notifications: agentMessage(ROOT, "later-root", "after the open response"),
+      };
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      NodeFS.writeFileSync(scriptPath, JSON.stringify(script), "utf8");
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => NodeFS.rmSync(scriptPath, { force: true })),
+      );
+
+      const runtime = yield* makeCodexSessionRuntime({
+        threadId: ThreadId.make("thread-collab-resume-fallback"),
+        binaryPath: peerPath,
+        cwd: NodeOS.tmpdir(),
+        runtimeMode: "full-access",
+        resumeCursor: { threadId: STALE },
+        environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+      });
+      const eventsFiber = yield* runtime.events.pipe(
+        Stream.takeUntil((event) => event.method === "turn/completed"),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+
+      const session = yield* runtime.start();
+      assert.deepEqual(session.resumeCursor, { threadId: ROOT });
+      yield* runtime.sendTurn({ input: "continue" });
+      const events = Array.from(yield* Fiber.join(eventsFiber));
+
+      assert.deepEqual(
+        events
+          .filter((event) => event.method === "item/completed")
+          .map((event) => String(event.itemId)),
+        ["early-root", "later-root"],
+      );
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  // it.live: the runtime talks to a real child process; under it.effect's
+  // TestClock the internal timers freeze and the join never completes.
+  it.live("Stop skips child turns that failed before the child registered", () =>
+    Effect.gen(function* () {
+      // Children A and B each start a turn and fail it while unregistered, so
+      // their errors are held. A registers afterwards; B never does. Neither
+      // failed turn may stay interruptible: an interrupt to a dead child can
+      // stall Stop before it reaches the root.
+      const failedTurn = (childId: string) => {
+        const turnStarted = wireFixture.notifications.find(
+          (entry) =>
+            entry.method === "turn/started" &&
+            (entry.params as { threadId?: string }).threadId === childId,
+        );
+        assert.isDefined(turnStarted);
+        const turnId = (turnStarted.params as { turn: { id: string } }).turn.id;
+        return [
+          turnStarted,
+          {
+            method: "error",
+            params: {
+              threadId: childId,
+              turnId,
+              willRetry: false,
+              error: { message: "child turn failed" },
+            },
+          },
+        ];
+      };
+      const script = {
+        rootThreadId: ROOT,
+        holdTurnOpen: true,
+        notifications: [
+          ...failedTurn(CHILD_A),
+          ...failedTurn(CHILD_B),
+          capturedStartedActivity(CHILD_A),
+          // Notifications are handled in order, so once this root message is
+          // out, the registration and its replay have finished.
+          ...agentMessage(ROOT, "root-marker", "registered"),
+        ],
+      };
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      NodeFS.writeFileSync(scriptPath, JSON.stringify(script), "utf8");
+      const interruptsPath = `${scriptPath}.interrupts`;
+      NodeFS.rmSync(interruptsPath, { force: true });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          NodeFS.rmSync(scriptPath, { force: true });
+          NodeFS.rmSync(interruptsPath, { force: true });
+        }),
+      );
+
+      const runtime = yield* makeCodexSessionRuntime({
+        threadId: ThreadId.make("thread-collab-stop-failed-child"),
+        binaryPath: peerPath,
+        cwd: NodeOS.tmpdir(),
+        runtimeMode: "full-access",
+        environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+      });
+      const markerFiber = yield* runtime.events.pipe(
+        Stream.filter(
+          (event) => event.method === "item/completed" && event.itemId === "root-marker",
+        ),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "fan out" });
+      const marker = yield* Fiber.join(markerFiber).pipe(Effect.timeoutOption("15 seconds"));
+      assert.isTrue(marker._tag === "Some", "the root marker never arrived");
+
+      yield* runtime.interruptTurn();
+
+      const interruptedThreads = NodeFS.readFileSync(interruptsPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => (JSON.parse(line) as { threadId?: string }).threadId);
+      assert.deepEqual(interruptedThreads, [ROOT], "only the root turn is still live");
+
+      yield* runtime.close;
+    }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),
+  );
+
+  // it.live: the runtime talks to a real child process; under it.effect's
+  // TestClock the internal timers freeze and the join never completes.
+  it.live("Stop reaches a child's newer turn after its held error replays", () =>
+    Effect.gen(function* () {
+      // Child A fails turn 1, starts turn 2, then registers. The error is
+      // held until registration; replaying it must not forget turn 2.
+      const turnStartedA = wireFixture.notifications.find(
+        (entry) =>
+          entry.method === "turn/started" &&
+          (entry.params as { threadId?: string }).threadId === CHILD_A,
+      );
+      assert.isDefined(turnStartedA);
+      const newerTurnId = `${CHILD_A}-turn-2`;
+      const script = {
+        rootThreadId: ROOT,
+        holdTurnOpen: true,
+        notifications: [
+          {
+            method: "error",
+            params: {
+              threadId: CHILD_A,
+              turnId: `${CHILD_A}-turn-1`,
+              willRetry: false,
+              error: { message: "child turn failed" },
+            },
+          },
+          {
+            ...turnStartedA,
+            params: {
+              ...turnStartedA.params,
+              turn: { ...turnStartedA.params.turn, id: newerTurnId },
+            },
+          },
+          capturedStartedActivity(CHILD_A),
+          // Notifications are handled in order, so once this root message is
+          // out, any replay triggered by the registration has finished.
+          ...agentMessage(ROOT, "root-marker", "registered"),
+        ],
+      };
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      NodeFS.writeFileSync(scriptPath, JSON.stringify(script), "utf8");
+      const interruptsPath = `${scriptPath}.interrupts`;
+      NodeFS.rmSync(interruptsPath, { force: true });
+      yield* Effect.addFinalizer(() =>
+        Effect.sync(() => {
+          NodeFS.rmSync(scriptPath, { force: true });
+          NodeFS.rmSync(interruptsPath, { force: true });
+        }),
+      );
+
+      const runtime = yield* makeCodexSessionRuntime({
+        threadId: ThreadId.make("thread-collab-stop-replayed-error"),
+        binaryPath: peerPath,
+        cwd: NodeOS.tmpdir(),
+        runtimeMode: "full-access",
+        environment: { ...process.env, T3_CODEX_COLLAB_SCRIPT: scriptPath },
+      });
+      const markerFiber = yield* runtime.events.pipe(
+        Stream.filter(
+          (event) => event.method === "item/completed" && event.itemId === "root-marker",
+        ),
+        Stream.take(1),
+        Stream.runCollect,
+        Effect.forkScoped,
+      );
+
+      yield* runtime.start();
+      yield* runtime.sendTurn({ input: "fan out" });
+      const marker = yield* Fiber.join(markerFiber).pipe(Effect.timeoutOption("15 seconds"));
+      assert.isTrue(marker._tag === "Some", "the root marker never arrived");
+
+      yield* runtime.interruptTurn();
+
+      const interrupts = NodeFS.readFileSync(interruptsPath, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as { threadId?: string; turnId?: string });
+      assert.include(
+        interrupts.map((entry) => `${entry.threadId} ${entry.turnId}`),
+        `${CHILD_A} ${newerTurnId}`,
+        "child A's newer turn must be interrupted",
       );
 
       yield* runtime.close;

@@ -18,6 +18,8 @@ const script = JSON.parse(NodeFS.readFileSync(process.env.T3_CODEX_COLLAB_SCRIPT
 const write = (message) => process.stdout.write(`${JSON.stringify(message)}\n`);
 let turnStartCount = 0;
 let activeTurn;
+// A thread/start request whose answer waits for threadStartAfterResumeOf.
+let deferredThreadStartId;
 // Server->client requests the runtime must answer (approval prompts), keyed
 // by the numeric JSON-RPC id this peer allocated for them.
 const openServerRequests = new Map();
@@ -103,6 +105,17 @@ rl.on("line", (line) => {
     return;
   }
   if (method === "thread/start") {
+    // Output Codex sends for the new thread before answering the request.
+    for (const notification of script.threadStartNotifications ?? []) {
+      write({ jsonrpc: "2.0", method: notification.method, params: notification.params });
+    }
+    // The runtime resumes a registered child only after routing every
+    // notification before that registration, so waiting for that request
+    // proves those notifications were handled before the open response.
+    if (script.threadStartAfterResumeOf) {
+      deferredThreadStartId = id;
+      return;
+    }
     write({ id, result: fixture.responses.threadStart });
     return;
   }
@@ -122,6 +135,10 @@ rl.on("line", (line) => {
       );
     }
     const threadId = message.params?.threadId;
+    if (deferredThreadStartId !== undefined && threadId === script.threadStartAfterResumeOf) {
+      write({ id: deferredThreadStartId, result: fixture.responses.threadStart });
+      deferredThreadStartId = undefined;
+    }
     const childSnapshot = script.childResumeSnapshots?.[threadId];
     if (script.resumeRequestMarker) {
       write({

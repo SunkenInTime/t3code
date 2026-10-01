@@ -836,6 +836,23 @@ function readNotificationThreadId(notification: CodexServerNotification): string
   }
 }
 
+/**
+ * Bounds for output held from unidentified foreign threads. A child's output
+ * normally waits a few notifications for its registration; memory work that is
+ * never identified stays held until its thread closes, so cap both.
+ */
+const MAX_HELD_THREADS = 16;
+const MAX_HELD_NOTIFICATIONS_PER_THREAD = 256;
+
+/** Like readNotificationThreadId, plus methods whose threadId is optional (warning). */
+function readAddressedThreadId(notification: CodexServerNotification): string | undefined {
+  const params = notification.params;
+  return (
+    readNotificationThreadId(notification) ??
+    ("threadId" in params && typeof params.threadId === "string" ? params.threadId : undefined)
+  );
+}
+
 export function makeMemoryConsolidationNotificationFilter(): (
   notification: CodexServerNotification,
 ) => boolean {
@@ -951,9 +968,9 @@ function readRouteFields(notification: CodexServerNotification): {
  * WIP, probe-gated: registration is deliberately explicit-signals-only. The
  * spec's "provisionally treat unknown foreign thread ids as v2 children" rule
  * needs a live wire capture of the packaged binary before it lands — blind
- * capture risks eating unrelated traffic. Until then a child whose first
- * notification precedes registration passes through as today (no regression
- * vs main, which passes everything through).
+ * capture risks eating unrelated traffic. Until then a child's output that
+ * precedes registration is held and replayed once it registers (see
+ * heldNotificationsByThread).
  */
 interface CollabChildAgentState {
   readonly agentThreadId: string;
@@ -1032,26 +1049,28 @@ function readThreadSpawnSource(thread: { readonly source: unknown }):
   };
 }
 
+/** Records receiver threads named by a collabAgentToolCall and returns their ids. */
 function rememberCollabReceiverTurns(
   collabReceiverTurns: Map<string, TurnId>,
   notification: CodexServerNotification,
   parentTurnId: TurnId | undefined,
-): void {
+): ReadonlyArray<string> {
   if (!parentTurnId) {
-    return;
+    return [];
   }
 
   if (notification.method !== "item/started" && notification.method !== "item/completed") {
-    return;
+    return [];
   }
 
   if (notification.params.item.type !== "collabAgentToolCall") {
-    return;
+    return [];
   }
 
   for (const receiverThreadId of notification.params.item.receiverThreadIds) {
     collabReceiverTurns.set(receiverThreadId, parentTurnId);
   }
+  return notification.params.item.receiverThreadIds;
 }
 
 function shouldSuppressChildConversationNotification(
@@ -1317,6 +1336,36 @@ export const makeCodexSessionRuntime = (
     /** Child provider-thread id → its currently running provider turn id. */
     const collabChildLiveTurnsRef = yield* Ref.make(new Map<string, string>());
     const suppressMemoryConsolidationNotification = makeMemoryConsolidationNotificationFilter();
+    /** Provider threads announced by thread/started on this connection. */
+    const announcedThreadIds = new Set<string>();
+    /**
+     * Output addressed to a foreign thread nothing has identified yet, in
+     * arrival order. Codex can stream a v2 child's items before the
+     * subAgentActivity or thread/started that registers it, and background
+     * memory work streams items with no announcement at all; the two look the
+     * same on arrival. Held output replays through the normal routing once its
+     * thread is identified, and is discarded if the thread closes first.
+     * Plain mutable state: only the single notification consumer touches it.
+     */
+    const heldNotificationsByThread = new Map<string, Array<CodexServerNotification>>();
+    /** Held threads identified while routing the current notification, to release next. */
+    const identifiedHeldThreadIds: Array<string> = [];
+    /** Called wherever a thread becomes identified: announced, registered, or a receiver. */
+    const markIdentified = (threadId: string) => {
+      if (heldNotificationsByThread.has(threadId)) {
+        identifiedHeldThreadIds.push(threadId);
+      }
+    };
+    /** Ends a child's tracked live turn unless a newer turn has replaced it. */
+    const endCollabChildLiveTurn = (agentThreadId: string, turnId: string) =>
+      Ref.update(collabChildLiveTurnsRef, (current) => {
+        if (current.get(agentThreadId) !== turnId) {
+          return current;
+        }
+        const next = new Map(current);
+        next.delete(agentThreadId);
+        return next;
+      });
     const closedRef = yield* Ref.make(false);
     /** The `additionalContext` of the latest `turn/start`, restored after compaction. */
     const lastAdditionalContextRef =
@@ -1670,6 +1719,7 @@ export const makeCodexSessionRuntime = (
             });
             return next;
           });
+          markIdentified(item.agentThreadId);
           const registeredChild = (yield* Ref.get(collabChildAgentsRef)).get(item.agentThreadId);
           const metadata = (yield* Ref.get(collabChildMetadataRef)).get(item.agentThreadId);
           yield* emitEvent({
@@ -1846,11 +1896,9 @@ export const makeCodexSessionRuntime = (
             if (willRetry) {
               return true;
             }
-            yield* Ref.update(collabChildLiveTurnsRef, (current) => {
-              const next = new Map(current);
-              next.delete(child.agentThreadId);
-              return next;
-            });
+            // Turn-aware: a held error replays after the child may have
+            // started a newer turn that Stop must still reach.
+            yield* endCollabChildLiveTurn(child.agentThreadId, notification.params.turnId);
             yield* emitEvent({
               kind: "notification",
               threadId: options.threadId,
@@ -1901,8 +1949,47 @@ export const makeCodexSessionRuntime = (
         ),
       );
 
-    const handleRawNotification = (notification: CodexServerNotification) =>
+    const isIdentifiedThread = (threadId: string) =>
       Effect.gen(function* () {
+        return (
+          threadId === currentProviderThreadId(yield* Ref.get(sessionRef)) ||
+          announcedThreadIds.has(threadId) ||
+          (yield* Ref.get(collabReceiverTurnsRef)).has(threadId) ||
+          (yield* Ref.get(collabChildAgentsRef)).has(threadId)
+        );
+      });
+
+    const holdNotification = (threadId: string, notification: CodexServerNotification) => {
+      const held = heldNotificationsByThread.get(threadId);
+      if (held) {
+        if (held.length < MAX_HELD_NOTIFICATIONS_PER_THREAD) {
+          held.push(notification);
+        }
+        return;
+      }
+      if (heldNotificationsByThread.size >= MAX_HELD_THREADS) {
+        // Evict the oldest: a thread unidentified for that long is the one
+        // least likely to be a child still waiting on registration.
+        const oldest = heldNotificationsByThread.keys().next();
+        if (!oldest.done) {
+          heldNotificationsByThread.delete(oldest.value);
+        }
+      }
+      heldNotificationsByThread.set(threadId, [notification]);
+    };
+
+    /**
+     * Routes one notification. Bookkeeping (announcements, receiver turns,
+     * live turns) happens on arrival; a `replayed` notification was held, so
+     * its bookkeeping already ran and it is only delivered. Child live-turn
+     * cleanup is turn-aware, so replaying an error cannot end a newer turn.
+     */
+    const routeRawNotification = (notification: CodexServerNotification, replayed: boolean) =>
+      Effect.gen(function* () {
+        if (notification.method === "thread/started") {
+          announcedThreadIds.add(notification.params.thread.id);
+          markIdentified(notification.params.thread.id);
+        }
         const isMemoryConsolidationNotification =
           suppressMemoryConsolidationNotification(notification);
 
@@ -1916,7 +2003,15 @@ export const makeCodexSessionRuntime = (
             : undefined;
         })();
 
-        rememberCollabReceiverTurns(collabReceiverTurns, notification, route.turnId);
+        if (!replayed) {
+          for (const receiverThreadId of rememberCollabReceiverTurns(
+            collabReceiverTurns,
+            notification,
+            route.turnId,
+          )) {
+            markIdentified(receiverThreadId);
+          }
+        }
         // Interception FIRST: a registered v2 child is usually also in the
         // receiver-turn map (collabAgentToolCall.receiverThreadIds), and the
         // legacy suppressor below would drop its lifecycle before it could
@@ -1934,7 +2029,8 @@ export const makeCodexSessionRuntime = (
         // lifecycle must not reach the parent path, where the adapter maps
         // thread/* onto parent session state. Root-id-known guard keeps the
         // root's own early notifications flowing during session open.
-        const suppressRootId = currentProviderThreadId(yield* Ref.get(sessionRef));
+        const currentSession = yield* Ref.get(sessionRef);
+        const suppressRootId = currentProviderThreadId(currentSession);
         const foreignConversation = (() => {
           const providerConversationId = readNotificationThreadId(notification);
           return (
@@ -1978,12 +2074,40 @@ export const makeCodexSessionRuntime = (
                 return next;
               });
             }
+            // A thread that closes while unidentified never claims its held
+            // output.
+            if (notification.method === "thread/closed") {
+              heldNotificationsByThread.delete(foreignThreadId);
+            }
           }
           yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
           return;
         }
 
         if (isMemoryConsolidationNotification) {
+          return;
+        }
+
+        yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
+        // Nothing is held while the session opens: until the open response
+        // the root may still be a stale resume cursor, and the root never
+        // changes after it. serverRequest/resolved never waits: it clears
+        // approval state the parent owns.
+        const addressedThreadId = readAddressedThreadId(notification);
+        if (
+          currentSession.status !== "connecting" &&
+          suppressRootId !== undefined &&
+          addressedThreadId !== undefined &&
+          addressedThreadId !== suppressRootId &&
+          notification.method !== "serverRequest/resolved" &&
+          !(yield* isIdentifiedThread(addressedThreadId))
+        ) {
+          // Live-turn tracking saw this thread's turn/started on arrival, so
+          // the turn this error ends is cleared on arrival too.
+          if (notification.method === "error" && !notification.params.willRetry) {
+            yield* endCollabChildLiveTurn(addressedThreadId, notification.params.turnId);
+          }
+          holdNotification(addressedThreadId, notification);
           return;
         }
 
@@ -2021,7 +2145,6 @@ export const makeCodexSessionRuntime = (
           }
         }
 
-        yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
         yield* emitEvent({
           kind: "notification",
           threadId: options.threadId,
@@ -2036,6 +2159,35 @@ export const makeCodexSessionRuntime = (
           ...(payload !== undefined ? { payload } : {}),
         });
       });
+
+    /**
+     * Replays held output for threads identified while routing the last
+     * notification, in arrival order, through the same routing a fresh
+     * notification gets: a registered child goes to the child path, announced
+     * memory work is dropped, anything else takes the normal path.
+     */
+    const releaseIdentifiedThreads = Effect.gen(function* () {
+      let threadId: string | undefined;
+      while ((threadId = identifiedHeldThreadIds.shift()) !== undefined) {
+        const held = heldNotificationsByThread.get(threadId);
+        if (!held) {
+          continue;
+        }
+        heldNotificationsByThread.delete(threadId);
+        yield* Effect.forEach(held, (notification) => routeRawNotification(notification, true), {
+          discard: true,
+        });
+      }
+    });
+
+    const handleRawNotification = (notification: CodexServerNotification) =>
+      routeRawNotification(notification, false).pipe(
+        Effect.andThen(
+          Effect.suspend(() =>
+            identifiedHeldThreadIds.length > 0 ? releaseIdentifiedThreads : Effect.void,
+          ),
+        ),
+      );
 
     const currentSessionProviderThreadId = Effect.map(Ref.get(sessionRef), currentProviderThreadId);
 
