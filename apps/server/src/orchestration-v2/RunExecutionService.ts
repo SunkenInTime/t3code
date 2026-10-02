@@ -948,6 +948,10 @@ export const layer: Layer.Layer<
           );
           const rootTerminalSeen = yield* Ref.make(false);
           const rootRunFinalized = yield* Ref.make(false);
+          // Set when an event write fails. The stream then stops writing but
+          // keeps routing until it has seen the root provider turn, so
+          // recovery always knows which turn to stop.
+          const lostIngestion = yield* Ref.make<Cause.Cause<unknown> | null>(null);
           const providerThreadOwnerLost = yield* Ref.make(false);
           const activeChildProviderTurns = yield* Ref.make<ReadonlySet<ProviderTurnId>>(new Set());
           const activeChildSubagents = yield* Ref.make<ReadonlySet<NodeId>>(new Set());
@@ -1271,6 +1275,7 @@ export const layer: Layer.Layer<
             ),
             Stream.tap((event) =>
               Effect.gen(function* () {
+                if ((yield* Ref.get(lostIngestion)) !== null) return;
                 let storedEventCount = 0;
                 const deliveredEvent = filterAssistantEvent(
                   event,
@@ -1286,37 +1291,45 @@ export const layer: Layer.Layer<
                   const isRootProviderThreadUpdate =
                     event.type === "provider_thread.updated" &&
                     event.providerThread.id === input.providerThread.id;
-                  const storedEvents = yield* providerEventIngestor.ingestNormalized({
-                    analyticsContext: {
-                      modelSelection: input.modelSelection,
-                      runtimeMode: input.runtimePolicy.runtimeMode,
-                      interactionMode: input.runtimePolicy.interactionMode,
-                    },
-                    providerSessionId: input.providerSessionId,
-                    providerInstanceId: input.run.providerInstanceId,
-                    threadId: input.run.threadId,
-                    runId: input.run.id,
-                    nodeId: input.rootNode.id,
-                    event: deliveredEvent,
-                    ...(isRootProviderThreadUpdate
-                      ? rootTerminalAlreadySeen
-                        ? {
-                            writeIfProviderThreadOwner: {
-                              providerThreadId: input.providerThread.id,
-                              runId: input.run.id,
-                              activeAttemptId: input.attempt.id,
-                              expectedLastRunOrdinal: input.run.ordinal,
-                            },
-                          }
-                        : {
-                            writeIfRunCurrent: {
-                              runId: input.run.id,
-                              activeAttemptId: input.attempt.id,
-                              expectedStatus: "running" as const,
-                            },
-                          }
-                      : {}),
-                  });
+                  const storedEvents = yield* providerEventIngestor
+                    .ingestNormalized({
+                      analyticsContext: {
+                        modelSelection: input.modelSelection,
+                        runtimeMode: input.runtimePolicy.runtimeMode,
+                        interactionMode: input.runtimePolicy.interactionMode,
+                      },
+                      providerSessionId: input.providerSessionId,
+                      providerInstanceId: input.run.providerInstanceId,
+                      threadId: input.run.threadId,
+                      runId: input.run.id,
+                      nodeId: input.rootNode.id,
+                      event: deliveredEvent,
+                      ...(isRootProviderThreadUpdate
+                        ? rootTerminalAlreadySeen
+                          ? {
+                              writeIfProviderThreadOwner: {
+                                providerThreadId: input.providerThread.id,
+                                runId: input.run.id,
+                                activeAttemptId: input.attempt.id,
+                                expectedLastRunOrdinal: input.run.ordinal,
+                              },
+                            }
+                          : {
+                              writeIfRunCurrent: {
+                                runId: input.run.id,
+                                activeAttemptId: input.attempt.id,
+                                expectedStatus: "running" as const,
+                              },
+                            }
+                        : {}),
+                    })
+                    .pipe(
+                      Effect.catchCauseIf(
+                        (cause) => !Cause.hasInterruptsOnly(cause),
+                        (cause) => Ref.set(lostIngestion, cause).pipe(Effect.as(null)),
+                      ),
+                    );
+                  if (storedEvents === null) return;
                   storedEventCount = storedEvents.length;
                   if (
                     isRootProviderThreadUpdate &&
@@ -1350,11 +1363,22 @@ export const layer: Layer.Layer<
                 yield* trackChildLifecycle(event, deliveredEvent !== null);
               }),
             ),
-            Stream.takeUntilEffect(() => shouldStopProviderEventIngestion),
+            Stream.takeUntilEffect(() =>
+              Effect.gen(function* () {
+                if ((yield* Ref.get(lostIngestion)) !== null) {
+                  return (yield* Ref.get(eventRouting)).rootProviderTurnId !== null;
+                }
+                return yield* shouldStopProviderEventIngestion;
+              }),
+            ),
             Stream.runDrain,
             Effect.mapError((cause) => new RunExecutionIngestError({ runId: input.run.id, cause })),
             Effect.flatMap(() =>
               Effect.gen(function* () {
+                const lost = yield* Ref.get(lostIngestion);
+                if (lost !== null) {
+                  return yield* new RunExecutionIngestError({ runId: input.run.id, cause: lost });
+                }
                 const terminal = yield* Ref.get(terminalEvent);
                 if (terminal === null) {
                   return;
