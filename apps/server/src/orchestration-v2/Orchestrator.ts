@@ -96,6 +96,7 @@ import type { ProviderAdapterV2Shape } from "./ProviderAdapter.ts";
 import { ProviderAdapterRegistryV2 } from "./ProviderAdapterRegistry.ts";
 import { ProviderContinuationRequests } from "./ProviderContinuationRequests.ts";
 import { makeProviderFailure } from "./ProviderFailure.ts";
+import { cascadeTerminalizeRunOwnedSubagents } from "./RunExecutionService.ts";
 import { ProviderSessionManagerV2 } from "./ProviderSessionManager.ts";
 import { ProviderSwitchServiceV2 } from "./ProviderSwitchService.ts";
 import { isAutomaticCompletionRun, queuedRunsInDeliveryOrder } from "./QueuedRunOrder.ts";
@@ -7981,42 +7982,82 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             payload: { ...message, streaming: false, updatedAt: now },
           });
         }
-        for (const node of projection.nodes.filter(
-          (candidate) =>
-            candidate.runId === run.id &&
-            (candidate.status === "pending" ||
-              candidate.status === "running" ||
-              candidate.status === "waiting"),
-        )) {
-          yield* emitEvent({
-            type: "node.updated",
-            threadId: command.threadId,
-            runId: run.id,
-            nodeId: node.id,
-            providerInstanceId: run.providerInstanceId,
-            occurredAt: now,
-            payload: { ...node, status: "interrupted", completedAt: now },
-          });
-        }
-        // Provider-native subagents died with the provider process. App-owned
-        // children run in their own threads and may still be working.
-        for (const subagent of projection.subagents.filter(
+        const isOpen = (status: string) =>
+          status === "pending" || status === "running" || status === "waiting";
+        // Provider-native subagents and their child threads died with the
+        // provider process. App-owned children run in their own threads and
+        // may still be working, so they are left alone.
+        const nativeSubagents = projection.subagents.filter(
           (candidate) =>
             candidate.runId === run.id &&
             candidate.origin === "provider_native" &&
-            (candidate.status === "pending" ||
-              candidate.status === "running" ||
-              candidate.status === "waiting"),
+            isOpen(candidate.status),
+        );
+        const childThreadIds = new Set(
+          nativeSubagents.flatMap((subagent) =>
+            subagent.childThreadId === null ? [] : [subagent.childThreadId],
+          ),
+        );
+        const childRecords = yield* Effect.forEach([...childThreadIds], (childThreadId) =>
+          projectionStore
+            .getThreadRecords(childThreadId, ["nodes", "turnItems"], {
+              turnItemStatuses: ["pending", "running", "waiting"],
+            })
+            .pipe(Effect.orElseSucceed(() => ({ nodes: [], turnItems: [] }))),
+        );
+        const cascaded = yield* cascadeTerminalizeRunOwnedSubagents({
+          run,
+          open: {
+            subagents: new Map(nativeSubagents.map((subagent) => [subagent.id, subagent])),
+            turnItems: new Map(),
+            childTurnItems: new Map(
+              childRecords.flatMap((records) => records.turnItems).map((item) => [item.id, item]),
+            ),
+            nodes: new Map(
+              [
+                ...projection.nodes.filter((node) => node.runId === run.id),
+                ...childRecords.flatMap((records) => records.nodes),
+              ]
+                .filter((node) => isOpen(node.status))
+                .map((node) => [node.id, node]),
+            ),
+            linkedChildThreadIds: childThreadIds,
+          },
+          status: "interrupted",
+          completedAt: now,
+          allocateEventId: () =>
+            idAllocator.allocate.event({
+              threadId: command.threadId,
+              commandId: command.commandId,
+            }),
+        }).pipe(mapDispatchError(command));
+        yield* Ref.update(events, (existing) => [...existing, ...cascaded]);
+        // Background-capable items settle below. Close this run's other open
+        // items (assistant text, reasoning) so no spinner outlives the run.
+        const openRunItems = yield* projectionStore
+          .getThreadRecords(command.threadId, ["turnItems"], {
+            turnItemRunIds: [run.id],
+            turnItemStatuses: ["pending", "running", "waiting"],
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+            ),
+          );
+        for (const item of openRunItems.turnItems.filter(
+          (candidate) =>
+            candidate.type !== "command_execution" &&
+            candidate.type !== "dynamic_tool" &&
+            candidate.type !== "subagent",
         )) {
           yield* emitEvent({
-            type: "subagent.updated",
+            type: "turn-item.updated",
             threadId: command.threadId,
             runId: run.id,
-            nodeId: subagent.id,
-            driver: subagent.driver,
-            providerInstanceId: subagent.providerInstanceId,
+            ...(item.nodeId === null ? {} : { nodeId: item.nodeId }),
+            providerInstanceId: run.providerInstanceId,
             occurredAt: now,
-            payload: { ...subagent, status: "interrupted", completedAt: now, updatedAt: now },
+            payload: { ...item, status: "interrupted", completedAt: now, updatedAt: now },
           });
         }
         const attempt = projection.attempts.find(

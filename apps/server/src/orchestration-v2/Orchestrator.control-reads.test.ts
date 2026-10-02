@@ -671,7 +671,7 @@ it.effect("stops a running turn whose provider session is already gone", () =>
           driver: adapter.driver,
           providerInstanceId: instanceId,
           providerThreadId,
-          childThreadId: origin === "app_owned" ? ThreadId.make("thread:orphaned-run:child") : null,
+          childThreadId: ThreadId.make(`thread:orphaned-run:child:${origin}`),
           nativeTaskRef: null,
           prompt: "Explore",
           title: null,
@@ -726,6 +726,99 @@ it.effect("stops a running turn whose provider session is already gone", () =>
         input: "sleep 4",
       },
     });
+    const assistantItemId = TurnItemId.make("turn-item:orphaned-run:assistant");
+    yield* projections.apply({
+      id: EventId.make("orphaned-run:assistant"),
+      type: "turn-item.updated",
+      threadId,
+      runId,
+      occurredAt: now,
+      payload: {
+        id: assistantItemId,
+        threadId,
+        runId,
+        nodeId,
+        providerThreadId,
+        providerTurnId,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 11,
+        status: "running",
+        title: null,
+        startedAt: now,
+        completedAt: null,
+        updatedAt: now,
+        type: "assistant_message",
+        messageId: MessageId.make("message:orphaned-run:assistant"),
+        text: "Working on it",
+        streaming: true,
+      },
+    });
+    // The provider-native subagent's own thread still shows running work.
+    const nativeChildThreadId = ThreadId.make("thread:orphaned-run:child:provider_native");
+    const childNodeId = NodeId.make("node:orphaned-run:child-root");
+    const childItemId = TurnItemId.make("turn-item:orphaned-run:child");
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-orphaned-run-child"),
+      threadId: nativeChildThreadId,
+      projectId: ProjectId.make("project:orphaned-run"),
+      title: "Native subagent",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "agent",
+      creationSource: "provider",
+    });
+    yield* projections.apply({
+      id: EventId.make("orphaned-run:child-node"),
+      type: "node.updated",
+      threadId: nativeChildThreadId,
+      occurredAt: now,
+      payload: {
+        id: childNodeId,
+        threadId: nativeChildThreadId,
+        runId: null,
+        parentNodeId: null,
+        rootNodeId: childNodeId,
+        kind: "root_turn",
+        status: "running",
+        countsForRun: false,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        runtimeRequestId: null,
+        checkpointScopeId: null,
+        startedAt: now,
+        completedAt: null,
+      },
+    });
+    yield* projections.apply({
+      id: EventId.make("orphaned-run:child-item"),
+      type: "turn-item.updated",
+      threadId: nativeChildThreadId,
+      occurredAt: now,
+      payload: {
+        id: childItemId,
+        threadId: nativeChildThreadId,
+        runId: null,
+        nodeId: childNodeId,
+        providerThreadId: null,
+        providerTurnId: null,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 1,
+        status: "running",
+        title: "Reading files",
+        startedAt: now,
+        completedAt: null,
+        updatedAt: now,
+        type: "command_execution",
+        input: "ls",
+      },
+    });
 
     yield* orchestrator.dispatch({
       type: "run.interrupt",
@@ -741,6 +834,7 @@ it.effect("stops a running turn whose provider session is already gone", () =>
       node: projection.nodes.find((node) => node.id === nodeId)?.status,
       providerTurn: projection.providerTurns.find((turn) => turn.id === providerTurnId)?.status,
       item: projection.turnItems.find((item) => item.id === itemId)?.status,
+      assistant: projection.turnItems.find((item) => item.id === assistantItemId)?.status,
     };
     assert.deepEqual(statuses, {
       run: "interrupted",
@@ -748,7 +842,16 @@ it.effect("stops a running turn whose provider session is already gone", () =>
       node: "interrupted",
       providerTurn: "interrupted",
       item: "interrupted",
+      assistant: "interrupted",
     });
+    const child = yield* projections.getThreadRecords(nativeChildThreadId, ["nodes", "turnItems"]);
+    assert.deepEqual(
+      [
+        child.nodes.find((node) => node.id === childNodeId)?.status,
+        child.turnItems.find((item) => item.id === childItemId)?.status,
+      ],
+      ["interrupted", "interrupted"],
+    );
     const result = projection.turnItems.find((item) => item.type === "run_interrupt_result");
     assert.equal(result?.status, "interrupted");
     // The provider's own subagent died with it; a delegated child thread did not.
