@@ -1,5 +1,6 @@
 import { assert, it } from "@effect/vitest";
 import {
+  CheckpointScopeId,
   CommandId,
   MessageId,
   EventId,
@@ -532,5 +533,236 @@ it.effect("settles only the stopped run's background work, once", () =>
       `${commandItem(2)}:running`,
       `${commandItem(3)}:running`,
     ]);
+  }).pipe(Effect.provide(testLayer)),
+);
+
+// A run whose event consumer died stays "running" with nothing behind it once
+// its provider session is released. Stop must settle it rather than fail.
+it.effect("stops a running turn whose provider session is already gone", () =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const projections = yield* ProjectionStore.ProjectionStoreV2;
+    const threadId = ThreadId.make("thread:orphaned-run");
+    const providerThreadId = ProviderThreadId.make("provider-thread:orphaned-run");
+    const runId = RunId.make("run:orphaned-run");
+    const attemptId = RunAttemptId.make("attempt:orphaned-run");
+    const nodeId = NodeId.make("node:orphaned-run");
+    const providerTurnId = ProviderTurnId.make("provider-turn:orphaned-run");
+    const itemId = TurnItemId.make("turn-item:orphaned-run");
+    const now = yield* DateTime.now;
+    yield* orchestrator.dispatch({
+      type: "thread.create",
+      commandId: CommandId.make("create-orphaned-run"),
+      threadId,
+      projectId: ProjectId.make("project:orphaned-run"),
+      title: "Orphaned run",
+      modelSelection,
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      createdBy: "user",
+      creationSource: "web",
+    });
+    // The provider thread still points at a session the server no longer holds.
+    yield* projections.apply({
+      id: EventId.make("orphaned-run:provider-thread"),
+      type: "provider-thread.updated",
+      threadId,
+      occurredAt: now,
+      payload: {
+        id: providerThreadId,
+        driver: adapter.driver,
+        providerInstanceId: instanceId,
+        providerSessionId: ProviderSessionId.make("session:orphaned-run:released"),
+        appThreadId: threadId,
+        ownerNodeId: null,
+        nativeThreadRef: null,
+        nativeConversationHeadRef: null,
+        status: "active",
+        firstRunOrdinal: 1,
+        lastRunOrdinal: 1,
+        handoffIds: [],
+        forkedFrom: null,
+        createdAt: now,
+        updatedAt: now,
+      },
+    });
+    yield* projections.apply({
+      id: EventId.make("orphaned-run:run"),
+      type: "run.created",
+      threadId,
+      occurredAt: now,
+      payload: {
+        id: runId,
+        threadId,
+        ordinal: 1,
+        providerInstanceId: instanceId,
+        modelSelection,
+        providerThreadId,
+        userMessageId: MessageId.make("message:orphaned-run"),
+        rootNodeId: nodeId,
+        activeAttemptId: attemptId,
+        status: "running",
+        requestedAt: now,
+        startedAt: now,
+        completedAt: null,
+        checkpointId: null,
+        contextHandoffId: null,
+      },
+    });
+    yield* projections.apply({
+      id: EventId.make("orphaned-run:attempt"),
+      type: "run-attempt.created",
+      threadId,
+      occurredAt: now,
+      payload: {
+        id: attemptId,
+        runId,
+        attemptOrdinal: 1,
+        rootNodeId: nodeId,
+        providerInstanceId: instanceId,
+        providerThreadId,
+        providerTurnId,
+        reason: "initial",
+        status: "running",
+        startedAt: now,
+        completedAt: null,
+      },
+    });
+    yield* projections.apply({
+      id: EventId.make("orphaned-run:node"),
+      type: "node.updated",
+      threadId,
+      runId,
+      occurredAt: now,
+      payload: {
+        id: nodeId,
+        threadId,
+        runId,
+        parentNodeId: null,
+        rootNodeId: nodeId,
+        kind: "root_turn",
+        status: "running",
+        countsForRun: true,
+        providerThreadId,
+        providerTurnId,
+        nativeItemRef: null,
+        runtimeRequestId: null,
+        checkpointScopeId: CheckpointScopeId.make("checkpoint-scope:orphaned-run"),
+        startedAt: now,
+        completedAt: null,
+      },
+    });
+    for (const origin of ["provider_native", "app_owned"] as const) {
+      yield* projections.apply({
+        id: EventId.make(`orphaned-run:subagent:${origin}`),
+        type: "subagent.updated",
+        threadId,
+        runId,
+        occurredAt: now,
+        payload: {
+          id: NodeId.make(`node:orphaned-run:${origin}`),
+          threadId,
+          runId,
+          parentNodeId: nodeId,
+          origin,
+          createdBy: "agent",
+          driver: adapter.driver,
+          providerInstanceId: instanceId,
+          providerThreadId,
+          childThreadId: origin === "app_owned" ? ThreadId.make("thread:orphaned-run:child") : null,
+          nativeTaskRef: null,
+          prompt: "Explore",
+          title: null,
+          model: null,
+          status: "running",
+          result: null,
+          startedAt: now,
+          completedAt: null,
+          updatedAt: now,
+        },
+      });
+    }
+    yield* projections.apply({
+      id: EventId.make("orphaned-run:turn"),
+      type: "provider-turn.updated",
+      threadId,
+      occurredAt: now,
+      payload: {
+        id: providerTurnId,
+        providerThreadId,
+        nodeId,
+        runAttemptId: attemptId,
+        nativeTurnRef: null,
+        ordinal: 1,
+        status: "running",
+        startedAt: now,
+        completedAt: null,
+      },
+    });
+    yield* projections.apply({
+      id: EventId.make("orphaned-run:item"),
+      type: "turn-item.updated",
+      threadId,
+      runId,
+      occurredAt: now,
+      payload: {
+        id: itemId,
+        threadId,
+        runId,
+        nodeId,
+        providerThreadId,
+        providerTurnId,
+        nativeItemRef: null,
+        parentItemId: null,
+        ordinal: 10,
+        status: "running",
+        title: "Running sleep",
+        startedAt: now,
+        completedAt: null,
+        updatedAt: now,
+        type: "command_execution",
+        input: "sleep 4",
+      },
+    });
+
+    yield* orchestrator.dispatch({
+      type: "run.interrupt",
+      commandId: CommandId.make("stop-orphaned-run"),
+      threadId,
+      runId,
+    });
+
+    const projection = yield* projections.getThreadProjection(threadId);
+    const statuses = {
+      run: projection.runs.find((run) => run.id === runId)?.status,
+      attempt: projection.attempts.find((attempt) => attempt.id === attemptId)?.status,
+      node: projection.nodes.find((node) => node.id === nodeId)?.status,
+      providerTurn: projection.providerTurns.find((turn) => turn.id === providerTurnId)?.status,
+      item: projection.turnItems.find((item) => item.id === itemId)?.status,
+    };
+    assert.deepEqual(statuses, {
+      run: "interrupted",
+      attempt: "interrupted",
+      node: "interrupted",
+      providerTurn: "interrupted",
+      item: "interrupted",
+    });
+    const result = projection.turnItems.find((item) => item.type === "run_interrupt_result");
+    assert.equal(result?.status, "interrupted");
+    // The provider's own subagent died with it; a delegated child thread did not.
+    assert.deepEqual(
+      projection.subagents.map((subagent) => `${subagent.origin}:${subagent.status}`).toSorted(),
+      ["app_owned:running", "provider_native:interrupted"],
+    );
+    const sql = yield* SqlClient.SqlClient;
+    const checkpointEffects = yield* sql<{ readonly effect_id: string }>`
+      SELECT effect_id FROM orchestration_v2_effect_outbox
+      WHERE effect_type = 'checkpoint.capture' AND thread_id = ${threadId}`;
+    assert.deepEqual(
+      checkpointEffects.map((row) => row.effect_id),
+      [`effect:checkpoint.capture:${runId}`],
+    );
   }).pipe(Effect.provide(testLayer)),
 );

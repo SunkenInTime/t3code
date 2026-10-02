@@ -7915,17 +7915,163 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           cause: `Run ${command.runId} is not interruptible.`,
         });
       }
+      const sessionGone =
+        providerThread.providerSessionId === null ||
+        Option.isNone(
+          yield* providerSessions
+            .get(providerThread.providerSessionId)
+            .pipe(Effect.orElseSucceed(() => Option.none())),
+        );
+      // A running turn whose session is gone has no process left to stop. Its
+      // run lost track of the provider (for example its event consumer died),
+      // so nothing will ever report it ending. Settle it here; otherwise Stop
+      // fails and the thread shows the agent working forever.
+      if (providerTurn.status === "running" && sessionGone) {
+        const interruptResultItem: OrchestrationV2TurnItem = {
+          id: idAllocator.derive.runSignalTurnItem({
+            runId: run.id,
+            signal: "interrupt-result",
+          }),
+          threadId: command.threadId,
+          runId: run.id,
+          nodeId: rootNode.id,
+          providerThreadId: providerThread.id,
+          providerTurnId: providerTurn.id,
+          nativeItemRef: null,
+          parentItemId: interruptRequestItem.id,
+          ordinal: interruptRequestItem.ordinal + 1,
+          status: "interrupted",
+          title: "Interrupted",
+          startedAt: now,
+          completedAt: now,
+          updatedAt: now,
+          type: "run_interrupt_result",
+          message: "Stopped. The agent's session had already ended.",
+        };
+        for (const payload of [interruptRequestItem, interruptResultItem]) {
+          yield* emitEvent({
+            type: "turn-item.updated",
+            threadId: command.threadId,
+            runId: run.id,
+            nodeId: rootNode.id,
+            providerInstanceId: run.providerInstanceId,
+            occurredAt: now,
+            payload,
+          });
+        }
+        yield* emitEvent({
+          type: "provider-turn.updated",
+          threadId: command.threadId,
+          runId: run.id,
+          nodeId: providerTurn.nodeId,
+          providerInstanceId: run.providerInstanceId,
+          occurredAt: now,
+          payload: { ...providerTurn, status: "interrupted", completedAt: now },
+        });
+        for (const message of projection.messages.filter(
+          (candidate) => candidate.runId === run.id && candidate.streaming,
+        )) {
+          yield* emitEvent({
+            type: "message.updated",
+            threadId: command.threadId,
+            runId: run.id,
+            ...(message.nodeId === null ? {} : { nodeId: message.nodeId }),
+            providerInstanceId: run.providerInstanceId,
+            occurredAt: now,
+            payload: { ...message, streaming: false, updatedAt: now },
+          });
+        }
+        for (const node of projection.nodes.filter(
+          (candidate) =>
+            candidate.runId === run.id &&
+            (candidate.status === "pending" ||
+              candidate.status === "running" ||
+              candidate.status === "waiting"),
+        )) {
+          yield* emitEvent({
+            type: "node.updated",
+            threadId: command.threadId,
+            runId: run.id,
+            nodeId: node.id,
+            providerInstanceId: run.providerInstanceId,
+            occurredAt: now,
+            payload: { ...node, status: "interrupted", completedAt: now },
+          });
+        }
+        // Provider-native subagents died with the provider process. App-owned
+        // children run in their own threads and may still be working.
+        for (const subagent of projection.subagents.filter(
+          (candidate) =>
+            candidate.runId === run.id &&
+            candidate.origin === "provider_native" &&
+            (candidate.status === "pending" ||
+              candidate.status === "running" ||
+              candidate.status === "waiting"),
+        )) {
+          yield* emitEvent({
+            type: "subagent.updated",
+            threadId: command.threadId,
+            runId: run.id,
+            nodeId: subagent.id,
+            driver: subagent.driver,
+            providerInstanceId: subagent.providerInstanceId,
+            occurredAt: now,
+            payload: { ...subagent, status: "interrupted", completedAt: now, updatedAt: now },
+          });
+        }
+        const attempt = projection.attempts.find(
+          (candidate) => candidate.id === run.activeAttemptId,
+        );
+        if (attempt !== undefined) {
+          yield* emitEvent({
+            type: "run-attempt.updated",
+            threadId: command.threadId,
+            runId: run.id,
+            nodeId: rootNode.id,
+            providerInstanceId: run.providerInstanceId,
+            occurredAt: now,
+            payload: { ...attempt, status: "interrupted", completedAt: now },
+          });
+        }
+        yield* emitEvent({
+          type: "run.updated",
+          threadId: command.threadId,
+          runId: run.id,
+          nodeId: rootNode.id,
+          providerInstanceId: run.providerInstanceId,
+          occurredAt: now,
+          payload: { ...run, status: "interrupted", completedAt: now },
+        });
+        // Like any stopped run, capture its checkpoint as the rollback point
+        // for the next message.
+        const checkpointScopeId = rootNode.checkpointScopeId;
+        if (checkpointScopeId !== null) {
+          yield* Ref.update(effects, (existing) => [
+            ...existing,
+            {
+              id: `effect:checkpoint.capture:${run.id}`,
+              commandId: CommandId.make(`command:effect:checkpoint.capture:${run.id}`),
+              threadId: command.threadId,
+              request: { type: "checkpoint.capture", runId: run.id, scopeId: checkpointScopeId },
+            } satisfies PendingOrchestrationEffectV2,
+          ]);
+        }
+        if (command.holdQueue === true) yield* holdQueuedRuns;
+        yield* stopCompletionCohort();
+        yield* settleBackgroundWork({
+          command,
+          events,
+          projection,
+          stoppedProviderThreadId: providerThread.id,
+          throughRunOrdinal: run.ordinal,
+          now,
+        });
+        return undefined;
+      }
       // Stop on a settled thread's background work. Its process may be gone
       // (released, restarted) and only the projection still shows the work;
       // the settle follow-up ends whatever no provider reports ending.
-      const settleOnly =
-        providerTurn.status !== "running" &&
-        (providerThread.providerSessionId === null ||
-          Option.isNone(
-            yield* providerSessions
-              .get(providerThread.providerSessionId)
-              .pipe(Effect.orElseSucceed(() => Option.none())),
-          ));
+      const settleOnly = providerTurn.status !== "running" && sessionGone;
       if (settleOnly) {
         yield* emitEvent({
           type: "turn-item.updated",
