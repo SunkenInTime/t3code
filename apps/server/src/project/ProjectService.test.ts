@@ -803,3 +803,55 @@ it.effect("rejects an update that waited on the lock while its project was delet
     );
   }).pipe(Effect.provide(ProjectServiceDependenciesLayer)),
 );
+
+it.effect("lists resolved shells for changed roots without requesting enrichment", () =>
+  Effect.gen(function* () {
+    const enrichment = yield* ProjectEnrichmentService.ProjectEnrichmentService;
+    const enrichmentCalls: Array<string> = [];
+    const record = (method: string, workspaceRoot: string) =>
+      Effect.sync(() => enrichmentCalls.push(`${method} ${workspaceRoot}`));
+    const service = yield* ProjectService.make.pipe(
+      Effect.provideService(ProjectEnrichmentService.ProjectEnrichmentService, {
+        ...enrichment,
+        peek: (root) => record("peek", root).pipe(Effect.andThen(enrichment.peek(root))),
+        request: (root) => record("request", root).pipe(Effect.andThen(enrichment.request(root))),
+        getAvailable: (root) =>
+          record("getAvailable", root).pipe(Effect.andThen(enrichment.getAvailable(root))),
+      }),
+    );
+    for (const name of ["a", "b", "c"]) {
+      yield* service.create({
+        commandId: CommandId.make(`command:project:resolved:${name}`),
+        projectId: ProjectId.make(`project:resolved-${name}`),
+        title: name,
+        workspaceRoot: `/work/resolved-${name}`,
+      });
+    }
+    enrichmentCalls.length = 0;
+
+    const identity = {
+      canonicalKey: "github.com/t3tools/resolved-a",
+      locator: {
+        source: "git-remote" as const,
+        remoteName: "origin",
+        remoteUrl: "git@github.com:t3tools/resolved-a.git",
+      },
+      rootPath: "/work/resolved-a",
+    };
+    const shells = yield* service.listResolvedShells(
+      new Map([
+        ["/work/resolved-a", identity],
+        ["/work/resolved-c", null],
+      ]),
+    );
+
+    assert.deepEqual(
+      shells.map((shell) => [shell.workspaceRoot, shell.repositoryIdentity?.canonicalKey ?? null]),
+      [
+        ["/work/resolved-a", "github.com/t3tools/resolved-a"],
+        ["/work/resolved-c", null],
+      ],
+    );
+    assert.deepEqual(enrichmentCalls, []);
+  }).pipe(Effect.provide(ProjectServiceDependenciesLayer)),
+);

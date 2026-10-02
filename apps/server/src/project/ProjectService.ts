@@ -6,6 +6,7 @@ import {
   type ProjectCreatePayload,
   type ProjectUpdatePayload,
   type ProjectSnapshot,
+  type RepositoryIdentity,
   type ThreadId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
@@ -141,6 +142,15 @@ export class ProjectService extends Context.Service<
     readonly listShells: (options?: {
       readonly projectIds?: ReadonlyArray<ProjectId>;
     }) => Effect.Effect<ReadonlyArray<OrchestrationProjectShell>, ProjectOperationError>;
+    /**
+     * Active shells for the workspace roots an enrichment refresh resolved,
+     * carrying those identities. Requests no enrichment: re-enriching here
+     * would re-request every expired root, and each resolution publishes
+     * another refresh.
+     */
+    readonly listResolvedShells: (
+      identities: ReadonlyMap<string, RepositoryIdentity | null>,
+    ) => Effect.Effect<ReadonlyArray<OrchestrationProjectShell>, ProjectOperationError>;
   }
 >()("t3/project/ProjectService") {}
 
@@ -539,6 +549,23 @@ export const make = Effect.gen(function* () {
     return yield* Effect.forEach(shells, enrichShell, { concurrency: 16 });
   });
 
+  const listResolvedShells: ProjectService["Service"]["listResolvedShells"] = Effect.fn(
+    "ProjectService.listResolvedShells",
+  )(function* (identities) {
+    const shells = yield* projects
+      .listShells()
+      .pipe(
+        Effect.mapError(
+          (cause) => new ProjectOperationError({ operation: "list-projects", cause }),
+        ),
+      );
+    return shells.flatMap((shell) =>
+      identities.has(shell.workspaceRoot)
+        ? [{ ...shell, repositoryIdentity: identities.get(shell.workspaceRoot) ?? null }]
+        : [],
+    );
+  });
+
   const snapshot = Effect.gen(function* () {
     const rows = yield* projects
       .list()
@@ -564,6 +591,7 @@ export const make = Effect.gen(function* () {
     snapshot,
     getShell,
     listShells,
+    listResolvedShells,
   });
 });
 
