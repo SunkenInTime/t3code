@@ -1,9 +1,11 @@
 import type { StorageCleanupSettings, WorktreeCleanupRules } from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
+import * as Equal from "effect/Equal";
 import { useState } from "react";
 
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
+import { Textarea } from "../ui/textarea";
 import {
   NumberField,
   NumberFieldDecrement,
@@ -101,9 +103,12 @@ export function StorageSettingsPanel() {
   const ruleStatus = (key: keyof StorageCleanupSettings) =>
     targets.some(
       (target) =>
-        ({ ...target.settings.storageCleanup, ...resolveWorktreeCleanup(target.settings, null) })[
-          key
-        ] !== settings[key],
+        !Equal.equals(
+          { ...target.settings.storageCleanup, ...resolveWorktreeCleanup(target.settings, null) }[
+            key
+          ],
+          settings[key],
+        ),
     )
       ? "Mixed across selected machines"
       : undefined;
@@ -113,6 +118,13 @@ export function StorageSettingsPanel() {
     isProjectScope
       ? updateSettings({ worktreeCleanup: { mode: "custom", rules: patch } })
       : update(patch);
+  const disposablePathsSupported = connectedEnvironments.every(
+    (environment) =>
+      environment.serverConfig?.environment.capabilities.worktreeDisposablePaths === true,
+  );
+  const disposablePathsStatus = ruleStatus("worktreeDisposablePaths");
+  const disposablePathsText = settings.worktreeDisposablePaths.join("\n");
+  const scopeKey = targets.map((entry) => `${entry.environmentId}:${entry.projectId}`).join(",");
 
   if (
     isProjectScope &&
@@ -249,6 +261,42 @@ export function StorageSettingsPanel() {
                 />
               }
             />
+            {disposablePathsSupported && (
+              <SettingsRow
+                title="Disposable ignored paths"
+                status={disposablePathsStatus}
+                description="Ignored files keep a worktree because they can hold secrets or local data. List .gitignore patterns that are safe to delete, one per line. Ignored symlinks and junctions never keep a worktree."
+                serverScoped={!isProjectScope}
+              >
+                <div className="mt-3 max-w-2xl pb-3.5">
+                  <Textarea
+                    key={`${scopeKey}:${disposablePathsText}`}
+                    aria-label="Disposable ignored paths"
+                    autoCapitalize="none"
+                    spellCheck={false}
+                    rows={3}
+                    defaultValue={disposablePathsStatus ? "" : disposablePathsText}
+                    placeholder={
+                      disposablePathsStatus
+                        ? "Mixed. Enter patterns to apply to all selected targets."
+                        : "No disposable paths"
+                    }
+                    onBlur={(event) => {
+                      const worktreeDisposablePaths = event.target.value
+                        .split("\n")
+                        .map((line) => line.trim())
+                        .filter((line) => line !== "");
+                      if (
+                        event.target.value !== event.target.defaultValue &&
+                        (disposablePathsStatus ||
+                          !Equal.equals(worktreeDisposablePaths, settings.worktreeDisposablePaths))
+                      )
+                        updateWorktree({ worktreeDisposablePaths });
+                    }}
+                  />
+                </div>
+              </SettingsRow>
+            )}
           </>
         )}
       </SettingsSection>

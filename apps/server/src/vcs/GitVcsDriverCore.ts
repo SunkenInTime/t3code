@@ -3580,6 +3580,23 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       },
     );
     if (result.exitCode === 0) {
+      // Git for Windows never descends into NTFS junctions, such as pnpm's
+      // node_modules links. It reports success but leaves them and their parent
+      // directories behind, so a resumed thread would find a stub instead of
+      // recreating its checkout. Node's rm unlinks links without following them.
+      // Git has already unregistered the worktree, so a failure here is logged
+      // rather than returned: a retry could never succeed.
+      const leftover = path.resolve(input.cwd, input.path);
+      if (yield* fileSystem.exists(leftover).pipe(Effect.orElseSucceed(() => false))) {
+        yield* fileSystem.remove(leftover, { recursive: true }).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("GitVcsDriver.removeWorktree: failed to delete leftover links", {
+              path: leftover,
+              error,
+            }),
+          ),
+        );
+      }
       return;
     }
     // Threads can share a worktree path, and worktrees get removed or pruned
