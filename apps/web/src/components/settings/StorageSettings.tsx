@@ -270,7 +270,7 @@ export function StorageSettingsPanel() {
               >
                 <div className="mt-3 max-w-2xl pb-3.5">
                   <Textarea
-                    key={`${scopeKey}:${disposablePathsText}`}
+                    key={`${scopeKey}:${disposablePathsStatus !== undefined}:${disposablePathsText}`}
                     aria-label="Disposable ignored paths"
                     autoCapitalize="none"
                     spellCheck={false}

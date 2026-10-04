@@ -1095,7 +1095,7 @@ const StorageRetentionDays = Schema.NullOr(
  * Any other ignored file, except a symlink or junction, keeps the worktree.
  */
 const WorktreeDisposablePaths = Schema.Array(TrimmedNonEmptyString);
-export const DEFAULT_WORKTREE_DISPOSABLE_PATHS: ReadonlyArray<string> = ["node_modules/"];
+const DEFAULT_WORKTREE_DISPOSABLE_PATHS: ReadonlyArray<string> = ["node_modules/"];
 
 export const WorktreeCleanupRules = Schema.Struct({
   worktreeAfterDays: StorageRetentionDays,
