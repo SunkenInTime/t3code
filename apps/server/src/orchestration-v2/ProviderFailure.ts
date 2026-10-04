@@ -107,7 +107,7 @@ function replaceUnsafeControlCharacters(value: string): string {
 }
 
 /** Removes common credential forms before provider text crosses a transport boundary. */
-function redactProviderFailureText(value: string): string {
+export function redactProviderFailureText(value: string): string {
   return replaceUnsafeControlCharacters(value)
     .replace(/\bhttps?:\/\/[^\s<>"']+/giu, redactUrl)
     .replace(/\b(Bearer|Basic)\s+[^\s,;]+/giu, "$1 [REDACTED]")

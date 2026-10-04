@@ -1,5 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from "node:child_process";
+import * as NodeCrypto from "node:crypto";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
@@ -96,6 +97,35 @@ describe.each(observedPlatforms)("ProviderProcessLedger observing as %s", (platf
       expect(yield* orphan.exited).toBe("SIGTERM");
       expect(groupExists(orphan.pid)).toBe(false);
       expect(yield* fs.readDirectory(path.join(stateDir, "provider-processes"))).toEqual([]);
+    }).pipe(provideHost),
+  );
+
+  it.live("stops an OpenCode server recorded by a server from before the shared ledger", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-opencode-ledger-" });
+      const orphan = yield* spawnGroup(SERVE_ARGS);
+      yield* recordFromDeadServer(stateDir, orphan);
+      const entryPath = path.join(stateDir, "provider-processes", `${orphan.pid}.json`);
+      const entry = yield* fs.readFileString(entryPath);
+      const command = `/bin/sh -c sleep 600 & wait ${SERVE_ARGS.join(" ")}`;
+      const commandHash = NodeCrypto.createHash("sha256").update(command).digest("hex");
+      const recorded = `"commandHash":"${commandHash}","label":"OpenCode server"`;
+      expect(entry).toContain(recorded);
+      // What an older server wrote: the raw command line and port, in its own directory.
+      yield* fs.remove(entryPath);
+      yield* fs.makeDirectory(path.join(stateDir, "opencode-servers"));
+      yield* fs.writeFileString(
+        path.join(stateDir, "opencode-servers", `${orphan.pid}.json`),
+        entry.replace(recorded, `"command":"${command}","port":4096`),
+      );
+
+      const restarted = yield* ProviderProcessLedger.make({ stateDir });
+      yield* restarted.reapOrphans;
+
+      expect(yield* orphan.exited).toBe("SIGTERM");
+      expect(yield* fs.readDirectory(path.join(stateDir, "opencode-servers"))).toEqual([]);
     }).pipe(provideHost),
   );
 

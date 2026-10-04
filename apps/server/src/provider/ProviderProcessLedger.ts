@@ -46,6 +46,30 @@ const encodeEntry = Schema.encodeEffect(ProviderProcessEntryJson);
 const hashCommand = (command: string) =>
   NodeCrypto.createHash("sha256").update(command).digest("hex");
 
+// Servers older than this ledger recorded only OpenCode, under `opencode-servers`
+// with the raw command line and port. Their entries are still reaped once.
+const LEGACY_ENTRY_DIRECTORY = "opencode-servers";
+const {
+  commandHash: _commandHash,
+  label: _label,
+  ...sharedEntryFields
+} = ProviderProcessEntry.fields;
+const LegacyOpenCodeEntry = Schema.Struct({
+  ...sharedEntryFields,
+  command: Schema.String,
+  port: Schema.Int,
+});
+const decodeLegacyEntry = Schema.decodeUnknownOption(Schema.fromJsonString(LegacyOpenCodeEntry));
+
+const decodeAnyEntry = (json: string): Option.Option<ProviderProcessEntry> =>
+  Option.orElse(decodeEntry(json), () =>
+    Option.map(decodeLegacyEntry(json), ({ command, port, ...entry }) => ({
+      ...entry,
+      commandHash: hashCommand(command),
+      label: `OpenCode server on port ${port}`,
+    })),
+  );
+
 /**
  * Provider processes that run in their own process group, such as `opencode
  * serve` and the Claude Code CLI, outlive a T3 server that is SIGKILLed or
@@ -298,7 +322,7 @@ export const make = Effect.fn("ProviderProcessLedger.make")(function* (input: {
 
   const reapEntry = (entryPath: string) =>
     Effect.gen(function* () {
-      const entry = decodeEntry(yield* fs.readFileString(entryPath));
+      const entry = decodeAnyEntry(yield* fs.readFileString(entryPath));
       if (Option.isSome(entry) && entry.value.stateDir === input.stateDir) {
         if (yield* isRunning(entry.value.owner)) return;
         yield* stopOrphan(entry.value);
@@ -311,14 +335,21 @@ export const make = Effect.fn("ProviderProcessLedger.make")(function* (input: {
     );
 
   /** Stops recorded processes whose owning T3 server is gone and drops stale entries. */
-  const reapOrphans = Effect.gen(function* () {
-    const names = yield* fs.readDirectory(directory).pipe(Effect.orElseSucceed(() => []));
-    yield* Effect.forEach(
-      names.filter((name) => ENTRY_FILE.test(name)),
-      (name) => reapEntry(path.join(directory, name)),
-      { concurrency: "unbounded", discard: true },
-    );
-  });
+  const reapOrphans = Effect.forEach(
+    [directory, path.join(input.stateDir, LEGACY_ENTRY_DIRECTORY)],
+    (entryDirectory) =>
+      fs.readDirectory(entryDirectory).pipe(
+        Effect.orElseSucceed(() => []),
+        Effect.flatMap((names) =>
+          Effect.forEach(
+            names.filter((name) => ENTRY_FILE.test(name)),
+            (name) => reapEntry(path.join(entryDirectory, name)),
+            { concurrency: "unbounded", discard: true },
+          ),
+        ),
+      ),
+    { concurrency: "unbounded", discard: true },
+  );
 
   return { track, reapOrphans };
 });

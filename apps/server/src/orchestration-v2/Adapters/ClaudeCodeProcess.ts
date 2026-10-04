@@ -7,16 +7,20 @@ import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 
 import * as ProviderProcessLedger from "../../provider/ProviderProcessLedger.ts";
+import { redactProviderFailureText } from "../ProviderFailure.ts";
 
-// The SDK quotes the same amount of stderr in its own exit errors.
+// The SDK's own spawn quotes this much stderr in exit errors, and reports an
+// exit only once stderr has closed or this long after the process exited.
 const STDERR_TAIL_LENGTH = 2048;
+const STDERR_DRAIN_MS = 200;
+const EXIT_AFTER_STDERR = "t3-exit-after-stderr";
 
 export interface ClaudeCodeProcess {
   /** The Agent SDK's `spawnClaudeCodeProcess`. */
-  readonly spawn: (options: SpawnOptions) => SpawnedProcess;
+  readonly spawn: (options: SpawnOptions) => SpawnedProcess & { readonly pid: number | undefined };
   /**
-   * Adds the CLI's stderr tail to an error raised after the CLI exited. The SDK
-   * only does this for processes it spawns itself.
+   * Adds the CLI's redacted stderr tail to an error raised after the CLI
+   * exited. The SDK only does this for processes it spawns itself.
    */
   readonly withStderr: (cause: unknown) => unknown;
 }
@@ -40,7 +44,7 @@ export const makeClaudeCodeProcessFactory = Effect.gen(function* () {
 
   return (): ClaudeCodeProcess => {
     let stderrTail = "";
-    let exited = false;
+    let exitReported = false;
     return {
       spawn: (options) => {
         const child = NodeChildProcess.spawn(options.command, options.args, {
@@ -55,8 +59,22 @@ export const makeClaudeCodeProcessFactory = Effect.gen(function* () {
         child.stderr.on("data", (chunk: string) => {
           stderrTail = `${stderrTail}${chunk}`.slice(-STDERR_TAIL_LENGTH);
         });
+        let stderrClosed = false;
+        let drainTimer: ReturnType<typeof setTimeout> | undefined;
+        const reportExit = () => {
+          if (exitReported) return;
+          exitReported = true;
+          clearTimeout(drainTimer);
+          child.emit(EXIT_AFTER_STDERR, child.exitCode, child.signalCode);
+        };
+        child.stderr.once("close", () => {
+          stderrClosed = true;
+          if (child.exitCode !== null || child.signalCode !== null) reportExit();
+        });
         child.once("exit", () => {
-          exited = true;
+          if (stderrClosed) reportExit();
+          // @effect-diagnostics-next-line globalTimers:off -- the SDK calls these Node callbacks.
+          else drainTimer = setTimeout(reportExit, STDERR_DRAIN_MS);
         });
         if (child.pid !== undefined) {
           const recording = runFork(
@@ -66,12 +84,39 @@ export const makeClaudeCodeProcessFactory = Effect.gen(function* () {
             runFork(Fiber.join(recording).pipe(Effect.flatten));
           });
         }
-        return child;
+        const event = (name: "exit" | "error") => (name === "exit" ? EXIT_AFTER_STDERR : name);
+        type Listener = (...args: never[]) => void;
+        const asNodeListener = (listener: Listener) => listener as (...args: unknown[]) => void;
+        return {
+          pid: child.pid,
+          stdin: child.stdin,
+          stdout: child.stdout,
+          get killed() {
+            return child.killed;
+          },
+          get exitCode() {
+            return child.exitCode;
+          },
+          get signalCode() {
+            return child.signalCode;
+          },
+          kill: (signal) => child.kill(signal),
+          on: (name: "exit" | "error", listener: Listener) => {
+            child.on(event(name), asNodeListener(listener));
+          },
+          once: (name: "exit" | "error", listener: Listener) => {
+            child.once(event(name), asNodeListener(listener));
+          },
+          off: (name: "exit" | "error", listener: Listener) => {
+            child.off(event(name), asNodeListener(listener));
+          },
+        };
       },
       withStderr: (cause) => {
-        const tail = stderrTail.trim();
-        if (exited && tail !== "" && cause instanceof Error && !cause.message.includes("stderr:")) {
-          cause.message = `${cause.message}. stderr: ${tail}`;
+        const tail = redactProviderFailureText(stderrTail);
+        if (exitReported && tail !== "" && cause instanceof Error) {
+          if (!cause.message.includes("stderr:"))
+            cause.message = `${cause.message}. stderr: ${tail}`;
         }
         return cause;
       },

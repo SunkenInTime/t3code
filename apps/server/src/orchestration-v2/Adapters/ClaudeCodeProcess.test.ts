@@ -2,7 +2,9 @@
 import * as NodeChildProcess from "node:child_process";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import type { SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "@effect/vitest";
+import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -70,22 +72,31 @@ const makeFactory = (stateDir: string, ownerPid: number) =>
 
 const spawnCli = (claudeCode: ClaudeCodeProcess, script: string) =>
   Effect.acquireRelease(
-    Effect.sync(
-      () =>
-        claudeCode.spawn({
-          command: "/bin/sh",
-          args: ["-c", script, "claude", "--output-format", "stream-json"],
-          env: process.env,
-          signal: new AbortController().signal,
-        }) as NodeChildProcess.ChildProcess,
+    Effect.sync(() =>
+      claudeCode.spawn({
+        command: "/bin/sh",
+        args: ["-c", script, "claude", "--output-format", "stream-json"],
+        env: process.env,
+        signal: new AbortController().signal,
+      }),
     ),
-    (child) =>
+    (cli) =>
       Effect.sync(() => {
-        if (child.pid !== undefined && groupExists(child.pid)) process.kill(-child.pid, "SIGKILL");
+        if (cli.pid !== undefined && groupExists(cli.pid)) process.kill(-cli.pid, "SIGKILL");
       }),
   );
 
-describe.skipIf(process.platform === "win32")("Claude Code process", () => {
+/** Resolves on the exit the SDK sees, which waits for stderr to drain. */
+const waitForSdkExit = (cli: SpawnedProcess) =>
+  Effect.callback<NodeJS.Signals | null>((resume) => {
+    if (cli.exitCode !== null || cli.signalCode != null) {
+      resume(Effect.succeed(cli.signalCode ?? null));
+      return;
+    }
+    cli.once("exit", (_code, signal) => resume(Effect.succeed(signal)));
+  });
+
+describe.skipIf(HostProcessPlatform.defaultValue() === "win32")("Claude Code process", () => {
   it.live("stops a CLI that outlived a killed server on the next server start", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -95,7 +106,7 @@ describe.skipIf(process.platform === "win32")("Claude Code process", () => {
       const { factory, recorded } = yield* makeFactory(stateDir, server.pid!);
 
       // Like the real CLI mid-turn: it keeps working after stdin closes, and
-      // its tool commands run in its process group.
+      // the whole group has to go, not just the leader.
       const cli = yield* spawnCli(factory(), "trap '' HUP; sleep 600 & wait");
       yield* recorded;
       expect(groupExists(cli.pid!)).toBe(true);
@@ -109,7 +120,7 @@ describe.skipIf(process.platform === "win32")("Claude Code process", () => {
       const restarted = yield* ProviderProcessLedger.make({ stateDir });
       yield* restarted.reapOrphans;
 
-      expect(yield* waitForExit(cli)).toBe("SIGTERM");
+      expect(yield* waitForSdkExit(cli)).toBe("SIGTERM");
       expect(groupExists(cli.pid!)).toBe(false);
       expect(yield* fs.readDirectory(path.join(stateDir, "provider-processes"))).toEqual([]);
     }).pipe(Effect.provide(NodeServices.layer)),
@@ -123,20 +134,22 @@ describe.skipIf(process.platform === "win32")("Claude Code process", () => {
       const { factory, recorded, forgotten } = yield* makeFactory(stateDir, process.pid);
       const claudeCode = factory();
 
-      const cli = yield* spawnCli(claudeCode, "read line; echo 'unknown option --x' >&2; exit 3");
+      const cli = yield* spawnCli(
+        claudeCode,
+        "read line; echo 'unknown option --x token=sk-ant-0123456789abcdefghij' >&2; exit 3",
+      );
       yield* recorded;
       expect(yield* fs.readDirectory(path.join(stateDir, "provider-processes"))).toHaveLength(1);
-      const stderrClosed = Effect.callback<void>((resume) => {
-        if (cli.stderr?.closed !== false) resume(Effect.void);
-        else cli.stderr.once("close", () => resume(Effect.void));
-      });
-      cli.stdin?.end("go\n");
-      yield* Effect.all([waitForExit(cli), stderrClosed, forgotten]);
+      const sdkSawExit = new Promise<void>((resolve) => cli.once("exit", () => resolve()));
+      cli.stdin.end("go\n");
+      // The SDK builds its exit error as soon as it sees the exit.
+      yield* Effect.promise(() => sdkSawExit);
+      const error = claudeCode.withStderr(new Error("Claude Code process exited with code 3"));
+      yield* forgotten;
 
       expect(yield* fs.readDirectory(path.join(stateDir, "provider-processes"))).toEqual([]);
-      const error = claudeCode.withStderr(new Error("Claude Code process exited with code 3"));
       expect((error as Error).message).toBe(
-        "Claude Code process exited with code 3. stderr: unknown option --x",
+        "Claude Code process exited with code 3. stderr: unknown option --x token=[REDACTED]",
       );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
