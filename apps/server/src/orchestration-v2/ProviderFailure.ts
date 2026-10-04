@@ -121,9 +121,9 @@ export function redactProviderFailureText(value: string): string {
         "$1[REDACTED]",
       )
       .replace(/\bsk-[A-Za-z0-9_-]{16,}\b/gu, "[REDACTED]")
-      // Bare GitHub, GitLab, and Slack tokens, AWS access key ids, and JWTs.
+      // Bare GitHub, GitLab, and Slack (bot, user, app) tokens, AWS access key ids, and JWTs.
       .replace(
-        /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_\w{22,}|glpat-[\w-]{20,}|xox[a-z]-[\w-]{10,}|(?:AKIA|ASIA)[A-Z0-9]{16}|eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,})/gu,
+        /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_\w{22,}|glpat-[\w-]{20,}|xapp-[\w-]{10,}|xox[a-z]-[\w-]{10,}|(?:AKIA|ASIA)[A-Z0-9]{16}|eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,})/gu,
         "[REDACTED]",
       )
       .trim()

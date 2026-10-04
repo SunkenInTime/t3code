@@ -27,6 +27,7 @@ it("redacts bare tokens from provider failures", () => {
     `github_pat_${"b2".repeat(20)}`,
     `glpat-${"c3".repeat(10)}`,
     `xoxb-${"1".repeat(12)}-${"d4".repeat(6)}`,
+    `xapp-1-A${"e5".repeat(8)}-${"2".repeat(12)}`,
     "AKIAABCDEFGHIJKLMNOP",
     "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.c2lnbmF0dXJlLXZhbHVl",
   ];
