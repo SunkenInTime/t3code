@@ -696,6 +696,15 @@ describe("ClientSettings composer collapse", () => {
   });
 });
 
+describe("ClientSettings compact before resume", () => {
+  it("keeps the full history by default and accepts opting in", () => {
+    expect(decodeClientSettings({}).compactBeforeResumeEnabled).toBe(false);
+    expect(
+      decodeClientSettingsPatch({ compactBeforeResumeEnabled: true }).compactBeforeResumeEnabled,
+    ).toBe(true);
+  });
+});
+
 describe("ServerSettings thread settlement", () => {
   it("defaults merge settlement on and inactivity settlement to three days", () => {
     const settings = decodeServerSettings({});

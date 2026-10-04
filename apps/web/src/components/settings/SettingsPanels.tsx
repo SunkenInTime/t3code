@@ -615,6 +615,10 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.followUpBehavior !== DEFAULT_UNIFIED_SETTINGS.followUpBehavior
         ? ["Follow-up behavior"]
         : []),
+      ...(settings.compactBeforeResumeEnabled !==
+      DEFAULT_UNIFIED_SETTINGS.compactBeforeResumeEnabled
+        ? ["Compact idle threads before sending"]
+        : []),
       ...(settings.contextWindowMeterEnabled !== DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled
         ? ["Context window indicator"]
         : []),
@@ -679,6 +683,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.composerRichTextEnabled,
       settings.sendShortcut,
       settings.followUpBehavior,
+      settings.compactBeforeResumeEnabled,
       settings.addProjectBaseDirectory,
       settings.defaultThreadEnvMode,
       settings.newWorktreesStartFromOrigin,
@@ -801,6 +806,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       composerRichTextEnabled: DEFAULT_UNIFIED_SETTINGS.composerRichTextEnabled,
       sendShortcut: DEFAULT_UNIFIED_SETTINGS.sendShortcut,
       followUpBehavior: DEFAULT_UNIFIED_SETTINGS.followUpBehavior,
+      compactBeforeResumeEnabled: DEFAULT_UNIFIED_SETTINGS.compactBeforeResumeEnabled,
       contextWindowMeterEnabled: DEFAULT_UNIFIED_SETTINGS.contextWindowMeterEnabled,
       environmentIdentificationMode: DEFAULT_UNIFIED_SETTINGS.environmentIdentificationMode,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
@@ -2868,6 +2874,33 @@ export function GeneralSettingsPanel() {
                 <SelectItem value="steer">Steer</SelectItem>
               </SelectPopup>
             </Select>
+          }
+        />
+
+        <SettingsRow
+          {...searchableSetting("compact-before-resume")}
+          description="When a long Claude thread has been idle for over an hour, sending a message runs /compact first instead of resending the full history."
+          resetAction={
+            settings.compactBeforeResumeEnabled !==
+            DEFAULT_UNIFIED_SETTINGS.compactBeforeResumeEnabled ? (
+              <SettingResetButton
+                label="compact idle threads before sending"
+                onClick={() =>
+                  updateSettings({
+                    compactBeforeResumeEnabled: DEFAULT_UNIFIED_SETTINGS.compactBeforeResumeEnabled,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Switch
+              checked={settings.compactBeforeResumeEnabled}
+              onCheckedChange={(checked) =>
+                updateSettings({ compactBeforeResumeEnabled: Boolean(checked) })
+              }
+              aria-label="Compact idle threads before sending"
+            />
           }
         />
 

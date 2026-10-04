@@ -409,6 +409,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["queue steer running turn send default behavior composer"],
   },
   {
+    id: "compact-before-resume",
+    title: "Compact idle threads before sending",
+    to: "/settings/general",
+    searchTerms: ["compact compaction resume stale old idle context tokens claude history"],
+  },
+  {
     id: "provider-update-checks",
     title: "Provider update checks",
     to: "/settings/general",
