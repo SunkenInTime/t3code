@@ -6,6 +6,7 @@ import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 
+import { signalProcessGroup } from "../../process/processGroup.ts";
 import * as ProviderProcessLedger from "../../provider/ProviderProcessLedger.ts";
 import { redactProviderFailureText } from "../ProviderFailure.ts";
 
@@ -34,7 +35,8 @@ export interface ClaudeCodeProcess {
  * crashes leaves its agents working where no thread can see them. Here the
  * CLI leads its own process group and is recorded in the provider process
  * ledger until it exits, so the next server start stops it before recovery
- * marks its run cancelled. Windows keeps the SDK's spawn: libuv puts the CLI
+ * marks its run cancelled. When the CLI exits, whatever it left in its group
+ * is stopped with it. Windows keeps the SDK's spawn: libuv puts the CLI
  * in the server's kill-on-close job object, so it already ends with the server.
  */
 export const makeClaudeCodeProcessFactory = Effect.gen(function* () {
@@ -78,11 +80,18 @@ export const makeClaudeCodeProcessFactory = Effect.gen(function* () {
           // @effect-diagnostics-next-line globalTimers:off -- the SDK calls these Node callbacks.
           else drainTimer = setTimeout(reportExit, STDERR_DRAIN_MS);
         });
-        if (child.pid !== undefined) {
+        const pid = child.pid;
+        if (pid !== undefined) {
           const recording = runFork(
-            ledger.track({ pid: child.pid, args: options.args, label: "Claude Code" }),
+            ledger.track({ pid, args: options.args, label: "Claude Code" }),
           );
           child.once("exit", () => {
+            // Anything the CLI left in its group would outlive the ledger entry.
+            try {
+              signalProcessGroup(pid, "SIGKILL");
+            } catch {
+              // The group is already empty.
+            }
             runFork(Fiber.join(recording).pipe(Effect.flatten));
           });
         }

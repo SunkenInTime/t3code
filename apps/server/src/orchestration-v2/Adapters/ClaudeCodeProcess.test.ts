@@ -154,14 +154,33 @@ describe.skipIf(HostProcessPlatform.defaultValue() === "win32")("Claude Code pro
     }).pipe(Effect.provide(NodeServices.layer)),
   );
 
-  it.live("reports the exit even while a descendant holds stderr open", () =>
+  it.live("stops what the CLI left in its process group when it exits", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-process-" });
+      const { factory, recorded, forgotten } = yield* makeFactory(stateDir, process.pid);
+
+      const cli = yield* spawnCli(factory(), "read line; sleep 600 & exit 0");
+      yield* recorded;
+      cli.stdin.end("go\n");
+      yield* forgotten;
+
+      expect(groupExists(cli.pid!)).toBe(false);
+      expect(yield* fs.readDirectory(path.join(stateDir, "provider-processes"))).toEqual([]);
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
+
+  it.live("reports the exit even while a process outside its group holds stderr open", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-process-" });
       const { factory, recorded } = yield* makeFactory(stateDir, process.pid);
       const claudeCode = factory();
 
-      const cli = yield* spawnCli(claudeCode, "read line; echo boom >&2; sleep 600 & exit 3");
+      // Like a tool command in its own session that inherited the CLI's stderr.
+      const holdStderr = `"${process.execPath}" -e 'require("node:child_process").spawn("sleep", ["2"], { detached: true, stdio: ["ignore", "ignore", "inherit"] }).unref()'`;
+      const cli = yield* spawnCli(claudeCode, `read line; echo boom >&2; ${holdStderr}; exit 3`);
       yield* recorded;
       const sdkSawExit = new Promise<void>((resolve) => cli.once("exit", () => resolve()));
       cli.stdin.end("go\n");
