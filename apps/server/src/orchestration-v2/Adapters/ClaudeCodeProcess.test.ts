@@ -120,10 +120,12 @@ describe.skipIf(process.platform === "win32")("Claude Code process", () => {
       const fs = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-process-" });
-      const { factory, forgotten } = yield* makeFactory(stateDir, process.pid);
+      const { factory, recorded, forgotten } = yield* makeFactory(stateDir, process.pid);
       const claudeCode = factory();
 
       const cli = yield* spawnCli(claudeCode, "read line; echo 'unknown option --x' >&2; exit 3");
+      yield* recorded;
+      expect(yield* fs.readDirectory(path.join(stateDir, "provider-processes"))).toHaveLength(1);
       const stderrClosed = Effect.callback<void>((resume) => {
         if (cli.stderr?.closed !== false) resume(Effect.void);
         else cli.stderr.once("close", () => resume(Effect.void));
