@@ -57,7 +57,7 @@ export const makeClaudeCodeProcessFactory = Effect.gen(function* () {
         });
         child.stderr.setEncoding("utf8");
         child.stderr.on("data", (chunk: string) => {
-          stderrTail = `${stderrTail}${chunk}`.slice(-STDERR_TAIL_LENGTH);
+          if (!exitReported) stderrTail = `${stderrTail}${chunk}`.slice(-STDERR_TAIL_LENGTH);
         });
         let stderrClosed = false;
         let drainTimer: ReturnType<typeof setTimeout> | undefined;
@@ -66,6 +66,8 @@ export const makeClaudeCodeProcessFactory = Effect.gen(function* () {
           exitReported = true;
           clearTimeout(drainTimer);
           child.emit(EXIT_AFTER_STDERR, child.exitCode, child.signalCode);
+          // A descendant may still hold stderr open; it must not keep the server's loop busy.
+          child.stderr.destroy();
         };
         child.stderr.once("close", () => {
           stderrClosed = true;

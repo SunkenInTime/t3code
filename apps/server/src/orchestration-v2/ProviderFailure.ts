@@ -108,19 +108,26 @@ function replaceUnsafeControlCharacters(value: string): string {
 
 /** Removes common credential forms before provider text crosses a transport boundary. */
 export function redactProviderFailureText(value: string): string {
-  return replaceUnsafeControlCharacters(value)
-    .replace(/\bhttps?:\/\/[^\s<>"']+/giu, redactUrl)
-    .replace(/\b(Bearer|Basic)\s+[^\s,;]+/giu, "$1 [REDACTED]")
-    .replace(
-      /(["'](?:access[_-]?token|api[_-]?key|authorization|credential|password|secret|token)["']\s*:\s*["'])[^"']*(["'])/giu,
-      "$1[REDACTED]$2",
-    )
-    .replace(
-      /(\b(?:access[_-]?token|api[_-]?key|authorization|credential|password|secret|token)\b\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu,
-      "$1[REDACTED]",
-    )
-    .replace(/\bsk-[A-Za-z0-9_-]{16,}\b/gu, "[REDACTED]")
-    .trim();
+  return (
+    replaceUnsafeControlCharacters(value)
+      .replace(/\bhttps?:\/\/[^\s<>"']+/giu, redactUrl)
+      .replace(/\b(Bearer|Basic)\s+[^\s,;]+/giu, "$1 [REDACTED]")
+      .replace(
+        /(["'](?:access[_-]?token|api[_-]?key|authorization|credential|password|secret|token)["']\s*:\s*["'])[^"']*(["'])/giu,
+        "$1[REDACTED]$2",
+      )
+      .replace(
+        /(\b(?:access[_-]?token|api[_-]?key|authorization|credential|password|secret|token)\b\s*[:=]\s*)(?:"[^"]*"|'[^']*'|[^\s,;]+)/giu,
+        "$1[REDACTED]",
+      )
+      .replace(/\bsk-[A-Za-z0-9_-]{16,}\b/gu, "[REDACTED]")
+      // Bare GitHub, GitLab, and Slack tokens, AWS access key ids, and JWTs.
+      .replace(
+        /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_\w{22,}|glpat-[\w-]{20,}|xox[a-z]-[\w-]{10,}|(?:AKIA|ASIA)[A-Z0-9]{16}|eyJ[\w-]{8,}\.[\w-]{8,}\.[\w-]{8,})/gu,
+        "[REDACTED]",
+      )
+      .trim()
+  );
 }
 
 function boundedText(value: string, maxLength: number): string {

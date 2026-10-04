@@ -153,4 +153,22 @@ describe.skipIf(HostProcessPlatform.defaultValue() === "win32")("Claude Code pro
       );
     }).pipe(Effect.provide(NodeServices.layer)),
   );
+
+  it.live("reports the exit even while a descendant holds stderr open", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-process-" });
+      const { factory, recorded } = yield* makeFactory(stateDir, process.pid);
+      const claudeCode = factory();
+
+      const cli = yield* spawnCli(claudeCode, "read line; echo boom >&2; sleep 600 & exit 3");
+      yield* recorded;
+      const sdkSawExit = new Promise<void>((resolve) => cli.once("exit", () => resolve()));
+      cli.stdin.end("go\n");
+      yield* Effect.promise(() => sdkSawExit);
+
+      const error = claudeCode.withStderr(new Error("Claude Code process exited with code 3"));
+      expect((error as Error).message).toBe("Claude Code process exited with code 3. stderr: boom");
+    }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });
