@@ -161,12 +161,18 @@ describe.skipIf(HostProcessPlatform.defaultValue() === "win32")("Claude Code pro
       const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-process-" });
       const { factory, recorded, forgotten } = yield* makeFactory(stateDir, process.pid);
 
+      // The background sleep inherits the CLI's stdout, so the pipe closes only
+      // once that leftover group member is dead too.
       const cli = yield* spawnCli(factory(), "read line; sleep 600 & exit 0");
+      const stdoutClosed = new Promise<void>((resolve) =>
+        cli.stdout.once("close", () => resolve()),
+      );
+      cli.stdout.resume();
       yield* recorded;
       cli.stdin.end("go\n");
       yield* forgotten;
+      yield* Effect.promise(() => stdoutClosed);
 
-      expect(groupExists(cli.pid!)).toBe(false);
       expect(yield* fs.readDirectory(path.join(stateDir, "provider-processes"))).toEqual([]);
     }).pipe(Effect.provide(NodeServices.layer)),
   );
