@@ -9461,6 +9461,8 @@ export default function ChatView(props: ChatViewProps) {
           modelSelection: ctxSelectedModelSelection,
           runtimeMode,
           interactionMode: sendInteractionMode,
+          // A run may have started during the awaits above; never steer /compact into it.
+          dispatchMode: "queue",
         },
       });
       if (compactResult._tag === "Failure") {
