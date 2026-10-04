@@ -3559,6 +3559,28 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       input.branch,
     ]);
 
+  /**
+   * Unlinks links under `target` without following them and removes the
+   * directories that leaves empty. Returns false when anything else remains.
+   */
+  const removeLeftoverLinks = (
+    target: string,
+  ): Effect.Effect<boolean, PlatformError.PlatformError> =>
+    Effect.gen(function* () {
+      if (Option.isSome(yield* fileSystem.readLink(target).pipe(Effect.option))) {
+        yield* fileSystem.remove(target);
+        return true;
+      }
+      if ((yield* fileSystem.stat(target)).type !== "Directory") return false;
+      let empty = true;
+      for (const name of yield* fileSystem.readDirectory(target)) {
+        if (!(yield* removeLeftoverLinks(path.join(target, name)))) empty = false;
+      }
+      // Node's rm refuses a directory without `recursive`, even an empty one.
+      if (empty) yield* fileSystem.remove(target, { recursive: true });
+      return empty;
+    });
+
   const removeWorktree: GitVcsDriver.GitVcsDriver["Service"]["removeWorktree"] = Effect.fn(
     "removeWorktree",
   )(function* (input) {
@@ -3583,19 +3605,25 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       // Git for Windows never descends into NTFS junctions, such as pnpm's
       // node_modules links. It reports success but leaves them and their parent
       // directories behind, so a resumed thread would find a stub instead of
-      // recreating its checkout. Node's rm unlinks links without following them.
-      // Git has already unregistered the worktree, so a failure here is logged
-      // rather than returned: a retry could never succeed.
+      // recreating its checkout. Git has already unregistered the worktree, so
+      // anything left here is logged rather than returned: a retry could never
+      // succeed.
       const leftover = path.resolve(input.cwd, input.path);
       if (yield* fileSystem.exists(leftover).pipe(Effect.orElseSucceed(() => false))) {
-        yield* fileSystem.remove(leftover, { recursive: true }).pipe(
+        const removed = yield* removeLeftoverLinks(leftover).pipe(
           Effect.catch((error) =>
             Effect.logWarning("GitVcsDriver.removeWorktree: failed to delete leftover links", {
               path: leftover,
               error,
-            }),
+            }).pipe(Effect.as(true)),
           ),
         );
+        if (!removed) {
+          yield* Effect.logWarning(
+            "GitVcsDriver.removeWorktree: kept files written after git removed the worktree",
+            { path: leftover },
+          );
+        }
       }
       return;
     }

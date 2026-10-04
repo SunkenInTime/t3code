@@ -1102,9 +1102,8 @@ export const WorktreeCleanupRules = Schema.Struct({
   worktreeOnMerge: Schema.Boolean,
   worktreeOnDelete: Schema.Boolean,
   worktreeUnchanged: Schema.Boolean,
-  worktreeDisposablePaths: WorktreeDisposablePaths.pipe(
-    Schema.withDecodingDefault(Effect.succeed(DEFAULT_WORKTREE_DISPOSABLE_PATHS)),
-  ),
+  /** Absent in rules saved before this key existed; the machine's list applies. */
+  worktreeDisposablePaths: Schema.optionalKey(WorktreeDisposablePaths),
 });
 export type WorktreeCleanupRules = typeof WorktreeCleanupRules.Type;
 

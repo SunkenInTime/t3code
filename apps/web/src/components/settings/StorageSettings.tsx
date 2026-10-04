@@ -1,7 +1,7 @@
 import type { StorageCleanupSettings, WorktreeCleanupRules } from "@t3tools/contracts";
 import { resolveWorktreeCleanup } from "@t3tools/shared/projectSettings";
 import * as Equal from "effect/Equal";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Switch } from "../ui/switch";
@@ -123,6 +123,7 @@ export function StorageSettingsPanel() {
       environment.serverConfig?.environment.capabilities.worktreeDisposablePaths === true,
   );
   const disposablePathsStatus = ruleStatus("worktreeDisposablePaths");
+  const disposablePathsEdited = useRef(false);
   const disposablePathsText = settings.worktreeDisposablePaths.join("\n");
   const scopeKey = targets.map((entry) => `${entry.environmentId}:${entry.projectId}`).join(",");
 
@@ -281,17 +282,21 @@ export function StorageSettingsPanel() {
                         ? "Mixed. Enter patterns to apply to all selected targets."
                         : "No disposable paths"
                     }
+                    onChange={() => {
+                      disposablePathsEdited.current = true;
+                    }}
                     onBlur={(event) => {
                       const worktreeDisposablePaths = event.target.value
                         .split("\n")
                         .map((line) => line.trim())
                         .filter((line) => line !== "");
                       if (
-                        event.target.value !== event.target.defaultValue &&
+                        disposablePathsEdited.current &&
                         (disposablePathsStatus ||
                           !Equal.equals(worktreeDisposablePaths, settings.worktreeDisposablePaths))
                       )
                         updateWorktree({ worktreeDisposablePaths });
+                      disposablePathsEdited.current = false;
                     }}
                   />
                 </div>

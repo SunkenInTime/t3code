@@ -371,6 +371,29 @@ describe("resolveWorktreeCleanup", () => {
         .worktreeAfterDays,
     ).toBe(8);
   });
+  it("uses the machine's disposable paths for custom rules saved without them", () => {
+    const settings = applyServerSettingsPatch(DEFAULT_SERVER_SETTINGS, {
+      storageCleanup: { worktreeDisposablePaths: ["node_modules/", "build/"] },
+      // Rules written by a client that predates disposable paths.
+      projectSettingsOverrides: {
+        [projectId]: {
+          worktreeCleanup: {
+            mode: "custom",
+            rules: {
+              worktreeAfterDays: 3,
+              worktreeOnDelete: false,
+              worktreeOnMerge: false,
+              worktreeUnchanged: false,
+            },
+          },
+        },
+      },
+    });
+    expect(resolveWorktreeCleanup(settings, projectId).worktreeDisposablePaths).toEqual([
+      "node_modules/",
+      "build/",
+    ]);
+  });
 });
 
 it("inherits branch naming defaults and applies project overrides independently", () => {

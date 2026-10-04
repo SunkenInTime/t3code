@@ -62,7 +62,7 @@ describe("storage cleanup settings", () => {
     });
   });
 
-  it("gives stored custom worktree rules the default disposable paths", () => {
+  it("keeps stored custom worktree rules without disposable paths", () => {
     expect(
       decodeServerSettings({
         worktreeCleanup: {
@@ -82,7 +82,6 @@ describe("storage cleanup settings", () => {
         worktreeOnMerge: false,
         worktreeOnDelete: true,
         worktreeUnchanged: false,
-        worktreeDisposablePaths: ["node_modules/"],
       },
     });
   });
