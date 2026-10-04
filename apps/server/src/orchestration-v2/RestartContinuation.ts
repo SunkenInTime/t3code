@@ -44,7 +44,7 @@ function isPutAway(
 export function restartContinuationRun(
   projection: Pick<
     ProjectionRuntimeRecoveryState,
-    "thread" | "runs" | "providerThreads" | "providerSessions" | "providerTurns"
+    "thread" | "runs" | "providerThreads" | "providerSessions" | "providerTurns" | "attempts"
   >,
   cancelledWorkProviderThreadIds: ReadonlySet<ProviderThreadId> = new Set(),
   resumeInterrupted = true,
@@ -66,8 +66,14 @@ export function restartContinuationRun(
     (run.status === "completed" || run.status === "waiting") &&
     run.providerThreadId !== null &&
     cancelledWorkProviderThreadIds.has(run.providerThreadId);
+  // A wake cut by another restart before reaching the provider is still a wake.
+  const wake =
+    settledWithCancelledWork ||
+    (preparedContinuation &&
+      restartContinuationNote(run, projection.runs, projection.providerTurns, projection.attempts)
+        .settled);
   const interrupted = run.status === "running" || preparedContinuation;
-  if (!settledWithCancelledWork && !(resumeInterrupted && interrupted)) return;
+  if (!wake && !(resumeInterrupted && interrupted)) return;
   const liveTurnRequired = !preparedContinuation && !settledWithCancelledWork;
   if (projection.thread.providerInstanceId !== run.providerInstanceId) return;
   const providerThread = projection.providerThreads.find(
@@ -133,9 +139,15 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
     const noteSource =
       source !== undefined && isRestartNoteSource(source, projection.providerTurns);
     if (!source || (source.status !== "cancelled" && !noteSource)) return;
+    const note = restartContinuationNote(
+      source,
+      projection.runs,
+      projection.providerTurns,
+      projection.attempts,
+    );
     // Only resuming an interrupted turn is opt-in; see `restartContinuationRun`.
     if (
-      !noteSource &&
+      !note.settled &&
       (enabled === null ||
         !resolveProjectSettings(enabled, projection.thread.projectId).settings
           .continueThreadsAfterServerUpdate)
@@ -177,12 +189,6 @@ export const continueRestartedRun = Effect.fn("RestartContinuation.continueResta
       (message) => message.id === source.userMessageId,
     );
     if (sourceMessage !== undefined && isNativeMaintenanceCommand(sourceMessage)) return;
-    const note = restartContinuationNote(
-      source,
-      projection.runs,
-      projection.providerTurns,
-      projection.attempts,
-    );
     const noteText =
       note.work.length === 0 ? undefined : restartCancelledBackgroundWorkNote(note.work);
     yield* threads.dispatch({

@@ -660,7 +660,10 @@ it.effect("does not cancel or resume a run that completes while shutdown intent 
   }),
 );
 
-const continuationTexts = (projection: OrchestrationV2ThreadProjection) =>
+const continuationTexts = (
+  projection: OrchestrationV2ThreadProjection,
+  continueThreadsAfterServerUpdate = true,
+) =>
   Effect.gen(function* () {
     const texts: Array<string> = [];
     yield* continueRestartedRun({ threadId, sourceRunId: runId }).pipe(
@@ -674,7 +677,7 @@ const continuationTexts = (projection: OrchestrationV2ThreadProjection) =>
               return Effect.succeed({} as never);
             },
           }),
-          ServerSettings.layerTest({ continueThreadsAfterServerUpdate: true }),
+          ServerSettings.layerTest({ continueThreadsAfterServerUpdate }),
         ),
       ),
     );
@@ -794,9 +797,9 @@ it.effect("tells a turn cut mid-way about the background work it lost", () =>
   }),
 );
 
-it.effect(
-  "carries the note forward when its continuation was cut before reaching the provider",
-  () =>
+it.effect.each([true, false])(
+  "carries the note forward when its continuation was cut before reaching the provider (opt-in %s)",
+  (continueThreadsAfterServerUpdate) =>
     Effect.gen(function* () {
       const base = makeProjection();
       const original = {
@@ -826,7 +829,19 @@ it.effect(
           },
         ],
       } as unknown as OrchestrationV2ThreadProjection;
-      const texts = yield* continuationTexts(projection);
+      // Before reconciliation the second restart finds the wake still starting.
+      const [, continuation] = projection.runs;
+      const starting = {
+        ...projection,
+        runs: [original, { ...continuation!, status: "starting" }],
+        providerThreads: [{ ...base.providerThreads[0]!, status: "idle" }],
+        providerSessions: [{ ...base.providerSessions[0]!, status: "stopped" }],
+      } as unknown as OrchestrationV2ThreadProjection;
+      assert.equal(
+        restartContinuationRun(starting, new Set(), continueThreadsAfterServerUpdate)?.id,
+        continuation!.id,
+      );
+      const texts = yield* continuationTexts(projection, continueThreadsAfterServerUpdate);
       assert.lengthOf(texts, 1);
       assert.include(texts[0]!, "sleep 25 && echo DONE");
       assert.notInclude(texts[0]!, "Continue where");
