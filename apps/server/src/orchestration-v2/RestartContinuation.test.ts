@@ -153,7 +153,8 @@ it("recovers an admitted continuation after another crash before provider start"
     providerTurns: [],
   };
   assert.equal(restartContinuationRun(starting)?.id, runId);
-  assert.isUndefined(restartContinuationRun(starting, new Set(), false));
+  // Offered without the opt-in too; delivery decides whether it was a wake.
+  assert.equal(restartContinuationRun(starting, new Set(), false)?.id, runId);
 });
 
 it("continues a settled root run only when the restart cancelled its background work", () => {
@@ -830,10 +831,11 @@ it.effect.each([true, false])(
         ],
       } as unknown as OrchestrationV2ThreadProjection;
       // Before reconciliation the second restart finds the wake still starting.
+      // Its recovery read holds no settled run but the latest, so not the original.
       const [, continuation] = projection.runs;
       const starting = {
         ...projection,
-        runs: [original, { ...continuation!, status: "starting" }],
+        runs: [{ ...continuation!, status: "starting" }],
         providerThreads: [{ ...base.providerThreads[0]!, status: "idle" }],
         providerSessions: [{ ...base.providerSessions[0]!, status: "stopped" }],
       } as unknown as OrchestrationV2ThreadProjection;

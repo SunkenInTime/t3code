@@ -44,7 +44,7 @@ function isPutAway(
 export function restartContinuationRun(
   projection: Pick<
     ProjectionRuntimeRecoveryState,
-    "thread" | "runs" | "providerThreads" | "providerSessions" | "providerTurns" | "attempts"
+    "thread" | "runs" | "providerThreads" | "providerSessions" | "providerTurns"
   >,
   cancelledWorkProviderThreadIds: ReadonlySet<ProviderThreadId> = new Set(),
   resumeInterrupted = true,
@@ -66,14 +66,15 @@ export function restartContinuationRun(
     (run.status === "completed" || run.status === "waiting") &&
     run.providerThreadId !== null &&
     cancelledWorkProviderThreadIds.has(run.providerThreadId);
-  // A wake cut by another restart before reaching the provider is still a wake.
-  const wake =
-    settledWithCancelledWork ||
-    (preparedContinuation &&
-      restartContinuationNote(run, projection.runs, projection.providerTurns, projection.attempts)
-        .settled);
-  const interrupted = run.status === "running" || preparedContinuation;
-  if (!wake && !(resumeInterrupted && interrupted)) return;
+  // A continuation another restart cut before it reached the provider is
+  // offered again whatever the opt-in: this read lacks the run it continues,
+  // and delivery reads the full history to tell a wake from a resume.
+  if (
+    !settledWithCancelledWork &&
+    !preparedContinuation &&
+    !(resumeInterrupted && run.status === "running")
+  )
+    return;
   const liveTurnRequired = !preparedContinuation && !settledWithCancelledWork;
   if (projection.thread.providerInstanceId !== run.providerInstanceId) return;
   const providerThread = projection.providerThreads.find(
