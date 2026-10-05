@@ -412,7 +412,7 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "compact-before-resume",
     title: "Compact idle threads before sending",
     to: "/settings/general",
-    searchTerms: ["compact compaction resume stale old idle context tokens claude history"],
+    searchTerms: ["compact compaction resume stale old idle context tokens history"],
   },
   {
     id: "provider-update-checks",

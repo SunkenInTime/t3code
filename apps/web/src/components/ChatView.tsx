@@ -7298,7 +7298,7 @@ export default function ChatView(props: ChatViewProps) {
       pendingUserInputs.length > 0 ||
       phase === "running" ||
       !shouldOfferResumeCompaction({
-        provider: selectedProvider,
+        supportsCompaction: manualCompactionProviderAvailable,
         usedTokens: activeContextWindow.usedTokens,
         updatedAt: activeContextWindow.updatedAt,
         now: `${nowMinute}:00.000Z`,
@@ -7346,13 +7346,13 @@ export default function ChatView(props: ChatViewProps) {
     compactDisabledReason,
     composerRef,
     dismissedResumeCompactionKeys,
+    manualCompactionProviderAvailable,
     nativeResumeCompactionDismissed,
     nowMinute,
     pendingUserInputs.length,
     phase,
     resumeCompactionKey,
     resumeCompactionPermanentlyDismissed,
-    selectedProvider,
   ]);
   const handleRestoreThreadBranch = useCallback(() => {
     if (gitStatusQuery.data?.hasWorkingTreeChanges) {

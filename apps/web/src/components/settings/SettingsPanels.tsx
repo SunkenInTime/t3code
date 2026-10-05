@@ -2879,7 +2879,7 @@ export function GeneralSettingsPanel() {
 
         <SettingsRow
           {...searchableSetting("compact-before-resume")}
-          description="When a long Claude thread has been idle for over an hour, sending a message runs /compact first instead of resending the full history."
+          description="When a long thread has been idle for over an hour, sending a message runs /compact first instead of resending the full history."
           resetAction={
             settings.compactBeforeResumeEnabled !==
             DEFAULT_UNIFIED_SETTINGS.compactBeforeResumeEnabled ? (
