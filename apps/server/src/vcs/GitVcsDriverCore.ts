@@ -3672,11 +3672,15 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
   const removeWorktree: GitVcsDriver.GitVcsDriver["Service"]["removeWorktree"] = Effect.fn(
     "removeWorktree",
   )(function* (input) {
+    // Git also accepts a worktree's short name, which can match a different
+    // folder than the path resolved against `input.cwd`. Resolve it once so Git
+    // and the leftover cleanup below act on the same directory.
+    const target = path.resolve(input.cwd, input.path);
     const args = ["worktree", "remove"];
     if (input.force) {
       args.push("--force");
     }
-    args.push(input.path);
+    args.push(target);
     const result = yield* executeGitWithStableDiagnostics(
       "GitVcsDriver.removeWorktree",
       input.cwd,
@@ -3696,12 +3700,11 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       // recreating its checkout. Git has already unregistered the worktree, so
       // anything left here is logged rather than returned: a retry could never
       // succeed.
-      const leftover = path.resolve(input.cwd, input.path);
-      if (yield* fileSystem.exists(leftover).pipe(Effect.orElseSucceed(() => false))) {
-        const removed = yield* removeLeftoverLinks(leftover).pipe(
+      if (yield* fileSystem.exists(target).pipe(Effect.orElseSucceed(() => false))) {
+        const removed = yield* removeLeftoverLinks(target).pipe(
           Effect.catch((error) =>
             Effect.logWarning("GitVcsDriver.removeWorktree: failed to delete leftover links", {
-              path: leftover,
+              path: target,
               error,
             }).pipe(Effect.as(true)),
           ),
@@ -3709,7 +3712,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
         if (!removed) {
           yield* Effect.logWarning(
             "GitVcsDriver.removeWorktree: kept files written after git removed the worktree",
-            { path: leftover },
+            { path: target },
           );
         }
       }
