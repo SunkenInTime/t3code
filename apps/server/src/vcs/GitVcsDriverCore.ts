@@ -35,6 +35,7 @@ import { parseT3ProjectFile } from "@t3tools/shared/t3ProjectFile";
 import { resolveProjectFileBackedSetting } from "@t3tools/shared/projectSettings";
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from "../observability/Metrics.ts";
 import * as GitVcsDriver from "./GitVcsDriver.ts";
+import { removeEmptyDirectory } from "./removeEmptyDirectory.ts";
 import {
   parseRemoteNames,
   parseRemoteNamesInGitOrder,
@@ -3663,9 +3664,8 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
       for (const name of yield* fileSystem.readDirectory(target)) {
         if (!(yield* removeLeftoverLinks(path.join(target, name)))) empty = false;
       }
-      // Node's rm refuses a directory without `recursive`, even an empty one.
-      if (empty) yield* fileSystem.remove(target, { recursive: true });
-      return empty;
+      // Only an empty directory goes, so files written since the listing stay.
+      return empty && (yield* removeEmptyDirectory(target));
     });
 
   const removeWorktree: GitVcsDriver.GitVcsDriver["Service"]["removeWorktree"] = Effect.fn(
