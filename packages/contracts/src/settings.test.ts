@@ -62,30 +62,6 @@ describe("storage cleanup settings", () => {
     });
   });
 
-  it("keeps stored custom worktree rules without disposable paths", () => {
-    expect(
-      decodeServerSettings({
-        worktreeCleanup: {
-          mode: "custom",
-          rules: {
-            worktreeAfterDays: 3,
-            worktreeOnMerge: false,
-            worktreeOnDelete: true,
-            worktreeUnchanged: false,
-          },
-        },
-      }).worktreeCleanup,
-    ).toEqual({
-      mode: "custom",
-      rules: {
-        worktreeAfterDays: 3,
-        worktreeOnMerge: false,
-        worktreeOnDelete: true,
-        worktreeUnchanged: false,
-      },
-    });
-  });
-
   it("accepts eight-day retention and disabling one rule without resetting others", () => {
     expect(decodeServerSettingsPatch({ storageCleanup: { worktreeAfterDays: 8 } })).toEqual({
       storageCleanup: { worktreeAfterDays: 8 },

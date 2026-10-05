@@ -118,10 +118,13 @@ export function StorageSettingsPanel() {
     isProjectScope
       ? updateSettings({ worktreeCleanup: { mode: "custom", rules: patch } })
       : update(patch);
-  const disposablePathsSupported = connectedEnvironments.every(
-    (environment) =>
-      environment.serverConfig?.environment.capabilities.worktreeDisposablePaths === true,
-  );
+  // Machine-wide only: a project's custom rules can't carry the list.
+  const showDisposablePaths =
+    !isProjectScope &&
+    connectedEnvironments.every(
+      (environment) =>
+        environment.serverConfig?.environment.capabilities.worktreeDisposablePaths === true,
+    );
   const disposablePathsStatus = ruleStatus("worktreeDisposablePaths");
   const disposablePathsEdited = useRef(false);
   const disposablePathsText = settings.worktreeDisposablePaths.join("\n");
@@ -262,12 +265,12 @@ export function StorageSettingsPanel() {
                 />
               }
             />
-            {disposablePathsSupported && (
+            {showDisposablePaths && (
               <SettingsRow
                 title="Disposable ignored paths"
                 status={disposablePathsStatus}
                 description="Ignored files keep a worktree because they can hold secrets or local data. List .gitignore patterns that are safe to delete, one per line. Ignored symlinks and junctions never keep a worktree."
-                serverScoped={!isProjectScope}
+                serverScoped
               >
                 <div className="mt-3 max-w-2xl pb-3.5">
                   <Textarea
@@ -295,7 +298,7 @@ export function StorageSettingsPanel() {
                         (disposablePathsStatus ||
                           !Equal.equals(worktreeDisposablePaths, settings.worktreeDisposablePaths))
                       )
-                        updateWorktree({ worktreeDisposablePaths });
+                        update({ worktreeDisposablePaths });
                       disposablePathsEdited.current = false;
                     }}
                   />

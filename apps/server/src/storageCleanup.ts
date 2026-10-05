@@ -238,6 +238,7 @@ export const make = Effect.gen(function* () {
   ) {
     if (!anyWorktreePolicy(serverSettings, worktreeCleanupEnabled)) return;
     if (!(yield* fs.exists(config.worktreesDir))) return;
+    const disposablePaths = serverSettings.storageCleanup.worktreeDisposablePaths;
     const hasDeleteRule = anyWorktreePolicy(serverSettings, (rules) => rules.worktreeOnDelete);
     const deletedRows = hasDeleteRule
       ? yield* sql<{ payload_json: string; workspaceRoot: string }>`
@@ -292,7 +293,7 @@ export const make = Effect.gen(function* () {
         if (!status.isRepo || status.branch !== thread.branch || status.hasWorkingTreeChanges)
           return;
         const head = yield* git.resolveCommit({ cwd: worktreePath, revision: "HEAD" });
-        if (yield* keepsIgnoredFiles(worktreePath, settings.worktreeDisposablePaths)) return;
+        if (yield* keepsIgnoredFiles(worktreePath, disposablePaths)) return;
         const old =
           !deleted &&
           settings.worktreeAfterDays !== null &&
@@ -392,12 +393,17 @@ export const make = Effect.gen(function* () {
           head.commitSha
         )
           return;
-        if (yield* keepsIgnoredFiles(worktreePath, settings.worktreeDisposablePaths)) return;
-        const current = resolveWorktreeCleanup(
-          yield* settingsService.getSettings,
-          thread.projectId,
-        );
-        if (!Equal.equals(current, settings)) return;
+        if (yield* keepsIgnoredFiles(worktreePath, disposablePaths)) return;
+        const latestSettings = yield* settingsService.getSettings;
+        const current = resolveWorktreeCleanup(latestSettings, thread.projectId);
+        if (
+          Object.keys(settings).some(
+            (key) =>
+              current[key as keyof typeof settings] !== settings[key as keyof typeof settings],
+          ) ||
+          !Equal.equals(latestSettings.storageCleanup.worktreeDisposablePaths, disposablePaths)
+        )
+          return;
         yield* git.removeWorktree({ cwd: project.workspaceRoot, path: worktreePath, force: false });
         yield* gitManager.invalidateStatus(project.workspaceRoot);
         // Preserve branch and path: ProviderTurnStartService recreates the checkout

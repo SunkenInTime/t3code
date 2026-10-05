@@ -96,15 +96,15 @@ hourly. Offline machines keep their existing policies.
 Select a project to set **Automatic worktree cleanup** to **Inherit**, **Off**, or **Custom**.
 Inherit follows each machine's rules; Off keeps that project's worktrees until you remove them
 manually. Custom applies separate worktree rules to the selected project or checkout. Browser
-captures and log retention remain machine-wide.
+captures, log retention and disposable ignored paths remain machine-wide.
 
 Worktrees can be removed after a chosen number of inactive days, after merging, or when they
 have no commits beyond the default branch. Only T3-managed worktrees are eligible. Active
 sessions, shared worktrees, uncommitted changes, and ignored files prevent removal, because
 ignored files can hold secrets or local data. Ignored symlinks and junctions don't count, and
 neither do paths listed under **Disposable ignored paths**, which uses `.gitignore` patterns and
-starts with `node_modules/`. Add build output such as `build/` and `.dart_tool/` there, per
-project if needed.
+starts with `node_modules/`. Add build output such as `build/` and `.dart_tool/` there. Patterns
+only match ignored paths, so a project without that folder is unaffected.
 Branches and thread history stay; starting another turn recreates the checkout.
 Merge cleanup requires the commits to be included in the remote default branch, so squash merges
 may need the inactivity rule instead.
