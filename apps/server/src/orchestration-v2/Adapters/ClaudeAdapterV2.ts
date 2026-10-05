@@ -7237,6 +7237,7 @@ export function makeClaudeAdapterV2(
               lastResult?.type === "result" &&
               lastResult.num_turns === 0 &&
               !lastResult.is_error &&
+              terminalStatusFromResult(lastResult) === "completed" &&
               drained.slice(lastResultIndex + 1).some((entry) => isClaudeTurnStartMessage(entry));
             const opaqueReplayTombstones = taskIdSetForNativeThread(
               yield* Ref.get(opaqueBackgroundTaskReplayTombstonesByNativeThread),
