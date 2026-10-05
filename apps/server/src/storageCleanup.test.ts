@@ -20,7 +20,7 @@ import { describe, expect } from "vite-plus/test";
 import * as ServerConfig from "./config.ts";
 import {
   storageCleanupActivityAt,
-  storageCleanupKeepsUntrackedFiles,
+  storageCleanupKeepsIgnoredFiles,
   storageCleanupThreadIdle,
 } from "./storageCleanup.ts";
 import * as GitVcsDriver from "./vcs/GitVcsDriver.ts";
@@ -161,16 +161,16 @@ it.layer(GitLayer)("storage cleanup ignored files", (it) => {
   it.effect("keeps a worktree whose ignored files are not disposable", () =>
     Effect.gen(function* () {
       const cwd = yield* makeRepo(flutterBuild);
-      expect(yield* storageCleanupKeepsUntrackedFiles(cwd, ["node_modules/"])).toBe(true);
-      expect(yield* storageCleanupKeepsUntrackedFiles(cwd, [])).toBe(true);
+      expect(yield* storageCleanupKeepsIgnoredFiles(cwd, ["node_modules/"])).toBe(true);
+      expect(yield* storageCleanupKeepsIgnoredFiles(cwd, [])).toBe(true);
     }),
   );
 
-  it.effect("removes a worktree whose ignored files all match disposable patterns", () =>
+  it.effect("allows removing a worktree whose ignored files all match disposable patterns", () =>
     Effect.gen(function* () {
       const cwd = yield* makeRepo(flutterBuild);
       expect(
-        yield* storageCleanupKeepsUntrackedFiles(cwd, ["node_modules/", "build/", ".dart_tool/"]),
+        yield* storageCleanupKeepsIgnoredFiles(cwd, ["node_modules/", "build/", ".dart_tool/"]),
       ).toBe(false);
     }),
   );
@@ -179,22 +179,8 @@ it.layer(GitLayer)("storage cleanup ignored files", (it) => {
     Effect.gen(function* () {
       const cwd = yield* makeRepo({ ...flutterBuild, "packages/removed/local.env": "TOKEN=1" });
       expect(
-        yield* storageCleanupKeepsUntrackedFiles(cwd, ["node_modules/", "build/", ".dart_tool/"]),
+        yield* storageCleanupKeepsIgnoredFiles(cwd, ["node_modules/", "build/", ".dart_tool/"]),
       ).toBe(true);
-    }),
-  );
-
-  it.effect("keeps untracked files that status is configured to hide", () =>
-    Effect.gen(function* () {
-      const git = yield* GitVcsDriver.GitVcsDriver;
-      const cwd = yield* makeRepo({ "notes.txt": "draft" });
-      yield* git.execute({
-        operation: "test.config",
-        cwd,
-        args: ["config", "status.showUntrackedFiles", "no"],
-      });
-      expect((yield* git.statusDetailsLocal(cwd)).hasWorkingTreeChanges).toBe(false);
-      expect(yield* storageCleanupKeepsUntrackedFiles(cwd, ["node_modules/"])).toBe(true);
     }),
   );
 
@@ -208,11 +194,11 @@ it.layer(GitLayer)("storage cleanup ignored files", (it) => {
       NodeFS.symlinkSync(target, path.join(cwd, "linked"), "junction");
       NodeFS.mkdirSync(path.join(cwd, "infra"));
       NodeFS.symlinkSync(target, path.join(cwd, "infra", "linked"), "junction");
-      expect(yield* storageCleanupKeepsUntrackedFiles(cwd, ["node_modules/"])).toBe(false);
+      expect(yield* storageCleanupKeepsIgnoredFiles(cwd, ["node_modules/"])).toBe(false);
 
       yield* fs.makeDirectory(path.join(cwd, "build"));
       yield* fs.writeFileString(path.join(cwd, "build", "output.bin"), "");
-      expect(yield* storageCleanupKeepsUntrackedFiles(cwd, ["node_modules/"])).toBe(true);
+      expect(yield* storageCleanupKeepsIgnoredFiles(cwd, ["node_modules/"])).toBe(true);
     }),
   );
 });

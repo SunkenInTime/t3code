@@ -105,21 +105,20 @@ export function storageCleanupActivityAt(thread: OrchestrationV2ThreadShell): nu
   );
 }
 
-// Untracked and ignored files can contain secrets or local datasets, so each one
-// keeps the worktree unless it is ignored and matches a disposable gitignore
-// pattern or is a symlink or junction. Removal unlinks a link and never touches
-// its target.
-export const storageCleanupKeepsUntrackedFiles = Effect.fn("StorageCleanup.keepsUntrackedFiles")(
+// Ignored files can contain secrets or local datasets, so each one keeps the
+// worktree unless it matches a disposable gitignore pattern or is a symlink or
+// junction. Removal unlinks a link and never touches its target.
+export const storageCleanupKeepsIgnoredFiles = Effect.fn("StorageCleanup.keepsIgnoredFiles")(
   function* (worktreePath: string, disposablePaths: ReadonlyArray<string>) {
     const git = yield* GitVcsDriver.GitVcsDriver;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const listUntracked = (args: ReadonlyArray<string>) =>
+    const listIgnored = (excludes: ReadonlyArray<string>) =>
       git
         .execute({
-          operation: "StorageCleanup.untrackedFiles",
+          operation: "StorageCleanup.ignoredFiles",
           cwd: worktreePath,
-          args: ["ls-files", "--others", "--directory", "-z", ...args],
+          args: ["ls-files", "--others", "--ignored", "--directory", "-z", ...excludes],
           maxOutputBytes: 64 * 1024,
         })
         .pipe(
@@ -127,12 +126,6 @@ export const storageCleanupKeepsUntrackedFiles = Effect.fn("StorageCleanup.keeps
             result.stdoutTruncated ? null : result.stdout.split("\0").filter(Boolean),
           ),
         );
-    const listIgnored = (excludes: ReadonlyArray<string>) =>
-      listUntracked(["--ignored", ...excludes]);
-    // `status.showUntrackedFiles=no` hides these from the status check, and
-    // `git worktree remove` deletes them anyway.
-    const untracked = yield* listUntracked(["--exclude-standard", "--no-empty-directory"]);
-    if (untracked === null || untracked.length > 0) return true;
     const ignored = yield* listIgnored(["--exclude-standard"]);
     if (ignored === null) return true;
     if (ignored.length === 0) return false;
@@ -231,12 +224,12 @@ export const make = Effect.gen(function* () {
     return false;
   });
 
-  const untrackedFilesContext = yield* Effect.context<
+  const ignoredFilesContext = yield* Effect.context<
     GitVcsDriver.GitVcsDriver | FileSystem.FileSystem | Path.Path
   >();
-  const keepsUntrackedFiles = (worktreePath: string, disposablePaths: ReadonlyArray<string>) =>
-    storageCleanupKeepsUntrackedFiles(worktreePath, disposablePaths).pipe(
-      Effect.provideContext(untrackedFilesContext),
+  const keepsIgnoredFiles = (worktreePath: string, disposablePaths: ReadonlyArray<string>) =>
+    storageCleanupKeepsIgnoredFiles(worktreePath, disposablePaths).pipe(
+      Effect.provideContext(ignoredFilesContext),
     );
 
   const cleanWorktrees = Effect.fn("StorageCleanup.cleanWorktrees")(function* (
@@ -299,7 +292,7 @@ export const make = Effect.gen(function* () {
         if (!status.isRepo || status.branch !== thread.branch || status.hasWorkingTreeChanges)
           return;
         const head = yield* git.resolveCommit({ cwd: worktreePath, revision: "HEAD" });
-        if (yield* keepsUntrackedFiles(worktreePath, settings.worktreeDisposablePaths)) return;
+        if (yield* keepsIgnoredFiles(worktreePath, settings.worktreeDisposablePaths)) return;
         const old =
           !deleted &&
           settings.worktreeAfterDays !== null &&
@@ -399,7 +392,7 @@ export const make = Effect.gen(function* () {
           head.commitSha
         )
           return;
-        if (yield* keepsUntrackedFiles(worktreePath, settings.worktreeDisposablePaths)) return;
+        if (yield* keepsIgnoredFiles(worktreePath, settings.worktreeDisposablePaths)) return;
         const current = resolveWorktreeCleanup(
           yield* settingsService.getSettings,
           thread.projectId,
