@@ -1,4 +1,5 @@
 import * as Cache from "effect/Cache";
+import * as Cause from "effect/Cause";
 import * as Data from "effect/Data";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -3653,7 +3654,7 @@ export const makeGitVcsDriverCore = Effect.fn("makeGitVcsDriverCore")(function* 
    */
   const removeLeftoverLinks = (
     target: string,
-  ): Effect.Effect<boolean, PlatformError.PlatformError> =>
+  ): Effect.Effect<boolean, PlatformError.PlatformError | Cause.UnknownError> =>
     Effect.gen(function* () {
       if (Option.isSome(yield* fileSystem.readLink(target).pipe(Effect.option))) {
         yield* fileSystem.remove(target);
