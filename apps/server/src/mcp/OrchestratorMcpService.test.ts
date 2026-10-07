@@ -67,7 +67,7 @@ describe("OrchestratorMcpService", () => {
         ],
       } as unknown as OrchestrationV2ThreadProjection;
       const childProjection = {
-        thread: { id: childThreadId },
+        thread: { id: childThreadId, title: "Child task" },
         runs: [
           {
             id: childRunId,
@@ -199,7 +199,7 @@ describe("OrchestratorMcpService", () => {
         ],
       } as unknown as OrchestrationV2ThreadProjection;
       const childProjection = {
-        thread: { id: childThreadId },
+        thread: { id: childThreadId, title: "Child task" },
         runs: [{ id: RunId.make("run:mcp-restart-child"), ordinal: 1, status: "cancelled" }],
         contextTransfers: [],
         messages: [],
@@ -283,7 +283,7 @@ describe("OrchestratorMcpService", () => {
         ],
       } as unknown as OrchestrationV2ThreadProjection;
       const childProjection = {
-        thread: { id: childThreadId },
+        thread: { id: childThreadId, title: "Child task" },
         runs: [],
         contextTransfers: [],
         messages: [],
@@ -359,7 +359,7 @@ describe("OrchestratorMcpService", () => {
         ],
       } as unknown as OrchestrationV2ThreadProjection;
       const childProjection = {
-        thread: { id: childThreadId },
+        thread: { id: childThreadId, title: "Child task" },
         runs: [{ id: childRunId, status: "running" }],
         contextTransfers: [],
         messages: [],
@@ -438,7 +438,7 @@ describe("OrchestratorMcpService", () => {
         ],
       } as unknown as OrchestrationV2ThreadProjection;
       const childProjection = {
-        thread: { id: childThreadId },
+        thread: { id: childThreadId, title: "Child task" },
         runs: [{ id: childRunId, status: "running" }],
         contextTransfers: [],
         messages: [],
@@ -524,7 +524,7 @@ describe("OrchestratorMcpService", () => {
         ],
       } as unknown as OrchestrationV2ThreadProjection;
       const childProjection = {
-        thread: { id: childThreadId },
+        thread: { id: childThreadId, title: "Child task" },
         runs: [{ id: childRunId, status: "running" }],
         contextTransfers: [],
         messages: [],
@@ -624,7 +624,7 @@ describe("OrchestratorMcpService", () => {
         [
           childThreadId,
           {
-            thread: { id: childThreadId },
+            thread: { id: childThreadId, title: "Child task" },
             runs: [{ id: RunId.make("run:mcp-cancel-grandchild-child"), status: "running" }],
             contextTransfers: [],
             messages: [],
@@ -637,7 +637,7 @@ describe("OrchestratorMcpService", () => {
         [
           grandchildThreadId,
           {
-            thread: { id: grandchildThreadId },
+            thread: { id: grandchildThreadId, title: "Grandchild task" },
             runs: [],
             contextTransfers: [],
             messages: [],
@@ -851,7 +851,7 @@ describe("OrchestratorMcpService provider resolution", () => {
     }) as unknown as OrchestrationV2ThreadProjection;
 
   const childProjection = {
-    thread: { id: childThreadId },
+    thread: { id: childThreadId, title: "Child task" },
     runs: [],
     contextTransfers: [],
     messages: [],
