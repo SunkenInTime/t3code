@@ -132,7 +132,10 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
           creationSource: "mcp",
         })
         .pipe(Effect.mapError(dispatchFailure));
-      const fork = yield* threads.getThreadShell(targetThreadId).pipe(Effect.mapError(unavailable));
+      // The fork is committed, so a failed title read must not fail the call and invite a retry.
+      const fork = yield* threads
+        .getThreadShell(targetThreadId)
+        .pipe(Effect.orElseSucceed(() => null));
       return {
         sequence: result.sequence,
         targetThreadId,

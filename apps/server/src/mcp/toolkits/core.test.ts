@@ -474,53 +474,80 @@ it.effect("a client caller targets any thread within its ceiling and cannot act 
   ),
 );
 
-it.effect("a fork result links to the new fork, not its source", () =>
+// Serves "source-thread" as the fork source; `forkShell` answers the fork's own shell read.
+const forkToolkitLayer = (
+  forkShell: ThreadManagement.ThreadManagementService["Service"]["getThreadShell"],
+) =>
+  McpHttpServer.layerThreadToolkit.pipe(
+    Layer.provideMerge(McpServer.McpServer.layer),
+    Layer.provide(NodeCrypto.layer),
+    Layer.provide(
+      Layer.mock(ThreadManagement.ThreadManagementService)({
+        getThreadShell: (id) =>
+          id === "source-thread"
+            ? Effect.succeed(McpToolAccessTestkit.liveThreadShell(id, { runtimeMode: "auto" }))
+            : forkShell(id),
+        getProjectThreadRecords: () =>
+          Effect.succeed({
+            thread: {
+              id: ThreadId.make("source-thread"),
+              projectId: "project-a",
+              title: "Source title",
+              runtimeMode: "auto",
+              interactionMode: "default",
+              deletedAt: null,
+            },
+          } as never),
+        dispatch: () => Effect.succeed({ sequence: 7, storedEvents: [] }),
+      }),
+    ),
+  );
+
+const forkSourceThread = (args: Record<string, unknown> = {}) =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;
     const forked = yield* server
       .callTool({
         name: "t3_thread_fork",
-        arguments: { threadId: "source-thread", sourcePoint: { type: "latest_stable" } },
+        arguments: { threadId: "source-thread", sourcePoint: { type: "latest_stable" }, ...args },
       })
       .pipe(
         Effect.provideService(McpInvocationContext.McpInvocationContext, clientScope("auto")),
         Effect.provideService(McpSchema.McpServerClient, client),
       );
     expect(forked.isError).toBe(false);
-    const { targetThreadId, link } = forked.structuredContent as {
-      targetThreadId: string;
-      link: string;
-    };
+    return forked.structuredContent as { targetThreadId: string; link: string };
+  });
+
+it.effect("a fork result links to the new fork, not its source", () =>
+  Effect.gen(function* () {
+    const { targetThreadId, link } = yield* forkSourceThread();
     expect(targetThreadId).not.toBe("source-thread");
     expect(link).toBe(
       `[Fork title](t3-thread://v1/mcp-core-environment/${encodeURIComponent(targetThreadId)})`,
     );
   }).pipe(
     Effect.provide(
-      McpHttpServer.layerThreadToolkit.pipe(
-        Layer.provideMerge(McpServer.McpServer.layer),
-        Layer.provide(NodeCrypto.layer),
-        Layer.provide(
-          Layer.mock(ThreadManagement.ThreadManagementService)({
-            getThreadShell: (id) =>
-              Effect.succeed({
-                ...McpToolAccessTestkit.liveThreadShell(id, { runtimeMode: "auto" }),
-                ...(id === "source-thread" ? {} : { title: "Fork title" }),
-              }),
-            getProjectThreadRecords: () =>
-              Effect.succeed({
-                thread: {
-                  id: ThreadId.make("source-thread"),
-                  projectId: "project-a",
-                  title: "Source title",
-                  runtimeMode: "auto",
-                  interactionMode: "default",
-                  deletedAt: null,
-                },
-              } as never),
-            dispatch: () => Effect.succeed({ sequence: 7, storedEvents: [] }),
-          }),
-        ),
+      forkToolkitLayer((id) =>
+        Effect.succeed({
+          ...McpToolAccessTestkit.liveThreadShell(id, { runtimeMode: "auto" }),
+          title: "Fork title",
+        }),
+      ),
+    ),
+  ),
+);
+
+it.effect("a committed fork still returns its link when reading its title fails", () =>
+  Effect.gen(function* () {
+    const { targetThreadId, link } = yield* forkSourceThread({ title: "Requested title" });
+    expect(link).toBe(
+      `[Requested title](t3-thread://v1/mcp-core-environment/${encodeURIComponent(targetThreadId)})`,
+    );
+  }).pipe(
+    Effect.provide(
+      forkToolkitLayer((threadId) =>
+        Effect.fail(new OrchestratorProjectionError({ threadId, cause: "read failed" })),
       ),
     ),
   ),

@@ -249,6 +249,7 @@ the timeout expires. A wait timeout does not cancel the child; the result sets
 type DelegateTaskResult = {
   taskId: string;
   childThreadId: string;
+  childThreadLink: string;
   childRunId: string | null;
   childNodeId: string;
   status: "queued" | "running" | "waiting" | "completed" | "failed" | "cancelled" | "interrupted";
