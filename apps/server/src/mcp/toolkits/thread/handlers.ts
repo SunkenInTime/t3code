@@ -9,6 +9,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { modelSelectionCommandType } from "@t3tools/shared/model";
+import { formatThreadLink } from "@t3tools/shared/threadLinks";
 
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import {
@@ -116,7 +117,7 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
   ),
   t3_thread_fork: writesThread((input) =>
     Effect.gen(function* () {
-      const { threads, projection } = yield* readThread(input.threadId);
+      const { scope, threads, projection } = yield* readThread(input.threadId);
       const commandId = yield* newCommandId();
       const targetThreadId = ThreadId.make(`${commandId}:fork`);
       const result = yield* threads
@@ -131,7 +132,16 @@ export const layer = McpToolAccess.toLayer(ThreadToolkit, {
           creationSource: "mcp",
         })
         .pipe(Effect.mapError(dispatchFailure));
-      return { sequence: result.sequence, targetThreadId };
+      const fork = yield* threads.getThreadShell(targetThreadId).pipe(Effect.mapError(unavailable));
+      return {
+        sequence: result.sequence,
+        targetThreadId,
+        link: formatThreadLink({
+          environmentId: scope.environmentId,
+          threadId: targetThreadId,
+          title: fork?.title ?? input.title ?? projection.thread.title,
+        }),
+      };
     }),
   ),
   t3_thread_merge_back: McpToolAccess.writesThreads(

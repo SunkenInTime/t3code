@@ -38,6 +38,7 @@ describe("orchestrator MCP contracts", () => {
     const result = decodeDelegateTaskResult({
       taskId: "node-task-1",
       childThreadId: "thread-child-1",
+      childThreadLink: "[Child](t3-thread://v1/environment-1/thread-child-1)",
       childRunId: "run-child-1",
       childNodeId: "node-task-1",
       status: "completed",

@@ -196,16 +196,21 @@ const ThreadConfigureTool = Tool.make("t3_thread_configure", {
 }).annotate(Tool.Destructive, true);
 
 const transferResult = Schema.Struct({ sequence: NonNegativeInt, targetThreadId: ThreadId });
+const forkResult = Schema.Struct({
+  ...transferResult.fields,
+  /** Paste this whenever you mention the fork, so the user can click to open it. */
+  link: Schema.String,
+});
 const ThreadForkTool = Tool.make("t3_thread_fork", {
   ...commandTool,
   description:
-    "Fork a thread from a stable run or checkpoint using the existing fork command. Omit threadId to fork this thread. The fork inherits the source configuration. Acceptance does not mean a provider turn has completed.",
+    "Fork a thread from a stable run or checkpoint using the existing fork command. Omit threadId to fork this thread. The fork inherits the source configuration. Acceptance does not mean a provider turn has completed. Paste the returned link when you mention the fork.",
   parameters: Schema.Struct({
     threadId: Schema.optional(ThreadId),
     sourcePoint: OrchestrationV2ThreadForkSourcePoint,
     title: Schema.optional(TrimmedNonEmptyString),
   }),
-  success: transferResult,
+  success: forkResult,
 }).annotate(Tool.Destructive, true);
 const ThreadMergeBackTool = Tool.make("t3_thread_merge_back", {
   ...commandTool,

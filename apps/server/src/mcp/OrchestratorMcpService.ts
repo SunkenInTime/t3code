@@ -1325,6 +1325,11 @@ const make = Effect.gen(function* () {
       const response = {
         taskId: task.id,
         childThreadId: task.childThreadId,
+        childThreadLink: formatThreadLink({
+          environmentId: scope.environmentId,
+          threadId: task.childThreadId,
+          title: childControls.thread.title,
+        }),
         childRunId: childRun?.id ?? null,
         childNodeId: task.id,
         status,
@@ -2239,6 +2244,11 @@ const make = Effect.gen(function* () {
                 );
               return {
                 threadId,
+                link: formatThreadLink({
+                  environmentId: scope.environmentId,
+                  threadId,
+                  title: projection.thread.title,
+                }),
                 runId: run?.id ?? null,
                 status: run?.status ?? "idle",
                 title: projection.thread.title,

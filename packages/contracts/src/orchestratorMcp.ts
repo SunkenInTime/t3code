@@ -193,6 +193,8 @@ export type OrchestratorMcpDelegateTaskInput = typeof OrchestratorMcpDelegateTas
 export const OrchestratorMcpDelegateTaskResult = Schema.Struct({
   taskId: NodeId,
   childThreadId: ThreadId,
+  /** Paste this whenever you mention the child thread, so the user can click to open it. */
+  childThreadLink: Schema.String,
   childRunId: Schema.NullOr(RunId),
   childNodeId: NodeId,
   status: OrchestratorMcpDelegatedTaskStatus,
@@ -260,6 +262,8 @@ export type OrchestratorMcpCreatedThreadStatus = typeof OrchestratorMcpCreatedTh
 
 export const OrchestratorMcpCreatedThread = Schema.Struct({
   threadId: ThreadId,
+  /** Paste this whenever you mention the thread, so the user can click to open it. */
+  link: Schema.String,
   runId: Schema.NullOr(RunId),
   status: OrchestratorMcpCreatedThreadStatus,
   title: Schema.String,

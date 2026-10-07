@@ -474,6 +474,58 @@ it.effect("a client caller targets any thread within its ceiling and cannot act 
   ),
 );
 
+it.effect("a fork result links to the new fork, not its source", () =>
+  Effect.gen(function* () {
+    const server = yield* McpServer.McpServer;
+    const forked = yield* server
+      .callTool({
+        name: "t3_thread_fork",
+        arguments: { threadId: "source-thread", sourcePoint: { type: "latest_stable" } },
+      })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, clientScope("auto")),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      );
+    expect(forked.isError).toBe(false);
+    const { targetThreadId, link } = forked.structuredContent as {
+      targetThreadId: string;
+      link: string;
+    };
+    expect(targetThreadId).not.toBe("source-thread");
+    expect(link).toBe(
+      `[Fork title](t3-thread://v1/mcp-core-environment/${encodeURIComponent(targetThreadId)})`,
+    );
+  }).pipe(
+    Effect.provide(
+      McpHttpServer.layerThreadToolkit.pipe(
+        Layer.provideMerge(McpServer.McpServer.layer),
+        Layer.provide(NodeCrypto.layer),
+        Layer.provide(
+          Layer.mock(ThreadManagement.ThreadManagementService)({
+            getThreadShell: (id) =>
+              Effect.succeed({
+                ...McpToolAccessTestkit.liveThreadShell(id, { runtimeMode: "auto" }),
+                ...(id === "source-thread" ? {} : { title: "Fork title" }),
+              }),
+            getProjectThreadRecords: () =>
+              Effect.succeed({
+                thread: {
+                  id: ThreadId.make("source-thread"),
+                  projectId: "project-a",
+                  title: "Source title",
+                  runtimeMode: "auto",
+                  interactionMode: "default",
+                  deletedAt: null,
+                },
+              } as never),
+            dispatch: () => Effect.succeed({ sequence: 7, storedEvents: [] }),
+          }),
+        ),
+      ),
+    ),
+  ),
+);
+
 it.effect("a read-only client reads threads and is refused every write before it runs", () =>
   Effect.gen(function* () {
     const server = yield* McpServer.McpServer;

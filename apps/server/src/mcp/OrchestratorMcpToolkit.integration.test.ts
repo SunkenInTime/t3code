@@ -1695,6 +1695,9 @@ describe("orchestrator MCP toolkit", () => {
             expect(delegatedSource.messages[0]).toMatchObject({
               senderThreadId: parentThreadId,
             });
+            expect(delegated.childThreadLink).toBe(
+              `[${delegatedSource.thread.title}](t3-thread://v1/environment%3Amcp-orchestrator/${encodeURIComponent(delegated.childThreadId)})`,
+            );
             expect(
               delegatedSource.turnItems.find((item) => item.type === "user_message"),
             ).toMatchObject({
@@ -2089,6 +2092,9 @@ describe("orchestrator MCP toolkit", () => {
             expect(createdSource.messages[0]).toMatchObject({
               senderThreadId: parentThreadId,
             });
+            expect(promptedThread.link).toBe(
+              `[${createdSource.thread.title}](t3-thread://v1/environment%3Amcp-orchestrator/${encodeURIComponent(promptedThread.threadId)})`,
+            );
             expect(
               createdSource.turnItems.find((item) => item.type === "user_message"),
             ).toMatchObject({
