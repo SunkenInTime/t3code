@@ -352,10 +352,10 @@ and `creationSource: "mcp"`; provider output uses `creationSource: "provider"`.
 Actor and ingress are separate so agent-authored user-role messages remain
 distinguishable from human-authored messages.
 
-Every result that names a thread for the agent to mention includes a Markdown
+List, read, launch, `create_threads`, and fork results include `link`, and
+`delegate_task` and `task_status` results include `childThreadLink`: a Markdown
 link of the form `[title](t3-thread://v1/<environmentId>/<threadId>)` that
-clients open as the thread: `link` on list, read, launch, `create_threads`,
-and fork results, and `childThreadLink` on `delegate_task` and `task_status`. List and read results also report `snoozed` and `snoozedUntil`, and
+clients open as the thread. List and read results also report `snoozed` and `snoozedUntil`, and
 `t3_thread_list` filters on `snoozed`. The server's `isSnoozed` follows the
 client's `effectiveSnoozed`, so agents and the sidebar agree: a snoozed thread
 wakes early when it has a pending request, fails, or completes after the snooze.
