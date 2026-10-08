@@ -9,7 +9,7 @@ export default Effect.gen(function* () {
   // find a few dozen of them. ProjectionStore's turn_anchors CTE relies on it.
   yield* sql`
     CREATE INDEX IF NOT EXISTS orchestration_v2_projection_turn_items_user_message_idx
-    ON orchestration_v2_projection_turn_items(thread_id, ordinal)
+    ON orchestration_v2_projection_turn_items(thread_id, ordinal, turn_item_id)
     WHERE type = 'user_message'
   `;
   // The same snapshot keeps every unfinished node. A long thread has thousands

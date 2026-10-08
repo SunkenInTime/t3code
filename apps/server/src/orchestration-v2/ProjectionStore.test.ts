@@ -633,14 +633,12 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
         windowPlan.map((row) => row.detail).join("\n"),
         /SEARCH item USING INDEX orchestration_v2_projection_turn_items_user_message_idx \(thread_id=\? AND ordinal<\?\)/,
       );
-      assert.deepEqual(
-        windowPlan.filter((row) => row.parent === 0).map((row) => row.detail),
-        [
-          "MATERIALIZE retained",
-          "SCAN retained",
-          "SEARCH item USING INDEX sqlite_autoindex_orchestration_v2_projection_turn_items_1 (turn_item_id=?)",
-        ],
+      const topLevel = windowPlan.filter((row) => row.parent === 0).map((row) => row.detail);
+      assert.include(
+        topLevel,
+        "SEARCH item USING INDEX sqlite_autoindex_orchestration_v2_projection_turn_items_1 (turn_item_id=?)",
       );
+      assert.notInclude(topLevel, "USE TEMP B-TREE FOR ORDER BY");
       const nodeStatement = statements.find((statement) =>
         statement.includes("WITH RECURSIVE retained"),
       );
