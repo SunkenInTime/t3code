@@ -399,18 +399,25 @@ it.layer(layerTest)("ProjectionStoreV2", (it) => {
           .getThreadRecords(threadId, ["runs", "messages", "turnItems"], filter)
           .pipe(Effect.provideService(Statement.CurrentTransformer, recordQueries));
 
-      const empty = yield* read({ turnItemTypes: [], runIds: [], messageRoles: [] });
-      assert.deepEqual([empty.turnItems, empty.runs, empty.messages], [[], [], []]);
-      for (const table of ["turn_items", "runs", "messages"]) {
+      const emptyFilters = [
+        [{ turnItemTypes: [] }, "turnItems", "turn_items"],
+        [{ turnItemStatuses: [] }, "turnItems", "turn_items"],
+        [{ turnItemRunIds: [] }, "turnItems", "turn_items"],
+        [{ runIds: [] }, "runs", "runs"],
+        [{ messageIds: [] }, "messages", "messages"],
+        [{ messageRoles: [] }, "messages", "messages"],
+        [{ messageRunIds: [] }, "messages", "messages"],
+      ] as const;
+      for (const [filter, field, table] of emptyFilters) {
+        queries.length = 0;
+        assert.isEmpty((yield* read(filter))[field]);
         assert.isFalse(
           queries.some((query) =>
             new RegExp(`FROM orchestration_v2_projection_${table}\\b`).test(query),
           ),
-          `read ${table}`,
+          `${JSON.stringify(filter)} read ${table}`,
         );
       }
-      assert.isEmpty((yield* read({ turnItemStatuses: [] })).turnItems);
-      assert.isEmpty((yield* read({ turnItemRunIds: [] })).turnItems);
 
       const selected = yield* read({ turnItemTypes: ["command_execution"], runIds: [runId] });
       assert.deepEqual(
