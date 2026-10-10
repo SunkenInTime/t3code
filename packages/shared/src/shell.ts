@@ -693,6 +693,46 @@ export const resolveCommandPath = Effect.fn("shell.resolveCommandPath")(function
   });
 });
 
+// Newest layout first: Git for Windows 2.56 moved x64 builds from mingw64 to
+// ucrt64, and an upgraded install can keep the old folder.
+const GIT_FOR_WINDOWS_BUILDS = ["ucrt64", "clangarm64", "mingw64", "mingw32"] as const;
+
+function isFileSync(filePath: string): boolean {
+  try {
+    return NodeFS.statSync(filePath).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Swaps Git for Windows' launcher (`<Git>\cmd\git.exe` or `<Git>\bin\git.exe`,
+ * the only git the installer puts on PATH by default) for the git.exe it
+ * starts. The launcher costs a second process on every git command, and each
+ * launch leaks a kernel token reference that slows process creation
+ * machine-wide until reboot. The real binary sets MSYSTEM, HOME and its own
+ * PATH entries for hooks, ssh and credential helpers, but only when MSYSTEM is
+ * unset, so the launcher stays when it is set. Anything else is returned as is.
+ */
+export function preferGitForWindowsBinary(
+  executable: string,
+  env: NodeJS.ProcessEnv,
+  isFile: (filePath: string) => boolean = isFileSync,
+): string {
+  if (env.MSYSTEM) return executable;
+  const path = NodePath.win32;
+  if (path.basename(executable).toLowerCase() !== "git.exe") return executable;
+  const launcherDirectory = path.dirname(executable);
+  const launcherFolder = path.basename(launcherDirectory).toLowerCase();
+  if (launcherFolder !== "cmd" && launcherFolder !== "bin") return executable;
+  const installRoot = path.dirname(launcherDirectory);
+  for (const build of GIT_FOR_WINDOWS_BUILDS) {
+    const candidate = path.join(installRoot, build, "bin", "git.exe");
+    if (isFile(candidate)) return candidate;
+  }
+  return executable;
+}
+
 // Untraced because it runs before most spawns and returns at once off Windows.
 export const resolveSpawnCommand = Effect.fnUntraced(function* (
   command: string,
@@ -724,6 +764,7 @@ export const resolveSpawnCommand = Effect.fnUntraced(function* (
     platform,
     resolvePathEnvironmentVariable(env),
     resolveWindowsPathExtensions(env).join(";"),
+    env.MSYSTEM ? "msystem" : "",
     command,
   ].join(COMMAND_RESOLUTION_CACHE_KEY_SEPARATOR);
   const nowNanos = yield* Clock.currentTimeNanos;
@@ -732,7 +773,8 @@ export const resolveSpawnCommand = Effect.fnUntraced(function* (
   if (cached !== undefined && cached.expiresAtNanos > nowNanos) {
     resolvedExecutable = cached.resolvedPath;
   } else {
-    resolvedExecutable = resolveExecutable(command, platform, env) ?? null;
+    const found = resolveExecutable(command, platform, env);
+    resolvedExecutable = found === undefined ? null : preferGitForWindowsBinary(found, env);
     if (!explicitPath && resolvedExecutable !== null) {
       cacheCommandResolution(cache, cacheKey, resolvedExecutable, nowNanos);
     }
