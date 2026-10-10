@@ -765,6 +765,7 @@ export const resolveSpawnCommand = Effect.fnUntraced(function* (
     platform,
     resolvePathEnvironmentVariable(env),
     resolveWindowsPathExtensions(env).join(";"),
+    env.MSYSTEM ? "msystem" : "",
     command,
   ].join(COMMAND_RESOLUTION_CACHE_KEY_SEPARATOR);
   const nowNanos = yield* Clock.currentTimeNanos;
@@ -773,14 +774,16 @@ export const resolveSpawnCommand = Effect.fnUntraced(function* (
   if (cached !== undefined && cached.expiresAtNanos > nowNanos) {
     resolvedExecutable = cached.resolvedPath;
   } else {
-    resolvedExecutable = resolveExecutable(command, platform, env) ?? null;
+    // Cached with the scan: its file checks would otherwise run before every
+    // git launch. A Git upgrade that moves the real binary can fail git for up
+    // to the cache lifetime.
+    const found = resolveExecutable(command, platform, env);
+    resolvedExecutable = found === undefined ? null : preferGitForWindowsBinary(found, env);
     if (!explicitPath && resolvedExecutable !== null) {
       cacheCommandResolution(cache, cacheKey, resolvedExecutable, nowNanos);
     }
   }
-  // Outside the cache: a Git upgrade moves the real binary, never the launcher.
-  const resolvedCommand =
-    resolvedExecutable === null ? command : preferGitForWindowsBinary(resolvedExecutable, env);
+  const resolvedCommand = resolvedExecutable ?? command;
   const extension = NodePath.win32.extname(resolvedCommand).toLowerCase();
   if (extension !== ".cmd" && extension !== ".bat") {
     return { command: resolvedCommand, args: [...args], shell: false };

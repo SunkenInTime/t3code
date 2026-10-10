@@ -692,6 +692,30 @@ effectIt.layer(NodeServices.layer)("resolveSpawnCommand", (it) => {
     }).pipe(Effect.provideService(CommandResolutionCache, new Map())),
   );
 
+  it.effect("keeps launcher swaps apart for environments with and without MSYSTEM", () =>
+    Effect.gen(function* () {
+      let scans = 0;
+      const scan: SpawnExecutableResolver = () => {
+        scans++;
+        return "C:\\Git\\cmd\\git.exe";
+      };
+      const resolve = (env: NodeJS.ProcessEnv) =>
+        resolveSpawnCommand("git", [], {
+          env: { PATH: "C:\\Git\\cmd", PATHEXT: ".EXE", ...env },
+        }).pipe(
+          Effect.provideService(HostProcess.Platform, "win32"),
+          Effect.provideService(SpawnExecutableResolution, scan),
+        );
+
+      yield* resolve({});
+      yield* resolve({});
+      expect(scans).toBe(1);
+      // A swap made without MSYSTEM must not reach a child that has it set.
+      yield* resolve({ MSYSTEM: "MINGW64" });
+      expect(scans).toBe(2);
+    }).pipe(Effect.provideService(CommandResolutionCache, new Map())),
+  );
+
   it.effect("does not fall back to a shell for unresolved Windows commands", () =>
     Effect.gen(function* () {
       const command = yield* resolveSpawnCommand("missing & calc", ["unsafe & value"], {
