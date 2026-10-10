@@ -519,10 +519,10 @@ describe("preferGitForWindowsBinary", () => {
       paths.includes(filePath);
 
   it("runs the git.exe Git for Windows' launcher would start", () => {
-    // 2.56+ on x64, including an upgraded install that kept mingw64.
+    // 2.56+ on x64. The PATHEXT scan returns the extension in PATHEXT's case.
     expect(
       preferGitForWindowsBinary(
-        "C:\\Program Files\\Git\\cmd\\git.exe",
+        "C:\\Program Files\\Git\\cmd\\git.EXE",
         {},
         files(
           "C:\\Program Files\\Git\\ucrt64\\bin\\git.exe",
@@ -559,12 +559,14 @@ describe("preferGitForWindowsBinary", () => {
     ).toBe("C:\\Program Files\\Git\\cmd\\git.exe");
   });
 
+  it("keeps the launcher when no git.exe sits beside it", () => {
+    expect(preferGitForWindowsBinary("C:\\Program Files\\Git\\cmd\\git.exe", {}, () => false)).toBe(
+      "C:\\Program Files\\Git\\cmd\\git.exe",
+    );
+  });
+
   it("leaves other gits and other launchers alone", () => {
     const everything = () => true;
-    const nothing = () => false;
-    expect(
-      preferGitForWindowsBinary("C:\\ProgramData\\chocolatey\\bin\\git.exe", {}, nothing),
-    ).toBe("C:\\ProgramData\\chocolatey\\bin\\git.exe");
     expect(preferGitForWindowsBinary("C:\\Users\\me\\scoop\\shims\\git.exe", {}, everything)).toBe(
       "C:\\Users\\me\\scoop\\shims\\git.exe",
     );

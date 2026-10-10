@@ -693,8 +693,8 @@ export const resolveCommandPath = Effect.fn("shell.resolveCommandPath")(function
   });
 });
 
-// Newest layout first: Git for Windows 2.56 moved x64 builds from mingw64 to
-// ucrt64, and an upgraded install can keep the old folder.
+// Git for Windows 2.56 moved x64 builds from mingw64 to ucrt64; ARM64 builds
+// live in clangarm64 and 32-bit ones in mingw32.
 const GIT_FOR_WINDOWS_BUILDS = ["ucrt64", "clangarm64", "mingw64", "mingw32"] as const;
 
 function isFileSync(filePath: string): boolean {
@@ -706,13 +706,14 @@ function isFileSync(filePath: string): boolean {
 }
 
 /**
- * Swaps Git for Windows' launcher (`<Git>\cmd\git.exe` or `<Git>\bin\git.exe`,
- * the only git the installer puts on PATH by default) for the git.exe it
- * starts. The launcher costs a second process on every git command, and each
- * launch leaks a kernel token reference that slows process creation
- * machine-wide until reboot. The real binary sets MSYSTEM, HOME and its own
- * PATH entries for hooks, ssh and credential helpers, but only when MSYSTEM is
- * unset, so the launcher stays when it is set. Anything else is returned as is.
+ * Swaps Git for Windows' launcher (`<Git>\cmd\git.exe`, the only git its
+ * installer puts on PATH, or the portable build's `<Git>\bin\git.exe`) for the
+ * git.exe it starts. The launcher costs a second process on every git command,
+ * and each launch leaks a kernel token reference that slows process creation
+ * machine-wide until reboot. The real binary sets HOME itself, but adds its own
+ * folders to PATH for hooks, ssh and credential helpers only when MSYSTEM is
+ * unset, so the launcher stays when MSYSTEM is set. Anything else is returned
+ * as is.
  */
 export function preferGitForWindowsBinary(
   executable: string,
@@ -764,7 +765,6 @@ export const resolveSpawnCommand = Effect.fnUntraced(function* (
     platform,
     resolvePathEnvironmentVariable(env),
     resolveWindowsPathExtensions(env).join(";"),
-    env.MSYSTEM ? "msystem" : "",
     command,
   ].join(COMMAND_RESOLUTION_CACHE_KEY_SEPARATOR);
   const nowNanos = yield* Clock.currentTimeNanos;
@@ -773,13 +773,14 @@ export const resolveSpawnCommand = Effect.fnUntraced(function* (
   if (cached !== undefined && cached.expiresAtNanos > nowNanos) {
     resolvedExecutable = cached.resolvedPath;
   } else {
-    const found = resolveExecutable(command, platform, env);
-    resolvedExecutable = found === undefined ? null : preferGitForWindowsBinary(found, env);
+    resolvedExecutable = resolveExecutable(command, platform, env) ?? null;
     if (!explicitPath && resolvedExecutable !== null) {
       cacheCommandResolution(cache, cacheKey, resolvedExecutable, nowNanos);
     }
   }
-  const resolvedCommand = resolvedExecutable ?? command;
+  // Outside the cache: a Git upgrade moves the real binary, never the launcher.
+  const resolvedCommand =
+    resolvedExecutable === null ? command : preferGitForWindowsBinary(resolvedExecutable, env);
   const extension = NodePath.win32.extname(resolvedCommand).toLowerCase();
   if (extension !== ".cmd" && extension !== ".bat") {
     return { command: resolvedCommand, args: [...args], shell: false };
