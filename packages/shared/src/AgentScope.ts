@@ -9,7 +9,7 @@ import * as Effect from "effect/Effect";
  * in its own transient scope, so systemd-oomd (which kills whole leaf cgroups)
  * kills one agent instead of the server and every other agent. Where util-linux
  * `setpriv` is available, each wrapped command also gets SIGTERM when the server
- * exits, so a crashed server does not leave agents working unseen.
+ * exits, even by SIGKILL or a crash.
  *
  * The server provides the real implementation. The default leaves commands
  * unchanged, which is also the behavior on macOS, Windows, and in tests.
@@ -101,8 +101,9 @@ export interface AgentSystemdScope {
 /**
  * Ties an agent to the server that launched it. `setpriv --pdeathsig` asks the
  * kernel to send the agent SIGTERM when the server exits, even when the server
- * is SIGKILLed or crashes and runs no cleanup of its own. Agents stop their own
- * tools on SIGTERM.
+ * is SIGKILLed or crashes and runs no cleanup of its own. Only the agent itself
+ * gets the signal; stopping its tools is up to its SIGTERM handling, which the
+ * Claude CLI does.
  */
 export interface AgentServerLink {
   readonly setpriv: string;
