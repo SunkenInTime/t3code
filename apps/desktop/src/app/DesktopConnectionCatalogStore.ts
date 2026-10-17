@@ -16,6 +16,7 @@ import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import * as Base64 from "effect/encoding/Base64";
+import * as Hex from "effect/encoding/Hex";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -33,8 +34,9 @@ const EncryptedConnectionCatalogDocument = Schema.Struct({
 type EncryptedConnectionCatalogDocument = typeof EncryptedConnectionCatalogDocument.Type;
 
 const EncryptedConnectionCatalogDocumentJson = fromLenientJson(EncryptedConnectionCatalogDocument);
-const decodeEncryptedConnectionCatalogDocumentJson = Schema.decodeEffect(
-  EncryptedConnectionCatalogDocumentJson,
+const decodeCatalogFileJson = Schema.decodeEffect(fromLenientJson(Schema.Unknown));
+const decodeEncryptedConnectionCatalogDocument = Schema.decodeUnknownEffect(
+  EncryptedConnectionCatalogDocument,
 );
 const encodeEncryptedConnectionCatalogDocumentJson = Schema.encodeEffect(
   EncryptedConnectionCatalogDocumentJson,
@@ -51,6 +53,7 @@ const DesktopConnectionCatalogStoreWriteOperation = Schema.Literals([
   "encode-document",
   "create-directory",
   "write-temporary-file",
+  "sync-temporary-file",
   "replace-catalog-file",
 ]);
 
@@ -153,6 +156,7 @@ export class DesktopConnectionCatalogStore extends Context.Service<
       Option.Option<string>,
       | DesktopConnectionCatalogStoreReadError
       | DesktopConnectionCatalogStoreDocumentDecodeError
+      | DesktopConnectionCatalogStoreWriteError
       | DesktopConnectionCatalogStoreDecodeError
       | DesktopConnectionCatalogStoreMigrationError
       | DesktopConnectionCatalogStoreProtectionError
@@ -183,17 +187,14 @@ function decodeSecretBytes(
   );
 }
 
-const readDocument = (
+const readCatalogFile = (
   fileSystem: FileSystem.FileSystem,
   catalogPath: string,
-): Effect.Effect<
-  Option.Option<EncryptedConnectionCatalogDocument>,
-  DesktopConnectionCatalogStoreReadError | DesktopConnectionCatalogStoreDocumentDecodeError
-> =>
-  fileSystem.readFileString(catalogPath).pipe(
+): Effect.Effect<Uint8Array | null, DesktopConnectionCatalogStoreReadError> =>
+  fileSystem.readFile(catalogPath).pipe(
     Effect.catch((error) =>
       error.reason._tag === "NotFound"
-        ? Effect.succeed<string | null>(null)
+        ? Effect.succeed<Uint8Array | null>(null)
         : Effect.fail(
             new DesktopConnectionCatalogStoreReadError({
               catalogPath,
@@ -201,41 +202,17 @@ const readDocument = (
             }),
           ),
     ),
-    Effect.flatMap((raw) =>
-      raw === null
-        ? Effect.succeed(Option.none<EncryptedConnectionCatalogDocument>())
-        : decodeEncryptedConnectionCatalogDocumentJson(raw).pipe(
-            Effect.asSome,
-            Effect.mapError(
-              (cause) =>
-                new DesktopConnectionCatalogStoreDocumentDecodeError({
-                  catalogPath,
-                  cause,
-                }),
-            ),
-          ),
-    ),
   );
 
 const writeDocument = Effect.fn("desktop.connectionCatalogStore.writeDocument")(function* (input: {
   readonly fileSystem: FileSystem.FileSystem;
   readonly path: Path.Path;
-  readonly catalogPath: string;
-  readonly document: EncryptedConnectionCatalogDocument;
+  readonly filePath: string;
+  readonly contents: Uint8Array;
   readonly suffix: string;
 }): Effect.fn.Return<void, DesktopConnectionCatalogStoreWriteError> {
-  const directory = input.path.dirname(input.catalogPath);
-  const tempPath = `${input.catalogPath}.${process.pid}.${input.suffix}.tmp`;
-  const encoded = yield* encodeEncryptedConnectionCatalogDocumentJson(input.document).pipe(
-    Effect.mapError(
-      (cause) =>
-        new DesktopConnectionCatalogStoreWriteError({
-          operation: "encode-document",
-          path: input.catalogPath,
-          cause,
-        }),
-    ),
-  );
+  const directory = input.path.dirname(input.filePath);
+  const tempPath = `${input.filePath}.${process.pid}.${input.suffix}.tmp`;
   yield* input.fileSystem.makeDirectory(directory, { recursive: true }).pipe(
     Effect.mapError(
       (cause) =>
@@ -247,7 +224,7 @@ const writeDocument = Effect.fn("desktop.connectionCatalogStore.writeDocument")(
     ),
   );
   yield* Effect.gen(function* () {
-    yield* input.fileSystem.writeFileString(tempPath, `${encoded}\n`).pipe(
+    yield* input.fileSystem.writeFile(tempPath, input.contents).pipe(
       Effect.mapError(
         (cause) =>
           new DesktopConnectionCatalogStoreWriteError({
@@ -257,12 +234,26 @@ const writeDocument = Effect.fn("desktop.connectionCatalogStore.writeDocument")(
           }),
       ),
     );
-    yield* input.fileSystem.rename(tempPath, input.catalogPath).pipe(
+    // Without a flush, a power cut after the rename can leave NTFS with the new
+    // size but none of the data. Windows only flushes a handle opened for writing.
+    yield* input.fileSystem.open(tempPath, { flag: "r+" }).pipe(
+      Effect.flatMap((file) => file.sync),
+      Effect.scoped,
+      Effect.mapError(
+        (cause) =>
+          new DesktopConnectionCatalogStoreWriteError({
+            operation: "sync-temporary-file",
+            path: tempPath,
+            cause,
+          }),
+      ),
+    );
+    yield* input.fileSystem.rename(tempPath, input.filePath).pipe(
       Effect.mapError(
         (cause) =>
           new DesktopConnectionCatalogStoreWriteError({
             operation: "replace-catalog-file",
-            path: input.catalogPath,
+            path: input.filePath,
             cause,
           }),
       ),
@@ -396,6 +387,18 @@ export const make = Effect.gen(function* () {
     ),
   );
 
+  const randomFileSuffix = crypto.randomUUIDv4().pipe(
+    Effect.map((uuid) => uuid.replace(/-/g, "")),
+    Effect.mapError(
+      (cause) =>
+        new DesktopConnectionCatalogStoreWriteError({
+          operation: "create-temporary-file-name",
+          path: catalogPath,
+          cause,
+        }),
+    ),
+  );
+
   const writeCatalog = Effect.fn("desktop.connectionCatalogStore.writeCatalog")(function* (
     catalog: string,
   ) {
@@ -411,21 +414,25 @@ export const make = Effect.gen(function* () {
         ),
       ),
     );
-    const suffix = (yield* crypto.randomUUIDv4().pipe(
+    const suffix = yield* randomFileSuffix;
+    const encoded = yield* encodeEncryptedConnectionCatalogDocumentJson({
+      version: 1,
+      encryptedCatalog,
+    }).pipe(
       Effect.mapError(
         (cause) =>
           new DesktopConnectionCatalogStoreWriteError({
-            operation: "create-temporary-file-name",
+            operation: "encode-document",
             path: catalogPath,
             cause,
           }),
       ),
-    )).replace(/-/g, "");
+    );
     yield* writeDocument({
       fileSystem,
       path,
-      catalogPath,
-      document: { version: 1, encryptedCatalog },
+      filePath: catalogPath,
+      contents: new TextEncoder().encode(`${encoded}\n`),
       suffix,
     });
   });
@@ -471,16 +478,61 @@ export const make = Effect.gen(function* () {
     return Option.some(encoded);
   });
 
+  // The copy is named by its content, so a relaunch over the same file
+  // rewrites the same copy, which also repairs one a crash left partial.
+  const backUpDamagedCatalog = Effect.fn("desktop.connectionCatalogStore.backUpDamagedCatalog")(
+    function* (bytes: Uint8Array) {
+      const digest = yield* crypto.digest("SHA-256", bytes).pipe(
+        Effect.mapError(
+          (cause) =>
+            new DesktopConnectionCatalogStoreWriteError({
+              operation: "create-temporary-file-name",
+              path: catalogPath,
+              cause,
+            }),
+        ),
+      );
+      const backupPath = `${catalogPath}.corrupt.${Hex.encode(digest).slice(0, 16)}`;
+      yield* writeDocument({
+        fileSystem,
+        path,
+        filePath: backupPath,
+        contents: bytes,
+        suffix: yield* randomFileSuffix,
+      });
+      yield* Effect.logWarning("The desktop connection catalog is not JSON; starting without it.", {
+        catalogPath,
+        backupPath,
+      });
+    },
+  );
+
   return DesktopConnectionCatalogStore.of({
     get: Effect.gen(function* () {
-      const document = yield* readDocument(fileSystem, catalogPath);
-      if (Option.isNone(document)) {
+      const bytes = yield* readCatalogFile(fileSystem, catalogPath);
+      if (bytes === null) {
         return yield* migrateLegacyCatalog;
       }
+      const json = yield* Effect.result(decodeCatalogFileJson(new TextDecoder().decode(bytes)));
+      if (json._tag === "Failure") {
+        // Not JSON at all, as after a power cut: NUL-filled, empty or cut short.
+        // Start without a catalog but leave the file for the next save to
+        // replace, and don't migrate: that would write over a save another
+        // app instance may have just made. JSON that fails the schema below,
+        // like a newer app's version, keeps failing since its ciphertext may
+        // still be readable.
+        yield* backUpDamagedCatalog(bytes);
+        return Option.none<string>();
+      }
+      const document = yield* decodeEncryptedConnectionCatalogDocument(json.success).pipe(
+        Effect.mapError(
+          (cause) => new DesktopConnectionCatalogStoreDocumentDecodeError({ catalogPath, cause }),
+        ),
+      );
       if (!(yield* encryptionAvailable)) {
         return Option.none<string>();
       }
-      const decrypted = yield* decodeSecretBytes(catalogPath, document.value.encryptedCatalog).pipe(
+      const decrypted = yield* decodeSecretBytes(catalogPath, document.encryptedCatalog).pipe(
         Effect.flatMap((encryptedCatalog) =>
           safeStorage.decryptString(encryptedCatalog).pipe(
             Effect.mapError(
