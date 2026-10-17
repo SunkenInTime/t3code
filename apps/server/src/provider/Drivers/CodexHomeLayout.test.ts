@@ -1,5 +1,6 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
@@ -13,6 +14,7 @@ import {
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
 } from "./CodexHomeLayout.ts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 const decodeCodexSettingsValue = Schema.decodeSync(CodexSettings);
 
@@ -38,6 +40,81 @@ const writeTextFile = Effect.fn("CodexHomeLayout.test.writeTextFile")(function* 
   yield* fileSystem.makeDirectory(path.dirname(filePath), { recursive: true });
   yield* fileSystem.writeFileString(filePath, contents);
 });
+
+// Windows without Developer Mode or elevation fails every symlink this way. Junctions still work.
+const refuseSymlinksLikeWindows = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    return yield* effect.pipe(
+      Effect.provideService(
+        FileSystem.FileSystem,
+        FileSystem.FileSystem.of({
+          ...fileSystem,
+          symlink: (target, link) =>
+            Effect.fail(
+              PlatformError.systemError({
+                _tag: "Unknown",
+                module: "FileSystem",
+                method: "symlink",
+                pathOrDescriptor: target,
+                syscall: "symlink",
+                cause: Object.assign(
+                  new Error(`EPERM: operation not permitted, symlink '${target}' -> '${link}'`),
+                  { errno: -4048, code: "EPERM", syscall: "symlink" },
+                ),
+              }),
+            ),
+        }),
+      ),
+      Effect.provideService(HostProcess.Platform, "win32"),
+    );
+  });
+
+// A full disk or a killed process mid-write: half the bytes land, then the write fails.
+const interruptWritesTo =
+  (fileName: string) =>
+  <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const ioError = (filePath: string) =>
+        PlatformError.systemError({
+          _tag: "Unknown",
+          module: "FileSystem",
+          method: "write",
+          pathOrDescriptor: filePath,
+          syscall: "write",
+          cause: Object.assign(new Error("EIO: i/o error, write"), { code: "EIO" }),
+        });
+      const half = (data: Uint8Array) => data.subarray(0, Math.floor(data.length / 2));
+      const targets = (filePath: string) => filePath.endsWith(fileName);
+      return yield* effect.pipe(
+        Effect.provideService(
+          FileSystem.FileSystem,
+          FileSystem.FileSystem.of({
+            ...fileSystem,
+            writeFile: (filePath, data, options) =>
+              targets(filePath)
+                ? fileSystem
+                    .writeFile(filePath, half(data), options)
+                    .pipe(Effect.andThen(Effect.fail(ioError(filePath))))
+                : fileSystem.writeFile(filePath, data, options),
+            open: (filePath, options) =>
+              fileSystem.open(filePath, options).pipe(
+                Effect.map((file) =>
+                  targets(filePath)
+                    ? Object.assign(Object.create(file) as FileSystem.File, {
+                        writeAll: (data: Uint8Array) =>
+                          file
+                            .writeAll(half(data))
+                            .pipe(Effect.andThen(Effect.fail(ioError(filePath)))),
+                      })
+                    : file,
+                ),
+              ),
+          }),
+        ),
+      );
+    });
 
 it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
   describe("resolveCodexHomeLayout", () => {
@@ -246,6 +323,203 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
           expect(memoriesLinkResult._tag).toBe("Failure");
           expect(tmpLinkResult._tag).toBe("Failure");
         }),
+    );
+
+    it.effect(
+      "links directories with junctions and starts from a copy of the user's setup when Windows refuses symlinks",
+      () =>
+        Effect.gen(function* () {
+          const fileSystem = yield* FileSystem.FileSystem;
+          const path = yield* Path.Path;
+          const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+          const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+          const shadowHome = path.join(shadowRoot, "shadow");
+          yield* writeTextFile(path.join(sharedHome, "config.toml"), 'model = "gpt-5-codex"\n');
+          yield* writeTextFile(path.join(sharedHome, "AGENTS.md"), "shared instructions\n");
+          yield* writeTextFile(path.join(sharedHome, "history.jsonl"), "{}\n");
+          yield* writeTextFile(path.join(sharedHome, "state_5.sqlite"), "shared-db");
+          yield* writeTextFile(path.join(sharedHome, ".sqlite-maintenance.lock"), "");
+          yield* writeTextFile(path.join(shadowHome, "auth.json"), '{"shadow":true}\n');
+          const layout = yield* resolveCodexHomeLayout(
+            decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+          );
+
+          yield* materializeCodexShadowHome(layout).pipe(refuseSymlinksLikeWindows);
+          const configAfterFirstPass = yield* fileSystem.readFileString(
+            path.join(shadowHome, "config.toml"),
+          );
+          // What Codex and the user then write in a home with no file links.
+          yield* writeTextFile(path.join(shadowHome, "state_5.sqlite"), "shadow-db");
+          yield* writeTextFile(path.join(shadowHome, ".sqlite-maintenance.lock"), "");
+          yield* writeTextFile(path.join(shadowHome, "AGENTS.md"), "shadow instructions\n");
+          yield* writeTextFile(path.join(sharedHome, "config.toml"), 'model = "changed"\n');
+          yield* materializeCodexShadowHome(layout).pipe(refuseSymlinksLikeWindows);
+
+          yield* writeTextFile(path.join(shadowHome, "sessions", "rollout.jsonl"), "{}\n");
+          expect(yield* fileSystem.exists(path.join(sharedHome, "sessions", "rollout.jsonl"))).toBe(
+            true,
+          );
+          expect(configAfterFirstPass).toBe('model = "gpt-5-codex"\n');
+          expect(yield* fileSystem.readFileString(path.join(shadowHome, "config.toml"))).toBe(
+            'model = "gpt-5-codex"\n',
+          );
+          expect(yield* fileSystem.readFileString(path.join(shadowHome, "AGENTS.md"))).toBe(
+            "shadow instructions\n",
+          );
+          expect(yield* fileSystem.exists(path.join(shadowHome, "history.jsonl"))).toBe(false);
+          expect(yield* fileSystem.exists(path.join(shadowHome, ".sqlite-maintenance.lock"))).toBe(
+            true,
+          );
+          expect(yield* fileSystem.readFileString(path.join(shadowHome, "state_5.sqlite"))).toBe(
+            "shadow-db",
+          );
+          expect(yield* fileSystem.readFileString(path.join(sharedHome, "state_5.sqlite"))).toBe(
+            "shared-db",
+          );
+        }),
+    );
+
+    it.effect("copies the setup into a refused shadow home that was interrupted before it", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+        const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+        const shadowHome = path.join(shadowRoot, "shadow");
+        yield* writeTextFile(path.join(sharedHome, "config.toml"), 'model = "gpt-5-codex"\n');
+        yield* writeTextFile(path.join(shadowHome, ".t3-local-files"), "");
+        const layout = yield* resolveCodexHomeLayout(
+          decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+        );
+
+        yield* materializeCodexShadowHome(layout).pipe(refuseSymlinksLikeWindows);
+
+        expect(yield* fileSystem.readFileString(path.join(shadowHome, "config.toml"))).toBe(
+          'model = "gpt-5-codex"\n',
+        );
+      }),
+    );
+
+    it.effect("never leaves a partly written copy of the setup in a refused shadow home", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+        const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+        const shadowHome = path.join(shadowRoot, "shadow");
+        const config = 'model = "gpt-5-codex"\n';
+        yield* writeTextFile(path.join(sharedHome, "config.toml"), config);
+        const layout = yield* resolveCodexHomeLayout(
+          decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+        );
+
+        const interrupted = yield* materializeCodexShadowHome(layout).pipe(
+          interruptWritesTo("config.toml"),
+          refuseSymlinksLikeWindows,
+          Effect.flip,
+        );
+        const copiedAfterInterruption = yield* fileSystem.exists(
+          path.join(shadowHome, "config.toml"),
+        );
+        yield* materializeCodexShadowHome(layout).pipe(refuseSymlinksLikeWindows);
+
+        expect(interrupted).toMatchObject({ operation: "copyFile", entryName: "config.toml" });
+        expect(copiedAfterInterruption).toBe(false);
+        expect(yield* fileSystem.readFileString(path.join(shadowHome, "config.toml"))).toBe(config);
+      }),
+    );
+
+    it.effect("keeps a published copy whole when two refreshes copy the same file", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+        const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+        const shadowHome = path.join(shadowRoot, "shadow");
+        const config = 'model = "gpt-5-codex"\n';
+        const layout = yield* resolveCodexHomeLayout(
+          decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+        );
+        yield* materializeCodexShadowHome(layout).pipe(refuseSymlinksLikeWindows);
+        yield* writeTextFile(path.join(sharedHome, "config.toml"), config);
+
+        // The second refresh opens its copy only after the first has published, then dies.
+        const firstPublished = yield* Deferred.make<void>();
+        let copiesOpened = 0;
+        const interleaved = FileSystem.FileSystem.of({
+          ...fileSystem,
+          link: (from, to) =>
+            fileSystem
+              .link(from, to)
+              .pipe(Effect.andThen(Deferred.succeed(firstPublished, void 0))),
+          open: (filePath, options) => {
+            if (!filePath.includes(".t3-copy-") || ++copiesOpened === 1) {
+              return fileSystem.open(filePath, options);
+            }
+            return Deferred.await(firstPublished).pipe(
+              Effect.andThen(fileSystem.open(filePath, options)),
+              Effect.andThen(Effect.die("second refresh interrupted")),
+            );
+          },
+        });
+        const refresh = materializeCodexShadowHome(layout).pipe(
+          refuseSymlinksLikeWindows,
+          Effect.provideService(FileSystem.FileSystem, interleaved),
+          Effect.exit,
+        );
+        yield* Effect.all([refresh, refresh], { concurrency: 2 });
+
+        expect(copiesOpened).toBe(2);
+        expect(yield* fileSystem.readFileString(path.join(shadowHome, "config.toml"))).toBe(config);
+      }),
+    );
+
+    it.effect("copies the setup whatever the case of its file names on Windows", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+        const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+        const shadowHome = path.join(shadowRoot, "shadow");
+        yield* writeTextFile(path.join(sharedHome, "Config.toml"), 'model = "gpt-5-codex"\n');
+        yield* writeTextFile(path.join(sharedHome, "agents.md"), "shared instructions\n");
+        const layout = yield* resolveCodexHomeLayout(
+          decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+        );
+
+        yield* materializeCodexShadowHome(layout).pipe(refuseSymlinksLikeWindows);
+
+        expect(yield* fileSystem.readFileString(path.join(shadowHome, "Config.toml"))).toBe(
+          'model = "gpt-5-codex"\n',
+        );
+        expect(yield* fileSystem.readFileString(path.join(shadowHome, "agents.md"))).toBe(
+          "shared instructions\n",
+        );
+      }),
+    );
+
+    it.effect("keeps a refused shadow home's files local once symlinks are allowed", () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const sharedHome = yield* makeTempDir("t3code-codex-shared-");
+        const shadowRoot = yield* makeTempDir("t3code-codex-shadow-root-");
+        const shadowHome = path.join(shadowRoot, "shadow");
+        yield* writeTextFile(path.join(sharedHome, "state_5.sqlite"), "shared-db");
+        const layout = yield* resolveCodexHomeLayout(
+          decodeCodexSettings({ homePath: sharedHome, shadowHomePath: shadowHome }),
+        );
+
+        yield* materializeCodexShadowHome(layout).pipe(refuseSymlinksLikeWindows);
+        yield* writeTextFile(path.join(shadowHome, "state_5.sqlite"), "shadow-db");
+        yield* materializeCodexShadowHome(layout).pipe(
+          Effect.provideService(HostProcess.Platform, "win32"),
+        );
+
+        expect(yield* fileSystem.readFileString(path.join(shadowHome, "state_5.sqlite"))).toBe(
+          "shadow-db",
+        );
+      }),
     );
 
     it.effect("rejects shadow homes that point at the shared home", () =>

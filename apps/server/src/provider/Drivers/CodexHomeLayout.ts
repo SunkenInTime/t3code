@@ -1,7 +1,11 @@
+// @effect-diagnostics-next-line nodeBuiltinImport:off - Effect's symlink has no type argument, and Windows needs a junction to link without elevation.
+import * as NodeFSP from "node:fs/promises";
+
 import { ProviderDriverKind, type CodexSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as PlatformError from "effect/PlatformError";
 
@@ -33,6 +37,20 @@ const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "memories", "tmp"]);
 // Codex creates these runtime locks itself when it starts in a shadow home before the shared
 // home has one. They guard shared state, so a local copy is replaced with the shared link.
 const REPLACEABLE_SHARED_RUNTIME_ENTRIES = new Set(["mcp-oauth-locks", ".sqlite-maintenance.lock"]);
+// Windows refuses symlinks without Developer Mode or the symlink privilege. A shadow home it refused
+// links directories with junctions and keeps its own files: a junction cannot reach a file, and a
+// hard link splits the first time Codex rewrites config.toml by rename. The marker keeps the home
+// that way, since its local files would conflict if symlinks were allowed later.
+const LOCAL_FILES_MARKER_NAME = ".t3-local-files";
+// The user's own Codex setup, lowercased. Such a home gets a copy of each one it lacks on every
+// refresh, so the account starts with the same configuration and instructions; later edits on either
+// side stay separate.
+const COPIED_LOCAL_FILE_NAMES = new Set([
+  "config.toml",
+  "agents.md",
+  "agents.override.md",
+  "hooks.json",
+]);
 
 function resolveHomePath(path: Path.Path, home: string, value: string | undefined): string {
   const expanded =
@@ -74,7 +92,16 @@ export class CodexShadowHomeFileSystemError extends Schema.TaggedError<CodexShad
   "CodexShadowHomeFileSystemError",
   {
     ...CodexShadowHomeContext,
-    operation: Schema.Literals(["readLink", "makeDirectory", "readDirectory", "remove", "symlink"]),
+    operation: Schema.Literals([
+      "readLink",
+      "makeDirectory",
+      "readDirectory",
+      "remove",
+      "symlink",
+      "stat",
+      "writeFile",
+      "copyFile",
+    ]),
     path: Schema.String,
     targetPath: Schema.optional(Schema.String),
     entryName: Schema.optional(Schema.String),
@@ -143,14 +170,14 @@ type LinkState =
       readonly target: string;
     };
 
-function isNotSymlinkError(error: PlatformError.PlatformError): boolean {
+function hasErrorCode(error: PlatformError.PlatformError, code: string): boolean {
   const cause = error.reason.cause;
   return (
     error.reason._tag === "Unknown" &&
     typeof cause === "object" &&
     cause !== null &&
     "code" in cause &&
-    cause.code === "EINVAL"
+    cause.code === code
   );
 }
 
@@ -168,7 +195,7 @@ const readLinkState = Effect.fn("CodexHomeLayout.readLinkState")(function* (inpu
         if (cause.reason._tag === "NotFound") {
           return Effect.succeed<LinkState>({ _tag: "Missing" });
         }
-        if (isNotSymlinkError(cause)) {
+        if (hasErrorCode(cause, "EINVAL")) {
           return Effect.succeed<LinkState>({ _tag: "NotSymlink" });
         }
         return new CodexShadowHomeFileSystemError({
@@ -218,8 +245,10 @@ const ensureSymlink = Effect.fn("CodexHomeLayout.ensureSymlink")(function* (inpu
   readonly sharedHomePath: string;
   readonly effectiveHomePath: string;
   readonly entryName: string;
+  readonly localFiles: Ref.Ref<boolean>;
 }): Effect.fn.Return<void, CodexShadowHomeError, Path.Path> {
   const path = yield* Path.Path;
+  const isWindows = yield* HostProcess.isWindows;
   const target = path.join(input.sharedHomePath, input.entryName);
   const link = path.join(input.effectiveHomePath, input.entryName);
   const state = yield* readLinkState({
@@ -227,22 +256,90 @@ const ensureSymlink = Effect.fn("CodexHomeLayout.ensureSymlink")(function* (inpu
     linkPath: link,
   });
 
-  const createLink = input.fileSystem.symlink(target, link).pipe(
-    Effect.catchTags({
-      PlatformError: (cause) =>
-        new CodexShadowHomeFileSystemError({
-          sharedHomePath: input.sharedHomePath,
-          effectiveHomePath: input.effectiveHomePath,
-          operation: "symlink",
-          path: link,
-          targetPath: target,
-          entryName: input.entryName,
-          cause,
+  const fileSystemError =
+    (operation: "stat" | "symlink" | "writeFile" | "copyFile", errorPath: string) =>
+    (cause: unknown) =>
+      new CodexShadowHomeFileSystemError({
+        sharedHomePath: input.sharedHomePath,
+        effectiveHomePath: input.effectiveHomePath,
+        operation,
+        path: errorPath,
+        ...(operation === "symlink" ? { targetPath: target } : {}),
+        entryName: input.entryName,
+        cause,
+      });
+  // An entry that vanished after the shared home was listed has nothing for a junction to reach.
+  const targetIsDirectory = input.fileSystem.stat(target).pipe(
+    Effect.map((info) => info.type === "Directory"),
+    Effect.catchReason("PlatformError", "NotFound", () => Effect.succeed(false)),
+    Effect.mapError(fileSystemError("stat", target)),
+  );
+  const linkWithoutSymlinks = Effect.gen(function* () {
+    if (yield* targetIsDirectory) {
+      return yield* Effect.tryPromise({
+        try: () => NodeFSP.symlink(target, link, "junction"),
+        catch: fileSystemError("symlink", link),
+      });
+    }
+    // Only reached on Windows, whose file names ignore case.
+    if (!COPIED_LOCAL_FILE_NAMES.has(input.entryName.toLowerCase())) return;
+    // Written in full in a directory of its own beside the destination, then hard-linked into
+    // place. An interrupted pass leaves no file, which the next refresh copies again, or a complete
+    // one. The link never replaces a file Codex, the user or a concurrent refresh put there first.
+    yield* input.fileSystem
+      .makeTempDirectory({ directory: input.effectiveHomePath, prefix: ".t3-copy-" })
+      .pipe(
+        Effect.flatMap((copyDirectory) => {
+          const copyPath = path.join(copyDirectory, input.entryName);
+          return Effect.scoped(
+            Effect.gen(function* () {
+              const contents = yield* input.fileSystem.readFile(target);
+              const copy = yield* input.fileSystem.open(copyPath, { flag: "wx" });
+              yield* copy.writeAll(contents);
+              yield* copy.sync;
+            }),
+          ).pipe(
+            Effect.andThen(input.fileSystem.link(copyPath, link)),
+            Effect.ensuring(
+              input.fileSystem
+                .remove(copyDirectory, { recursive: true, force: true })
+                .pipe(Effect.ignore),
+            ),
+          );
         }),
-    }),
+        Effect.catchReason("PlatformError", "AlreadyExists", () => Effect.void),
+        Effect.catchReason("PlatformError", "NotFound", () => Effect.void),
+        Effect.mapError(fileSystemError("copyFile", link)),
+      );
+  });
+  const markerPath = path.join(input.effectiveHomePath, LOCAL_FILES_MARKER_NAME);
+  const keepFilesLocal = input.fileSystem.writeFileString(markerPath, "", { flag: "wx" }).pipe(
+    Effect.catchReason("PlatformError", "AlreadyExists", () => Effect.void),
+    Effect.mapError(fileSystemError("writeFile", markerPath)),
+    Effect.andThen(Ref.set(input.localFiles, true)),
   );
 
+  const createLink = Effect.gen(function* () {
+    if (yield* Ref.get(input.localFiles)) {
+      return yield* linkWithoutSymlinks;
+    }
+    yield* input.fileSystem.symlink(target, link).pipe(
+      Effect.catchTags({
+        PlatformError: (cause) =>
+          // Marked first: a local file left by an interrupted pass must not read as a conflict.
+          isWindows && hasErrorCode(cause, "EPERM")
+            ? keepFilesLocal.pipe(Effect.andThen(linkWithoutSymlinks))
+            : Effect.fail(fileSystemError("symlink", link)(cause)),
+      }),
+    );
+  });
+
   if (state._tag === "NotSymlink") {
+    // Checked before the replaceable entries: a local lock file could be deleted here, but no link
+    // could take its place.
+    if ((yield* Ref.get(input.localFiles)) && !(yield* targetIsDirectory)) {
+      return;
+    }
     if (!REPLACEABLE_SHARED_RUNTIME_ENTRIES.has(input.entryName)) {
       return yield* new CodexShadowHomeEntryConflictError({
         sharedHomePath: input.sharedHomePath,
@@ -391,6 +488,17 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
     { discard: true },
   );
 
+  const localFiles = yield* Ref.make(
+    (yield* HostProcess.isWindows) &&
+      (yield* readLinkState({
+        fileSystem,
+        sharedHomePath: layout.sharedHomePath,
+        effectiveHomePath,
+        entryName: LOCAL_FILES_MARKER_NAME,
+        linkPath: path.join(effectiveHomePath, LOCAL_FILES_MARKER_NAME),
+      }))._tag !== "Missing",
+  );
+
   yield* Effect.forEach(
     entries,
     (entryName) => {
@@ -402,6 +510,7 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
         sharedHomePath: layout.sharedHomePath,
         effectiveHomePath,
         entryName,
+        localFiles,
       });
     },
     { discard: true },
