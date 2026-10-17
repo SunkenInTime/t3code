@@ -2403,6 +2403,87 @@ it.layer(
     ),
   );
 
+  it.effect.each([
+    { name: "the shared home", platform: "linux", inherited: {}, instance: [], expected: null },
+    {
+      name: "an inherited value",
+      platform: "linux",
+      inherited: { CODEX_SQLITE_HOME: "/inherited" },
+      instance: [],
+      expected: "/inherited",
+    },
+    {
+      name: "an inherited value on Windows",
+      platform: "win32",
+      inherited: { CODEX_SQLITE_HOME: "/inherited" },
+      instance: [],
+      expected: "/inherited",
+    },
+    {
+      name: "an instance value over an inherited one",
+      platform: "linux",
+      inherited: { CODEX_SQLITE_HOME: "/inherited" },
+      instance: [{ name: "CODEX_SQLITE_HOME", value: "/instance", sensitive: false }],
+      expected: "/instance",
+    },
+    {
+      name: "a mixed-case instance value on Windows",
+      platform: "win32",
+      inherited: { CODEX_SQLITE_HOME: "/inherited" },
+      instance: [{ name: "Codex_Sqlite_Home", value: "/instance", sensitive: false }],
+      expected: "/instance",
+    },
+  ] as const)(
+    "points a shadow-home terminal's Codex SQLite at $name",
+    ({ platform, inherited, instance, expected }) =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const serverSettings = yield* ServerSettings.ServerSettingsService;
+        const { manager, ptyAdapter } = yield* createManager(5, {
+          env: inherited,
+          resolveProviderInstanceEnvironment: (rawProviderInstanceId, env, inheritedEnv) =>
+            TerminalManager.resolveProviderInstanceTerminalEnvironment({
+              serverSettings,
+              path,
+              rawProviderInstanceId,
+              env,
+              inheritedEnv,
+            }),
+        });
+
+        yield* manager.open(
+          openInput({ providerInstanceId: ProviderInstanceId.make("codex_shadow") }),
+        );
+
+        const values = Object.entries(ptyAdapter.spawnInputs[0]?.env ?? {})
+          .filter(([key]) =>
+            platform === "win32"
+              ? key.toUpperCase() === "CODEX_SQLITE_HOME"
+              : key === "CODEX_SQLITE_HOME",
+          )
+          .map(([, value]) => value);
+        expect(values).toEqual([expected ?? path.resolve("/configured/codex")]);
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(
+            ServerSettings.layerTest({
+              providerInstances: {
+                [ProviderInstanceId.make("codex_shadow")]: {
+                  driver: ProviderDriverKind.make("codex"),
+                  environment: [...instance],
+                  config: {
+                    homePath: "/configured/codex",
+                    shadowHomePath: "/configured/codex-shadow",
+                  },
+                },
+              },
+            }),
+            layerWithHostPlatform(platform),
+          ),
+        ),
+      ),
+  );
+
   it.effect("resolves the Codex default slot", () =>
     Effect.gen(function* () {
       const path = yield* Path.Path;

@@ -107,6 +107,7 @@ import {
 import {
   materializeCodexShadowHome,
   resolveCodexHomeLayout,
+  withCodexSqliteHome,
 } from "../../provider/Drivers/CodexHomeLayout.ts";
 import {
   boundProviderEventForLogging,
@@ -1577,8 +1578,12 @@ export const createCodexAdapterV2 = (
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
     const serverConfig = yield* ServerConfig;
     const homeLayout = yield* resolveCodexHomeLayout(config);
+    const launchEnvironment = yield* withCodexSqliteHome(
+      homeLayout,
+      yield* mergeProviderInstanceEnvironment(environment, hostEnvironment),
+    );
 
-    yield* materializeCodexShadowHome(homeLayout).pipe(
+    yield* materializeCodexShadowHome(homeLayout, launchEnvironment).pipe(
       Effect.mapError(
         (cause) =>
           new ProviderAdapterDriverCreateError({
@@ -1600,7 +1605,7 @@ export const createCodexAdapterV2 = (
     return yield* makeCodexAdapterV2({
       instanceId,
       settings,
-      environment: yield* mergeProviderInstanceEnvironment(environment, hostEnvironment),
+      environment: launchEnvironment,
       clientFactory,
       crypto,
       fileSystem,

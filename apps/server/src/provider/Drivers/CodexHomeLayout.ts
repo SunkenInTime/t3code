@@ -11,6 +11,7 @@ import * as PlatformError from "effect/PlatformError";
 
 import { expandHomePath } from "@t3tools/provider-core/server/pathExpansion";
 import * as HostProcess from "@t3tools/shared/HostProcess";
+import * as Option from "effect/Option";
 
 export interface CodexHomeLayout {
   readonly mode: "direct" | "authOverlay";
@@ -83,6 +84,42 @@ export const resolveCodexHomeLayout = Effect.fn("resolveCodexHomeLayout")(functi
   };
 });
 
+// Shadow-home launches open SQLite in the shared home through CODEX_SQLITE_HOME, so SQLite files are
+// never linked. On Windows SQLite puts -wal/-shm beside a linked database rather than its target,
+// which gives one database two WALs.
+const CODEX_SQLITE_FILE = /\.sqlite(?:-wal|-shm|-journal)?$/;
+const CODEX_SQLITE_HOME = "CODEX_SQLITE_HOME";
+
+function readCodexSqliteHome(
+  environment: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): string | undefined {
+  for (const [key, value] of Object.entries(environment)) {
+    const matches =
+      platform === "win32" ? key.toUpperCase() === CODEX_SQLITE_HOME : key === CODEX_SQLITE_HOME;
+    if (matches && value?.trim()) return value;
+  }
+  return undefined;
+}
+
+/**
+ * An auth-overlay instance runs Codex with `CODEX_HOME` set to its shadow home. Point Codex's
+ * SQLite databases at the shared home so every account opens the same files. A value already set
+ * in `environment` or in the `inherited` environment it will be layered over wins.
+ */
+export const withCodexSqliteHome = Effect.fn("withCodexSqliteHome")(function* (
+  layout: CodexHomeLayout,
+  environment: NodeJS.ProcessEnv,
+  inherited: NodeJS.ProcessEnv = {},
+) {
+  if (layout.mode !== "authOverlay") return environment;
+  const platform = yield* HostProcess.Platform;
+  const isSet = [environment, inherited].some(
+    (source) => readCodexSqliteHome(source, platform) !== undefined,
+  );
+  return isSet ? environment : { ...environment, [CODEX_SQLITE_HOME]: layout.sharedHomePath };
+});
+
 const CodexShadowHomeContext = {
   sharedHomePath: Schema.String,
   effectiveHomePath: Schema.String,
@@ -150,11 +187,29 @@ export class CodexShadowHomePrivateEntrySymlinkError extends Schema.TaggedError<
   }
 }
 
+export class CodexShadowHomeSqliteBackupError extends Schema.TaggedError<CodexShadowHomeSqliteBackupError>()(
+  "CodexShadowHomeSqliteBackupError",
+  {
+    ...CodexShadowHomeContext,
+    backupPath: Schema.String,
+    movedPaths: Schema.Array(Schema.String),
+    remainingPaths: Schema.Array(Schema.String),
+    cause: Schema.Defect(),
+  },
+) {
+  override get message(): string {
+    const moved =
+      this.movedPaths.length === 0 ? "" : ` Already moved there: ${this.movedPaths.join(", ")}.`;
+    return `Could not move older Codex database files from shadow home '${this.effectiveHomePath}' into '${this.backupPath}': ${this.remainingPaths.join(", ")}.${moved} Close every Codex process using this home, including ones started by another T3 Code instance, then start this account again.`;
+  }
+}
+
 export const CodexShadowHomeError = Schema.Union([
   CodexShadowHomeFileSystemError,
   CodexShadowHomePathConflictError,
   CodexShadowHomeEntryConflictError,
   CodexShadowHomePrivateEntrySymlinkError,
+  CodexShadowHomeSqliteBackupError,
 ]);
 export type CodexShadowHomeError = typeof CodexShadowHomeError.Type;
 
@@ -414,8 +469,105 @@ const ensureShadowAuthIsPrivate = Effect.fn("CodexHomeLayout.ensureShadowAuthIsP
   },
 );
 
+// Older builds linked each database into the shadow home, and on Windows Codex then wrote this
+// account's -wal/-shm beside the link, or a private database when the shared home had none. Codex
+// no longer opens those files. They are moved aside, never replayed: their frames went through a
+// second WAL the shared database never saw, and replaying them into it can corrupt it.
+const backUpLegacySqlite = Effect.fn("CodexHomeLayout.backUpLegacySqlite")(function* (input: {
+  readonly fileSystem: FileSystem.FileSystem;
+  readonly sharedHomePath: string;
+  readonly effectiveHomePath: string;
+}): Effect.fn.Return<void, CodexShadowHomeError, Path.Path> {
+  const path = yield* Path.Path;
+  const { fileSystem, effectiveHomePath } = input;
+  const names = yield* fileSystem.readDirectory(effectiveHomePath).pipe(
+    Effect.catchTags({
+      PlatformError: (cause) =>
+        new CodexShadowHomeFileSystemError({
+          sharedHomePath: input.sharedHomePath,
+          effectiveHomePath,
+          operation: "readDirectory",
+          path: effectiveHomePath,
+          cause,
+        }),
+    }),
+  );
+  const legacy: Array<string> = [];
+  for (const entryName of names.filter((name) => CODEX_SQLITE_FILE.test(name)).toSorted()) {
+    const linkPath = path.join(effectiveHomePath, entryName);
+    const state = yield* readLinkState({ ...input, entryName, linkPath });
+    if (state._tag === "NotSymlink") legacy.push(entryName);
+  }
+  if (legacy.length === 0) return;
+
+  // One stable folder, so a pass interrupted by a busy file resumes beside what it already moved.
+  // A later pass whose names are taken goes to the first numbered folder where none are.
+  const backupRoot = path.join(effectiveHomePath, ".t3-sqlite-backup");
+  let backupPath = backupRoot;
+  const moved: Array<string> = [];
+  const fail = (cause: PlatformError.PlatformError) =>
+    new CodexShadowHomeSqliteBackupError({
+      sharedHomePath: input.sharedHomePath,
+      effectiveHomePath,
+      backupPath,
+      movedPaths: [...moved],
+      remainingPaths: legacy
+        .map((name) => path.join(effectiveHomePath, name))
+        .filter((file) => !moved.includes(file)),
+      cause,
+    });
+  // Windows rename replaces an existing file, so a taken name must never be a destination.
+  for (let index = 2; ; index++) {
+    const taken = yield* Effect.forEach(legacy, (name) =>
+      fileSystem.exists(path.join(backupPath, name)),
+    ).pipe(Effect.catchTags({ PlatformError: fail }));
+    if (!taken.includes(true)) break;
+    backupPath = path.join(backupRoot, String(index));
+  }
+  yield* fileSystem
+    .makeDirectory(backupPath, { recursive: true })
+    .pipe(Effect.catchTags({ PlatformError: fail }));
+  for (const name of legacy) {
+    const source = path.join(effectiveHomePath, name);
+    yield* fileSystem
+      .rename(source, path.join(backupPath, name))
+      .pipe(Effect.catchTags({ PlatformError: fail }));
+    moved.push(source);
+  }
+  yield* Effect.logWarning("Moved older Codex database files out of a shadow home", {
+    files: moved,
+    backupPath,
+  });
+});
+
+// A shadow path spelled differently from the shared home, or reached through a junction, is still
+// the shared home. Moving its "legacy" files would move the shared databases.
+const isSameDirectory = Effect.fn("CodexHomeLayout.isSameDirectory")(function* (
+  fileSystem: FileSystem.FileSystem,
+  left: string,
+  right: string,
+) {
+  const isWindows = yield* HostProcess.isWindows;
+  const identity = (directory: string) =>
+    fileSystem.stat(directory).pipe(
+      Effect.flatMap((info) =>
+        Option.isSome(info.ino) && info.ino.value > 0
+          ? Effect.succeed(`${info.dev}:${info.ino.value}`)
+          : fileSystem.realPath(directory),
+      ),
+      Effect.orElseSucceed(() => directory),
+      Effect.map((key) => (isWindows ? key.toLowerCase() : key)),
+    );
+  return (yield* identity(left)) === (yield* identity(right));
+});
+
+/**
+ * `environment` is the one Codex will launch with. Older SQLite files are moved aside only when it
+ * opens its databases in the shared home, not from an explicit `CODEX_SQLITE_HOME` elsewhere.
+ */
 export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome")(function* (
   layout: CodexHomeLayout,
+  environment: NodeJS.ProcessEnv = {},
 ) {
   if (layout.mode !== "authOverlay") return;
   const effectiveHomePath = layout.effectiveHomePath;
@@ -455,6 +607,21 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
     { concurrency: "unbounded" },
   );
 
+  if (yield* isSameDirectory(fileSystem, layout.sharedHomePath, effectiveHomePath)) {
+    return yield* new CodexShadowHomePathConflictError({
+      sharedHomePath: layout.sharedHomePath,
+      effectiveHomePath,
+    });
+  }
+  const sqliteHome = readCodexSqliteHome(environment, yield* HostProcess.Platform);
+  if (sqliteHome === undefined || path.resolve(sqliteHome) === layout.sharedHomePath) {
+    yield* backUpLegacySqlite({
+      fileSystem,
+      sharedHomePath: layout.sharedHomePath,
+      effectiveHomePath,
+    });
+  }
+
   const sharedEntryNames = yield* fileSystem.readDirectory(layout.sharedHomePath).pipe(
     Effect.catchTags({
       PlatformError: (cause) =>
@@ -469,7 +636,11 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
   );
   const entries = new Set<string>(KNOWN_SHARED_DIRECTORIES);
   for (const entryName of sharedEntryNames) {
-    if (!PRIVATE_ENTRY_NAMES.has(entryName) && !SHADOW_LOCAL_ENTRY_NAMES.has(entryName)) {
+    if (
+      !PRIVATE_ENTRY_NAMES.has(entryName) &&
+      !SHADOW_LOCAL_ENTRY_NAMES.has(entryName) &&
+      !CODEX_SQLITE_FILE.test(entryName)
+    ) {
       entries.add(entryName);
     }
   }

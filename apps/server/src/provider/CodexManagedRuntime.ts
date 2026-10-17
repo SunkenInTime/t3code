@@ -7,7 +7,7 @@ import * as Schema from "effect/Schema";
 import * as ServerConfig from "../config.ts";
 import * as CodexInstallation from "./CodexInstallation.ts";
 import { makeCodexChatGptAuth } from "./CodexChatGptAuth.ts";
-import { materializeCodexShadowHome } from "./Drivers/CodexHomeLayout.ts";
+import { materializeCodexShadowHome, withCodexSqliteHome } from "./Drivers/CodexHomeLayout.ts";
 
 export interface CodexEffectiveRuntime {
   readonly config: CodexSettings;
@@ -66,18 +66,6 @@ export const makeCodexManagedRuntime = Effect.fn("makeCodexManagedRuntime")(func
       ),
     );
     const credentials = yield* auth.access;
-    yield* materializeCodexShadowHome(homeLayout).pipe(
-      Effect.provideService(FileSystem.FileSystem, fs),
-      Effect.provideService(Path.Path, path),
-      Effect.mapError(
-        (cause) =>
-          new ProviderSetupError({
-            instanceId: options.instanceId,
-            operation: "runtime",
-            detail: cause.message,
-          }),
-      ),
-    );
     yield* fs.makeDirectory(homePath, { recursive: true }).pipe(
       Effect.mapError(
         () =>
@@ -89,14 +77,26 @@ export const makeCodexManagedRuntime = Effect.fn("makeCodexManagedRuntime")(func
       ),
     );
     // Ambient CLI overrides cannot redirect a T3-owned token to a different provider.
-    const environment: NodeJS.ProcessEnv = {
+    const environment = yield* withCodexSqliteHome(homeLayout, {
       ...options.environment,
       ACCESS_TOKEN: credentials.accessToken,
       CODEX_HOME: homePath,
-    };
+    });
     delete environment.T3CODE_CODEX_LAUNCH_ARGS;
     delete environment.OPENAI_API_KEY;
     delete environment.OPENAI_BASE_URL;
+    yield* materializeCodexShadowHome(homeLayout, environment).pipe(
+      Effect.provideService(FileSystem.FileSystem, fs),
+      Effect.provideService(Path.Path, path),
+      Effect.mapError(
+        (cause) =>
+          new ProviderSetupError({
+            instanceId: options.instanceId,
+            operation: "runtime",
+            detail: cause.message,
+          }),
+      ),
+    );
     return {
       config: decodeSettings({
         enabled: options.enabled,

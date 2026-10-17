@@ -58,7 +58,10 @@ import * as SynchronizedRef from "effect/SynchronizedRef";
 
 import * as ServerConfig from "../config.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
-import { resolveCodexHomeLayout } from "../provider/Drivers/CodexHomeLayout.ts";
+import {
+  resolveCodexHomeLayout,
+  withCodexSqliteHome,
+} from "../provider/Drivers/CodexHomeLayout.ts";
 import { makeClaudeEnvironment } from "../provider/Drivers/ClaudeHome.ts";
 import { deriveProviderInstanceConfigMap } from "../provider/ProviderInstanceRegistryHydration.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -1320,6 +1323,7 @@ interface TerminalManagerOptions {
   resolveProviderInstanceEnvironment?: (
     providerInstanceId: string,
     env: Record<string, string> | undefined,
+    inheritedEnv: NodeJS.ProcessEnv,
   ) => Effect.Effect<
     Record<string, string>,
     TerminalProviderInstanceNotFoundError | TerminalProviderEnvironmentError
@@ -1333,6 +1337,8 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
   readonly path: Path.Path;
   readonly rawProviderInstanceId: string;
   readonly env: Record<string, string> | undefined;
+  /** The terminal's own environment, which the resolved values are layered over. */
+  readonly inheritedEnv?: NodeJS.ProcessEnv;
 }) {
   const providerInstanceId = ProviderInstanceId.make(input.rawProviderInstanceId);
   const settings = yield* input.serverSettings.getSettings.pipe(
@@ -1351,7 +1357,11 @@ export const resolveProviderInstanceTerminalEnvironment = Effect.fn(
         Effect.provideService(Path.Path, input.path),
       );
       if (layout.effectiveHomePath)
-        resolved = { ...resolved, CODEX_HOME: layout.effectiveHomePath };
+        resolved = yield* withCodexSqliteHome(
+          layout,
+          { ...resolved, CODEX_HOME: layout.effectiveHomePath },
+          input.inheritedEnv,
+        );
     }
   } else if (instance.driver === "claudeAgent") {
     const config = decodeClaudeSettings(instance.config ?? {});
@@ -1377,13 +1387,19 @@ export const make = Effect.fn("TerminalManager.make")(function* () {
   const path = yield* Path.Path;
   const resolveProviderInstanceEnvironment = Effect.fn(
     "terminal.resolveProviderInstanceEnvironment",
-  )((rawProviderInstanceId: string, env: Record<string, string> | undefined) =>
-    resolveProviderInstanceTerminalEnvironment({
-      serverSettings,
-      path,
-      rawProviderInstanceId,
-      env,
-    }),
+  )(
+    (
+      rawProviderInstanceId: string,
+      env: Record<string, string> | undefined,
+      inheritedEnv: NodeJS.ProcessEnv,
+    ) =>
+      resolveProviderInstanceTerminalEnvironment({
+        serverSettings,
+        path,
+        rawProviderInstanceId,
+        env,
+        inheritedEnv,
+      }),
   );
   return yield* makeWithOptions({
     logsDir: terminalLogsDir,
@@ -1435,7 +1451,7 @@ export const makeWithOptions = Effect.fn("TerminalManager.makeWithOptions")(func
           providerInstanceId: ProviderInstanceId.make(input.providerInstanceId),
         });
       }
-      const env = yield* resolver(input.providerInstanceId, input.env);
+      const env = yield* resolver(input.providerInstanceId, input.env, baseEnv);
       return { ...input, env };
     },
   );

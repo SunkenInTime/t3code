@@ -32,6 +32,7 @@ import {
 import { assert, describe, it } from "@effect/vitest";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import { SpawnExecutableResolution } from "@t3tools/shared/shell";
+import { symlinksSupported } from "@t3tools/shared/testing/symlinks";
 import * as CodexClient from "effect-codex-app-server/client";
 import * as CodexError from "effect-codex-app-server/errors";
 import * as CodexReplay from "effect-codex-app-server/replay";
@@ -828,6 +829,68 @@ describe("CodexAdapterV2 process spawning", () => {
       ),
       Effect.provideService(HostProcess.Platform, "linux"),
     ),
+  );
+
+  it.effect.skipIf(!symlinksSupported)(
+    "opens a shadow-home session with its SQLite databases in the shared home",
+    () =>
+      Effect.gen(function* () {
+        const spawnedEnvironments: Array<Record<string, string | undefined> | undefined> = [];
+        const spawner = ChildProcessSpawner.make((command) => {
+          if (ChildProcess.isStandardCommand(command))
+            spawnedEnvironments.push(command.options.env);
+          return Effect.fail(
+            PlatformError.systemError({
+              _tag: "NotFound",
+              module: "ChildProcess",
+              method: "spawn",
+            }),
+          );
+        });
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-codex-sqlite-home-" });
+        const sharedHome = path.join(root, "shared");
+        const shadowHome = path.join(root, "shadow");
+        const adapter = yield* CodexAdapterV2.createCodexAdapterV2({
+          instanceId: CodexAdapterV2.CODEX_DEFAULT_INSTANCE_ID,
+          displayName: undefined,
+          environment: [],
+          enabled: true,
+          config: { ...DEFAULT_CODEX_SETTINGS, homePath: sharedHome, shadowHomePath: shadowHome },
+        }).pipe(
+          Effect.provide(
+            Layer.mergeAll(
+              CodexAdapterV2.layerAppServerClientFactory,
+              ServerConfig.layerTest(process.cwd(), { prefix: "t3-codex-sqlite-home-config-" }),
+            ),
+          ),
+          Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+          Effect.provideService(
+            ProviderEventLoggers.ProviderEventLoggers,
+            ProviderEventLoggers.NoOpProviderEventLoggers,
+          ),
+        );
+
+        yield* adapter
+          .openSession({
+            threadId: ThreadId.make("thread-sqlite-home"),
+            providerSessionId: ProviderSessionId.make("provider-session-sqlite-home"),
+            modelSelection: CODEX_TEST_MODEL_SELECTION,
+            runtimePolicy: CODEX_TEST_RUNTIME_POLICY,
+          })
+          .pipe(Effect.scoped, Effect.exit);
+
+        assert.lengthOf(spawnedEnvironments, 1);
+        assert.equal(spawnedEnvironments[0]?.CODEX_HOME, shadowHome);
+        assert.equal(spawnedEnvironments[0]?.CODEX_SQLITE_HOME, sharedHome);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(IdAllocator.layer, McpProviderSessions.layer, NodeServices.layer),
+        ),
+        Effect.provideService(HostProcess.Platform, "linux"),
+      ),
   );
 });
 

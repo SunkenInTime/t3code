@@ -205,7 +205,7 @@ it.layer(layerTest)("CodexDriver", (it) => {
         expect(restored.auth.email).toBe("account@example.test");
         expect(restored.runtimePaths?.homePath).toBe(sharedHome);
         expect(restored.runtimePaths?.shadowHomePath).toContain(
-          `providers/codex/${instanceId}/shadow`,
+          NodePath.join("providers", "codex", instanceId, "shadow"),
         );
         yield* Deferred.await(observedAccount);
 
@@ -229,6 +229,7 @@ it.layer(layerTest)("CodexDriver", (it) => {
         expect(launch.environment.ACCESS_TOKEN).toBe("dummy-owned-access");
         expect(launch.environment.OPENAI_API_KEY).toBeUndefined();
         expect(launch.environment.CODEX_HOME).toBe(launch.settings.homePath);
+        expect(launch.environment.CODEX_SQLITE_HOME).toBe(sharedHome);
         const before = yield* instance.auth!.subscribe("test-owner").pipe(Stream.runHead);
         expect(Option.getOrThrow(before).phase).toBe("idle");
         yield* instance.auth!.logout(Effect.void);
