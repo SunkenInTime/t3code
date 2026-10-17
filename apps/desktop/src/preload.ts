@@ -74,6 +74,21 @@ function unwrapEnsureSshEnvironmentResult(result: unknown) {
   return result as Awaited<ReturnType<DesktopBridge["ensureSshEnvironment"]>>;
 }
 
+function toLocalEnvironmentBootstraps(
+  result: unknown,
+): ReturnType<DesktopBridge["getLocalEnvironmentBootstraps"]> {
+  return Array.isArray(result) ? result : [];
+}
+
+// The web app polls these. sendSync blocks the renderer until the main process
+// answers, so a busy main process stalls typing even though the handlers are
+// fast (#12689). Only the first read is synchronous, for startup code that needs
+// a value before the first render; polls refresh the cache over invoke.
+let localEnvironmentBootstraps: ReturnType<DesktopBridge["getLocalEnvironmentBootstraps"]> | null =
+  null;
+// Changing this setting relaunches the app.
+let localEnvironmentEnabled: boolean | null = null;
+
 contextBridge.exposeInMainWorld("desktopBridge", {
   getAppBranding: () => {
     const result = ipcRenderer.sendSync(IpcChannels.GET_APP_BRANDING_CHANNEL);
@@ -100,17 +115,21 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     const result = ipcRenderer.sendSync(IpcChannels.GET_SYSTEM_LOCALE_CHANNEL);
     return typeof result === "string" ? result : null;
   },
-  getLocalEnvironmentBootstraps: () => {
-    const result = ipcRenderer.sendSync(IpcChannels.GET_LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANNEL);
-    if (!Array.isArray(result)) {
-      return [];
-    }
-    return result as ReturnType<DesktopBridge["getLocalEnvironmentBootstraps"]>;
+  getLocalEnvironmentBootstraps: () =>
+    (localEnvironmentBootstraps ??= toLocalEnvironmentBootstraps(
+      ipcRenderer.sendSync(IpcChannels.GET_LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANNEL),
+    )),
+  readLocalEnvironmentBootstraps: async () => {
+    localEnvironmentBootstraps = toLocalEnvironmentBootstraps(
+      await ipcRenderer.invoke(IpcChannels.GET_LOCAL_ENVIRONMENT_BOOTSTRAPS_CHANNEL),
+    );
+    return localEnvironmentBootstraps;
   },
   getLocalEnvironmentBearerToken: () =>
     ipcRenderer.invoke(IpcChannels.GET_LOCAL_ENVIRONMENT_BEARER_TOKEN_CHANNEL),
   getLocalEnvironmentEnabled: () =>
-    ipcRenderer.sendSync(IpcChannels.GET_LOCAL_ENVIRONMENT_ENABLED_CHANNEL) !== false,
+    (localEnvironmentEnabled ??=
+      ipcRenderer.sendSync(IpcChannels.GET_LOCAL_ENVIRONMENT_ENABLED_CHANNEL) !== false),
   setLocalEnvironmentEnabled: (enabled) =>
     ipcRenderer.invoke(IpcChannels.SET_LOCAL_ENVIRONMENT_ENABLED_CHANNEL, enabled),
   getClientSettings: () => ipcRenderer.invoke(IpcChannels.GET_CLIENT_SETTINGS_CHANNEL),

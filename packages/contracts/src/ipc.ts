@@ -1040,6 +1040,8 @@ export interface DesktopBridge {
    */
   getSystemLocale?: () => string | null;
   getLocalEnvironmentBootstraps: () => readonly DesktopEnvironmentBootstrap[];
+  /** Refreshes what getLocalEnvironmentBootstraps returns without blocking the renderer. */
+  readLocalEnvironmentBootstraps?: () => Promise<readonly DesktopEnvironmentBootstrap[]>;
   getLocalEnvironmentEnabled?: () => boolean;
   setLocalEnvironmentEnabled?: (enabled: boolean) => Promise<void>;
   getLocalEnvironmentBearerToken: () => Promise<string>;

@@ -54,7 +54,7 @@ import { appAtomRegistry } from "../rpc/atomRegistry";
 import { acknowledgeRpcRequest, trackRpcRequestSent } from "../rpc/requestLatencyState";
 import {
   desktopLocalConnectionId,
-  readDesktopSecondaryBootstrapsResult,
+  refreshDesktopSecondaryBootstraps,
   type DesktopSecondaryBootstrapsRead,
 } from "./desktopLocal";
 import * as ConnectionStorage from "./storage";
@@ -601,6 +601,8 @@ const layerPlatformConnectionSource = Layer.effect(
       const next = new Map<string, CachedPlatformRegistration>();
       const registrations: Array<PlatformConnectionRegistration> = [];
 
+      // Refresh first: the primary target below reads the same desktop snapshot.
+      const topologyRead = yield* Effect.promise(refreshDesktopSecondaryBootstraps);
       const primaryTopologyRead = readPrimaryEnvironmentTargetResult();
       const retainedPrimary = primaryRegistrationToRetainAfterTopologyRead(
         previous,
@@ -640,7 +642,6 @@ const layerPlatformConnectionSource = Layer.effect(
         }
       }
 
-      const topologyRead = readDesktopSecondaryBootstrapsResult();
       for (const [id, cached] of secondaryRegistrationsToRetainAfterTopologyRead(
         previous,
         topologyRead,

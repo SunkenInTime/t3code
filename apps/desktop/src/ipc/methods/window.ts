@@ -143,6 +143,11 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
   }),
 });
 
+export const readLocalEnvironmentBootstraps = {
+  channel: getLocalEnvironmentBootstraps.channel,
+  handler: () => getLocalEnvironmentBootstraps.handler(),
+};
+
 function extractWslDistroFromEnvironmentId(envId: string): string | null {
   if (!envId.startsWith(DesktopWslBackend.WSL_INSTANCE_ID_PREFIX)) {
     return null;

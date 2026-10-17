@@ -55,6 +55,43 @@ describe("desktop local connection identity", () => {
 });
 
 describe("desktop local topology reads", () => {
+  it("refreshes without the synchronous bridge and keeps the snapshot when a refresh fails", async () => {
+    const secondary: DesktopEnvironmentBootstrap = {
+      id: "wsl:default",
+      label: "WSL",
+      runningDistro: "Ubuntu",
+      httpBaseUrl: "http://127.0.0.1:4000",
+      wsBaseUrl: "ws://127.0.0.1:4000",
+    };
+    let refresh: () => Promise<DesktopEnvironmentBootstrap[]> = async () => [{ ...secondary }];
+    const reader = createDesktopSecondaryBootstrapsReader(() => ({
+      getLocalEnvironmentBootstraps: () => {
+        throw new Error("synchronous IPC");
+      },
+      readLocalEnvironmentBootstraps: () => refresh(),
+    }));
+
+    expect(await reader.refresh()).toEqual({ _tag: "Success", bootstraps: [secondary] });
+    const connectedSnapshot = reader.readSnapshot();
+
+    const cause = new Error("main process gone");
+    refresh = () => Promise.reject(cause);
+    expect(await reader.refresh()).toEqual({ _tag: "Failure", cause });
+    refresh = async () => [{ ...secondary }];
+    await reader.refresh();
+    expect(reader.readSnapshot()).toBe(connectedSnapshot);
+
+    refresh = async () => [];
+    expect(await reader.refresh()).toEqual({ _tag: "Success", bootstraps: [] });
+  });
+
+  it("refreshes through the synchronous read on a bridge without async reads", async () => {
+    const reader = createDesktopSecondaryBootstrapsReader(() => ({
+      getLocalEnvironmentBootstraps: () => [],
+    }));
+    expect(await reader.refresh()).toEqual({ _tag: "Success", bootstraps: [] });
+  });
+
   it("reuses snapshots when polling returns fresh objects for the same topology", () => {
     const secondary: DesktopEnvironmentBootstrap = {
       id: "wsl:default",
