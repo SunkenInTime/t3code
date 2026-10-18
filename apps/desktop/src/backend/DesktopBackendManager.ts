@@ -70,6 +70,10 @@ export interface DesktopBackendStartConfig extends BackendProcessContext {
   readonly bootstrap: DesktopBackendBootstrapValue & { readonly desktopLaunchId: string };
   readonly bootstrapDelivery: DesktopBackendBootstrapDelivery;
   readonly httpBaseUrl: URL;
+  // Tried alongside httpBaseUrl and used only while httpBaseUrl doesn't reach
+  // this launch's backend. When it wins, the instance's currentConfig carries
+  // it as httpBaseUrl, so every reader dials the address that answered.
+  readonly fallbackHttpBaseUrl?: URL;
   readonly captureOutput: boolean;
   readonly preflightFailure: Option.Option<PreflightFailure>;
   readonly runningDistro?: string;
@@ -197,7 +201,7 @@ interface RunBackendProcessOptions extends DesktopBackendStartConfig {
   readonly outputDrainTimeout?: Duration.Duration;
   readonly onStarted?: (pid: number) => Effect.Effect<void>;
   readonly onExitObserved?: () => Effect.Effect<void>;
-  readonly onReady?: () => Effect.Effect<void>;
+  readonly onReady?: (httpBaseUrl: URL) => Effect.Effect<void>;
   readonly onReadinessFailure?: (error: BackendReadinessTimeoutError) => Effect.Effect<void>;
   readonly onOutput?: (
     streamName: BackendProcessOutputStream,
@@ -235,11 +239,12 @@ export interface BackendInstanceSpec {
   readonly id: BackendInstanceId;
   readonly label: Effect.Effect<string>;
   readonly configResolve: Effect.Effect<DesktopBackendStartConfig, PlatformError.PlatformError>;
-  // Receives the *resolved* httpBaseUrl of the run that just became
-  // ready. The window service uses this to decide what URL to load
-  // (the WSL backend reports its distro IP, the Windows backend reports
-  // 127.0.0.1). Splitting this off from configResolve avoids races
-  // between "fired onReady" and "currentConfig already advanced".
+  // Receives the httpBaseUrl that answered readiness for the run that just
+  // became ready. The window service uses this to decide what URL to load
+  // (the WSL backend reports 127.0.0.1, or its distro IP when only that
+  // fallback answered; the Windows backend reports 127.0.0.1). Splitting
+  // this off from configResolve avoids races between "fired onReady" and
+  // "currentConfig already advanced".
   readonly onReady?: (httpBaseUrl: URL) => Effect.Effect<void>;
   readonly onShutdown?: () => Effect.Effect<void>;
   readonly onPreflightFailed?: (failure: PreflightFailure) => Effect.Effect<boolean>;
@@ -316,6 +321,12 @@ const closeRun = (
     ),
   );
 };
+
+// Why one readiness probe of a URL did not produce this launch's backend.
+type ReadinessMiss =
+  | { readonly _tag: "Timeout"; readonly error: BackendReadinessTimeoutError }
+  | { readonly _tag: "Foreign" }
+  | { readonly _tag: "Unchecked" };
 
 const BackendLaunchIdentity = Schema.fromJsonString(
   Schema.Struct({ desktopLaunchId: Schema.String }),
@@ -582,33 +593,59 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
   // bound, so another server can be answering there by now. Only a server that
   // echoes this launch's id counts as ready.
   const portTaken = yield* Ref.make(false);
-  const probeReadiness = Effect.fn("desktop.backendProcess.probeReadiness")(function* () {
-    const answered = yield* waitForHttpReady({
+  const readinessTimeout = options.readinessTimeout ?? DEFAULT_BACKEND_READINESS_TIMEOUT;
+  const probeLaunchedAt = (httpBaseUrl: URL, timeout: Duration.Duration) =>
+    waitForHttpReady({
       executablePath: options.executablePath,
       entryPath: options.entryPath,
       cwd: options.cwd,
-      httpBaseUrl: options.httpBaseUrl,
-      timeout: options.readinessTimeout ?? DEFAULT_BACKEND_READINESS_TIMEOUT,
+      httpBaseUrl,
+      timeout,
     }).pipe(
-      Effect.as(true),
-      Effect.catchTags({
-        BackendReadinessTimeoutError: (error) =>
-          (options.onReadinessFailure?.(error) ?? Effect.void).pipe(Effect.as(false)),
-      }),
+      Effect.mapError((error): ReadinessMiss => ({ _tag: "Timeout", error })),
+      Effect.andThen(
+        checkBackendOwnership({
+          httpBaseUrl,
+          desktopLaunchId: options.bootstrap.desktopLaunchId,
+        }).pipe(Effect.mapError((): ReadinessMiss => ({ _tag: "Unchecked" }))),
+      ),
+      Effect.flatMap((ownership) =>
+        ownership === "launched"
+          ? Effect.succeed(httpBaseUrl)
+          : Effect.fail<ReadinessMiss>({ _tag: "Foreign" }),
+      ),
     );
-    if (!answered) {
-      return false;
+  // Both URLs are probed at once so an unreachable httpBaseUrl costs no extra
+  // budget. The fallback only wins if httpBaseUrl still doesn't reach this
+  // launch one more request after the fallback did, so a host that reaches
+  // both keeps httpBaseUrl, and a foreign server on either URL never wins.
+  const fallbackHttpBaseUrl = options.fallbackHttpBaseUrl;
+  const probeLaunchedUrl =
+    fallbackHttpBaseUrl === undefined
+      ? probeLaunchedAt(options.httpBaseUrl, readinessTimeout)
+      : Effect.race(
+          probeLaunchedAt(options.httpBaseUrl, readinessTimeout),
+          probeLaunchedAt(fallbackHttpBaseUrl, readinessTimeout).pipe(
+            Effect.andThen(
+              probeLaunchedAt(options.httpBaseUrl, DEFAULT_BACKEND_READINESS_REQUEST_TIMEOUT).pipe(
+                Effect.orElseSucceed(() => fallbackHttpBaseUrl),
+              ),
+            ),
+          ),
+        );
+  const probeReadiness = Effect.fn("desktop.backendProcess.probeReadiness")(function* () {
+    const outcome = yield* Effect.exit(probeLaunchedUrl);
+    if (Exit.isSuccess(outcome)) {
+      yield* options.onReady?.(outcome.value) ?? Effect.void;
+      return true;
     }
-    const ownership = yield* checkBackendOwnership({
-      httpBaseUrl: options.httpBaseUrl,
-      desktopLaunchId: options.bootstrap.desktopLaunchId,
-    }).pipe(Effect.option);
-    if (Option.isNone(ownership)) {
-      return false;
-    }
-    if (ownership.value === "foreign") {
+    const misses = outcome.cause.reasons.filter(Cause.isFailReason).map((reason) => reason.error);
+    if (misses.some((miss) => miss._tag === "Foreign")) {
       yield* logBackendProcessWarning("another server is answering on the backend port", {
         httpBaseUrl: options.httpBaseUrl.href,
+        ...(fallbackHttpBaseUrl === undefined
+          ? {}
+          : { fallbackHttpBaseUrl: fallbackHttpBaseUrl.href }),
       });
       yield* Ref.set(portTaken, true);
       yield* handle
@@ -616,8 +653,13 @@ export const runBackendProcess = Effect.fn("runBackendProcess")(function* (
         .pipe(Effect.ignore);
       return true;
     }
-    yield* options.onReady?.() ?? Effect.void;
-    return true;
+    for (const miss of misses) {
+      if (miss._tag === "Timeout") {
+        yield* options.onReadinessFailure?.(miss.error) ?? Effect.void;
+        break;
+      }
+    }
+    return false;
   });
 
   yield* probeReadiness().pipe(Effect.repeat({ while: (done) => !done }), Effect.forkScoped);
@@ -962,7 +1004,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
               ...run,
               exitObserved: true,
             })),
-          onReady: Effect.fn("desktop.backendInstance.onReady")(function* () {
+          onReady: Effect.fn("desktop.backendInstance.onReady")(function* (readyUrl) {
             const isCurrentRun = yield* Ref.modify(state, (latest) => {
               const activeRun = Option.getOrUndefined(latest.active);
               if (activeRun?.id !== runId) {
@@ -975,6 +1017,10 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
                   ...latest,
                   restartAttempt: 0,
                   ready: true,
+                  config: Option.map(latest.config, (current) => ({
+                    ...current,
+                    httpBaseUrl: readyUrl,
+                  })),
                 },
               ] as const;
             });
@@ -982,7 +1028,13 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
               return;
             }
 
-            yield* spec.onReady?.(config.value.httpBaseUrl) ?? Effect.void;
+            if (readyUrl.href !== config.value.httpBaseUrl.href) {
+              yield* logInstanceWarning("backend unreachable at its primary URL; using fallback", {
+                httpBaseUrl: config.value.httpBaseUrl.href,
+                fallbackHttpBaseUrl: readyUrl.href,
+              });
+            }
+            yield* spec.onReady?.(readyUrl) ?? Effect.void;
             if (
               config.value.runningDistro !== undefined &&
               config.value.wslRuntimeId !== undefined

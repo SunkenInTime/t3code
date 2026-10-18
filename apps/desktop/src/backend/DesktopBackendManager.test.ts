@@ -4,6 +4,7 @@ import {
   DesktopTelemetryControlMessage,
 } from "@t3tools/contracts";
 import { assert, describe, it } from "@effect/vitest";
+import * as Clock from "effect/Clock";
 import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -951,6 +952,150 @@ describe("DesktopBackendManager", () => {
       }).pipe(Effect.provide(TestClock.layer())),
     ),
   );
+
+  describe("WSL readiness with a distro-IP fallback", () => {
+    // How one address answers the readiness path: this launch's backend,
+    // another server, nothing, or this launch's backend only after a delay.
+    type Route = "launched" | "foreign" | "down" | { readonly launchedAfterMs: number };
+
+    const respond = (request: HttpClientRequest.HttpClientRequest, route: Route) =>
+      Effect.gen(function* () {
+        if (route === "foreign") {
+          return HttpClientResponse.fromWeb(
+            request,
+            new Response("<html><body>another server</body></html>", { status: 200 }),
+          );
+        }
+        const launched =
+          route === "launched" ||
+          (route !== "down" && (yield* Clock.currentTimeMillis) >= route.launchedAfterMs);
+        return responseForRequest(request, launched ? 200 : 503);
+      });
+
+    // The WSL NAT config: loopback first, the distro IP as the fallback.
+    // Returns the URL the instance's currentConfig settles on after a few
+    // seconds, which is what the renderer bootstraps and local auth dial.
+    const settledUrl = (routes: { readonly loopback: Route; readonly distroIp: Route }) =>
+      Effect.gen(function* () {
+        const instance = yield* makeTestInstance({
+          config: {
+            ...baseConfig,
+            httpBaseUrl: new URL("http://127.0.0.1:3773"),
+            fallbackHttpBaseUrl: new URL("http://172.27.0.99:3773"),
+          },
+          spawnerLayer: Layer.succeed(
+            ChildProcessSpawner.ChildProcessSpawner,
+            ChildProcessSpawner.make(() => Effect.succeed(makeProcess({ exitCode: Effect.never }))),
+          ),
+          httpClientLayer: layerHttpClient((request) =>
+            respond(
+              request,
+              request.url.startsWith("http://127.0.0.1:") ? routes.loopback : routes.distroIp,
+            ),
+          ),
+        });
+
+        yield* instance.start;
+        yield* TestClock.adjust(Duration.seconds(5));
+        assert.isTrue((yield* instance.snapshot).ready);
+        return Option.getOrThrow(yield* instance.currentConfig).httpBaseUrl.href;
+      }).pipe(Effect.provide(TestClock.layer()));
+
+    it.effect("keeps loopback when both answer", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          assert.equal(
+            yield* settledUrl({ loopback: "launched", distroIp: "launched" }),
+            "http://127.0.0.1:3773/",
+          );
+        }),
+      ),
+    );
+
+    it.effect("keeps loopback when it answers shortly after the distro IP", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          assert.equal(
+            yield* settledUrl({ loopback: { launchedAfterMs: 500 }, distroIp: "launched" }),
+            "http://127.0.0.1:3773/",
+          );
+        }),
+      ),
+    );
+
+    it.effect("switches to the distro IP when loopback never answers", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          assert.equal(
+            yield* settledUrl({ loopback: "down", distroIp: "launched" }),
+            "http://172.27.0.99:3773/",
+          );
+        }),
+      ),
+    );
+
+    it.effect("switches to the distro IP when another server answers on loopback", () =>
+      Effect.scoped(
+        Effect.gen(function* () {
+          assert.equal(
+            yield* settledUrl({ loopback: "foreign", distroIp: "launched" }),
+            "http://172.27.0.99:3773/",
+          );
+        }),
+      ),
+    );
+
+    it.effect(
+      "gives up the port when another server holds loopback and the distro IP never answers",
+      () =>
+        Effect.gen(function* () {
+          const killed = yield* Deferred.make<void>();
+          let readyCount = 0;
+          const run = yield* DesktopBackendManager.runBackendProcess({
+            ...baseConfig,
+            httpBaseUrl: new URL("http://127.0.0.1:3773"),
+            fallbackHttpBaseUrl: new URL("http://172.27.0.99:3773"),
+            readinessTimeout: Duration.seconds(2),
+            desktopTelemetryStream: Stream.empty,
+            onReady: () =>
+              Effect.sync(() => {
+                readyCount += 1;
+              }),
+          }).pipe(
+            Effect.scoped,
+            Effect.provide(
+              Layer.merge(
+                Layer.succeed(
+                  ChildProcessSpawner.ChildProcessSpawner,
+                  ChildProcessSpawner.make(() =>
+                    Effect.succeed(
+                      makeProcess({
+                        exitCode: Deferred.await(killed).pipe(
+                          Effect.as(ChildProcessSpawner.ExitCode(1)),
+                        ),
+                        kill: () => Deferred.succeed(killed, void 0).pipe(Effect.asVoid),
+                      }),
+                    ),
+                  ),
+                ),
+                layerHttpClient((request) =>
+                  respond(
+                    request,
+                    request.url.startsWith("http://127.0.0.1:") ? "foreign" : "down",
+                  ),
+                ),
+              ),
+            ),
+            Effect.forkChild,
+          );
+
+          yield* TestClock.adjust(Duration.seconds(3));
+          const exit = yield* Fiber.join(run);
+          assert.isTrue(exit.portTaken);
+          assert.equal(readyCount, 0);
+        }).pipe(Effect.provide(TestClock.layer())),
+    );
+  });
 
   it.effect("starts the configured backend and closes the scoped process on stop", () =>
     Effect.scoped(

@@ -465,7 +465,7 @@ const runWslPreflight = Effect.fn("desktop.backendConfiguration.wslPreflight")(f
 });
 
 // In WSL2 mirrored mode the distro's eth0 IP equals the host's, which is the
-// signature we use to detect that mode and switch the renderer URL to loopback.
+// signature we use to detect that mode and skip the distro-IP fallback URL.
 const isLocalHostIpv4 = (ip: string): boolean => {
   const interfaces = NodeOS.networkInterfaces();
   for (const list of Object.values(interfaces)) {
@@ -582,11 +582,10 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
   const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment;
   const fileSystem = yield* FileSystem.FileSystem;
 
-  // wslhost forwarding is unreliable on some Windows hosts: the desktop's
-  // readiness probe and the renderer's saved-env-style fetch both saw "Failed
-  // to fetch" when the backend only bound to 127.0.0.1 inside WSL. Binding to
-  // 0.0.0.0 plus advertising the WSL IP as the renderer-visible URL avoids that
-  // dependency.
+  // Binding to 0.0.0.0 keeps both routes open: loopback through wslhost
+  // forwarding, and the distro IP for hosts where that forwarding is slow or
+  // broken (readiness and renderer fetches saw "Failed to fetch" when the
+  // backend only bound to 127.0.0.1 inside WSL).
   const wslBindHost = "0.0.0.0";
 
   const bootstrap = {
@@ -653,10 +652,14 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     onNone: () => false,
     onSome: (ip) => isLocalHostIpv4(ip),
   });
-  const rendererHost = usesSharedNetworkStack
-    ? "127.0.0.1"
-    : Option.getOrElse(distroIp, () => "127.0.0.1");
-  const httpBaseUrl = new URL(`http://${rendererHost}:${input.port}`);
+  // Loopback first: some endpoint security drops Windows-to-NAT traffic while
+  // wslhost forwarding works. The NAT distro IP backs it up on hosts where
+  // forwarding is slow or broken. In mirrored mode the distro reports a host
+  // interface and loopback is the only route.
+  const httpBaseUrl = new URL(`http://127.0.0.1:${input.port}`);
+  const fallbackHttpBaseUrl = usesSharedNetworkStack
+    ? undefined
+    : Option.getOrUndefined(Option.map(distroIp, (ip) => new URL(`http://${ip}:${input.port}`)));
 
   const distroArgs = distroForConfig ? ["-d", distroForConfig] : [];
   const forwardedEnv: Record<string, string> = {};
@@ -693,6 +696,7 @@ const resolveWslStartConfig = Effect.fn("desktop.backendConfiguration.resolveWsl
     bootstrap,
     bootstrapDelivery: "stdin" as const,
     httpBaseUrl,
+    ...(fallbackHttpBaseUrl === undefined ? {} : { fallbackHttpBaseUrl }),
     captureOutput: true,
     ...(runningDistro !== null ? { runningDistro } : {}),
   };
