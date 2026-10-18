@@ -1,4 +1,4 @@
-import { parseMarkdownDocument, type MarkdownNode } from "./markdownDocument";
+import { parseNativeMarkdownDocument, type MarkdownNode } from "./markdownDocument";
 
 export function markdownImageSources(markdown: string): string[] {
   if (!markdown.includes("![") && !/<img[\s>]/i.test(markdown)) return [];
@@ -7,6 +7,6 @@ export function markdownImageSources(markdown: string): string[] {
     if (node.type === "image") sources.add(node.url);
     if ("children" in node) node.children.forEach(visit);
   };
-  visit(parseMarkdownDocument(markdown));
+  visit(parseNativeMarkdownDocument(markdown));
   return [...sources];
 }
