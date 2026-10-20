@@ -51,6 +51,21 @@ describe("mcpToolPresentation", () => {
     expect(presentation.toolSource?.icon).toEqual(presentation.toolIcon);
   });
 
+  it("brands Apify calls with its name and bundled logo", () => {
+    const presentation = mcpToolPresentation({ toolName: "mcp__apify__call-actor" });
+    expect(presentation.title).toBe("Apify MCP · call-actor");
+    expect(presentation.toolSource).toMatchObject({ key: "mcp:apify", name: "Apify MCP" });
+    expect(presentation.toolIcon).toMatchObject({
+      _tag: "themed-logo",
+      logoUrl: expect.stringMatching(/^data:image\/png;base64,/u),
+    });
+    expect(presentation.toolSource?.icon).toEqual(presentation.toolIcon);
+    expect(
+      mcpToolPresentation({ serverName: "apify", toolName: "search-actors", title: "Search" })
+        .title,
+    ).toBe("Search");
+  });
+
   it("uses readable fallback names without a guessed logo", () => {
     expect(mcpToolPresentation({ toolName: "mcp__my_server__get_weather" })).toEqual({
       title: "get weather",
