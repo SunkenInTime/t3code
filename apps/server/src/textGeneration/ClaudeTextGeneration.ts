@@ -206,6 +206,9 @@ export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(fu
           ...(cliEffort ? ["--effort", cliEffort] : []),
           "--settings",
           settingsJson,
+          // cwd may be an untrusted checkout (review guides); its .claude/ and CLAUDE.md must not load.
+          "--setting-sources",
+          "user",
           ...(investigate
             ? [
                 "--tools",
