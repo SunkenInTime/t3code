@@ -213,7 +213,11 @@ export function acpMcpToolApprovalElicitationDisposition(
   ) {
     return undefined;
   }
-  // T3's authenticated MCP endpoint enforces scope; only explicit approval mode needs a user prompt.
+  return acpT3McpToolDisposition(runtimePolicy);
+}
+
+/** T3's authenticated MCP endpoint enforces scope; only explicit approval mode needs a user prompt. */
+export function acpT3McpToolDisposition(runtimePolicy: AcpRuntimePolicy): "ask" | "allow" {
   return acpPolicyRequiresApproval(runtimePolicy) ? "ask" : "allow";
 }
 

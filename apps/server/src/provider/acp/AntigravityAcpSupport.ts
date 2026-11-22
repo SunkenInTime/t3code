@@ -25,9 +25,11 @@ import {
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
   acpPermissionDisposition,
+  acpT3McpToolDisposition,
   type AcpRuntimePolicy,
 } from "@t3tools/provider-acp/server/clientPolicy";
 import type { AcpSessionModeState } from "@t3tools/provider-acp/server/runtimeModel";
+import { T3_MCP_TOOL_NAMES } from "@t3tools/shared/t3McpToolPresentation";
 import packageJson from "../../../package.json" with { type: "json" };
 import { normalizeAntigravitySessionUpdate } from "./AntigravityProtocol.ts";
 
@@ -181,13 +183,30 @@ export function antigravitySessionMode(
   return modeId === "yolo" || modeId === "auto_edit" ? "default" : modeId;
 }
 
+// agy names MCP tools `mcp_<server>_<tool>` and asks for every one of them, even in its own Auto.
+const T3_MCP_TOOL_PREFIX = "mcp_t3-code_";
+const T3_MCP_TOOL_TITLE = /^Run (mcp_t3-code_\w+)\??$/;
+
+function isAntigravityT3McpToolRequest(request: EffectAcpSchema.RequestPermissionRequest) {
+  const { kind, name, title } = request.toolCall;
+  if (kind !== "other") return false;
+  // Older runtimes may send only the title; when `name` is present it alone decides.
+  const toolName = name ?? (title == null ? undefined : T3_MCP_TOOL_TITLE.exec(title)?.[1]);
+  return (
+    toolName?.startsWith(T3_MCP_TOOL_PREFIX) === true &&
+    T3_MCP_TOOL_NAMES.has(toolName.slice(T3_MCP_TOOL_PREFIX.length))
+  );
+}
+
 export function antigravityPermissionDisposition(
   policy: AcpRuntimePolicy,
   request: EffectAcpSchema.RequestPermissionRequest,
 ) {
   const disposition = acpPermissionDisposition(policy, request);
+  if (disposition === "deny") return disposition;
+  if (isAntigravityT3McpToolRequest(request)) return acpT3McpToolDisposition(policy);
   // agy's Auto has already reviewed what it sends; the user decides unless the sandbox forbids it.
-  return policy.runtimeMode === "auto" && disposition !== "deny" ? "ask" : disposition;
+  return policy.runtimeMode === "auto" ? "ask" : disposition;
 }
 
 /** The runtime mode an Antigravity session mode grants; the inverse of `antigravityPermissionMode`. */

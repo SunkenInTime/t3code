@@ -376,6 +376,8 @@ const availableModes: ReadonlyArray<AcpCompat.SessionMode> = antigravityProfile
       { id: "default", name: "Default" },
       { id: "auto_edit", name: "Auto edit" },
       { id: "yolo", name: "YOLO" },
+      // agy 1.5 offers its own Auto to ACP sessions.
+      { id: "auto", name: "Auto" },
     ]
   : copilotModesProfile
     ? [

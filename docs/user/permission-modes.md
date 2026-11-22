@@ -30,6 +30,8 @@ Providers enforce permissions differently. Some read-only actions can proceed in
 **Auto** uses automatic review on Codex, Claude, Cursor, Grok, Antigravity, and fx; providers without
 an equivalent, including OpenCode, fall back to asking. On Grok and Antigravity, actions their review
 does not approve come to you for approval. On fx, prompts it still sends also come to you.
+Antigravity asks before every MCP tool call, even in its own **Auto**; T3 Code approves calls to
+its own tools in every mode except **Supervised**.
 
 Antigravity offers **Auto** only when your Antigravity sign-in provides its Auto mode; some accounts,
 including some personal Google accounts, do not. Without it, an Antigravity thread already set to

@@ -10,6 +10,7 @@ import {
   ProviderSessionId,
   RunAttemptId,
   RunId,
+  type RuntimeMode,
   ThreadId,
 } from "@t3tools/contracts";
 import { resolveSelfInvocation } from "@t3tools/shared/nodeRuntime";
@@ -1004,6 +1005,7 @@ const openSessionWithRunningCommand = Effect.fn("openSessionWithRunningCommand")
   options?: {
     readonly profileDirectory?: string;
     readonly initialToolCalls?: ReadonlyArray<EffectAcpSchema.SessionUpdate>;
+    readonly runtimeMode?: RuntimeMode;
   },
 ) {
   const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
@@ -1137,8 +1139,9 @@ const openSessionWithRunningCommand = Effect.fn("openSessionWithRunningCommand")
             onDeferredFinalizeScheduled: (debounce) => Queue.offer(scheduledFinalizes, debounce),
           },
         });
+  const runtimeMode = options?.runtimeMode ?? "full-access";
   const runtimePolicy = ProviderAdapter.ProviderAdapterV2RuntimePolicy.make({
-    runtimeMode: "full-access",
+    runtimeMode,
     interactionMode: "default",
     cwd: process.cwd(),
   });
@@ -1179,7 +1182,7 @@ const openSessionWithRunningCommand = Effect.fn("openSessionWithRunningCommand")
         title: "Antigravity wake",
         providerInstanceId: instanceId,
         modelSelection,
-        runtimeMode: "full-access",
+        runtimeMode,
         interactionMode: "default",
         branch: null,
         worktreePath: process.cwd(),
@@ -2009,6 +2012,44 @@ describe("AntigravityAdapterV2 work after the prompt ends", () => {
         assert.equal(terminal?.type === "turn.terminal" && terminal.status, status);
         assert.equal(opened.cancels(), cancels);
       }).pipe(Effect.provide(layerSession)),
+  );
+});
+
+describe("AntigravityAdapterV2 T3 MCP tools", () => {
+  // agy asks before every MCP call, even in its own Auto mode.
+  it.effect("runs T3's own tools in Auto without an approval card", () =>
+    Effect.gen(function* () {
+      const { startTurn, throughPromptSettled, requestPermission, until } =
+        yield* openSessionWithRunningCommand({ WaitMsBeforeAsync: 10000 }, undefined, undefined, {
+          runtimeMode: "auto",
+        });
+      yield* startTurn(1, false);
+      yield* throughPromptSettled;
+
+      const answered = requestPermission(
+        {
+          sessionId: "mock-session-1",
+          toolCall: {
+            toolCallId: "call_preview",
+            name: "mcp_t3-code_html_preview",
+            title: "Run mcp_t3-code_html_preview",
+            kind: "other",
+            status: "pending",
+            rawInput: { toolSummary: "Preview the chart" },
+          },
+          options: [
+            { optionId: "allow", name: "Allow", kind: "allow_once" },
+            { optionId: "deny", name: "Deny", kind: "reject_once" },
+          ],
+        },
+        { requestId: "permission-1", method: "session/request_permission" },
+      );
+      const approvalCard = until((event) => event.type === "runtime_request.updated");
+      assert.deepEqual(
+        yield* Effect.raceFirst(answered, approvalCard.pipe(Effect.as("approval card"))),
+        { outcome: { outcome: "selected", optionId: "allow" } },
+      );
+    }).pipe(Effect.provide(layerSession)),
   );
 });
 
